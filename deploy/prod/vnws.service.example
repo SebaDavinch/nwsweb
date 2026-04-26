@@ -1,0 +1,15 @@
+[Unit]
+Description=vnWS Node backend
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/var/www/vnws
+EnvironmentFile=/var/www/vnws/.env
+ExecStart=/usr/bin/node server/index.js
+Restart=on-failure
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target

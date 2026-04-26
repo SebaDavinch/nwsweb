@@ -1,0 +1,21 @@
+[Unit]
+Description=Nordwind Website Static Server (Node/Express)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/nws
+Environment=NODE_ENV=production
+Environment=WEBSITE_SERVER_PORT=8788
+EnvironmentFile=/var/www/nws/.env
+ExecStart=/usr/bin/env node server/site.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nwsweb-site
+
+[Install]
+WantedBy=multi-user.target

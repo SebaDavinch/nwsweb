@@ -1,0 +1,21 @@
+[Unit]
+Description=Nordwind vAMSYS API Proxy (Node/Express)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/nws
+Environment=NODE_ENV=production
+Environment=SERVE_STATIC=false
+EnvironmentFile=/var/www/nws/.env
+ExecStart=/usr/bin/env node server/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nwsweb-api
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,50 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+.env
+.env.*
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Local runtime/build caches
+.venv/
+
+# Heavy release bundles and temp workspaces
+artifacts/
+website-release/
+website-release-1.8/
+website-release-assembled/
+website-release-original/
+temp_compare_a/
+temp_compare_b/
+NordwindWebsite-main/
+NordwindWebsite-main-admin/
+NordwindWebsite-main-routes/
+NordwindWebsite-main1/
+NordwindWebsite-main2/
+NordwindWebsite-main3/
+NordwindWebsite-main6/
+*.zip
+
+# Sensitive local files
+temp_vamsys.env
+data/auth-store.json
