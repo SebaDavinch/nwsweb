@@ -12,6 +12,7 @@ import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
+import { useLanguage } from "../../context/language-context";
 
 type ActivityView = "events" | "focus-airports" | "rosters" | "curated-rosters" | "community";
 type ActivitySection = "events" | "focus-airports" | "rosters" | "community-goals" | "community-challenges";
@@ -38,18 +39,18 @@ interface ActivityCatalogItem {
   updatedAt?: string | null;
 }
 
-const EVENT_VIEWS: Array<{ value: ActivityView; label: string }> = [
-  { value: "events", label: "Events" },
-  { value: "focus-airports", label: "Focus Airports" },
-  { value: "rosters", label: "Rosters" },
-  { value: "curated-rosters", label: "Curated Rosters" },
-  { value: "community", label: "Community Goals & Challenges" },
+const EVENT_VIEWS: Array<{ value: ActivityView; labelKey: string }> = [
+  { value: "events", labelKey: "admin.events.view.events" },
+  { value: "focus-airports", labelKey: "admin.events.view.focusAirports" },
+  { value: "rosters", labelKey: "admin.events.view.rosters" },
+  { value: "curated-rosters", labelKey: "admin.events.view.curatedRosters" },
+  { value: "community", labelKey: "admin.events.view.community" },
 ];
 
 const SECTION_LABELS: Record<ActivitySection, string> = {
-  events: "Events",
-  "focus-airports": "Focus Airports",
-  rosters: "Rosters",
+  events: "admin.events.view.events",
+  "focus-airports": "admin.events.view.focusAirports",
+  rosters: "admin.events.view.rosters",
   "community-goals": "Community Goals",
   "community-challenges": "Community Challenges",
 };
@@ -199,15 +200,16 @@ const getSectionOptionsForView = (view: ActivityView): ActivitySection[] => {
   return ["events"];
 };
 
-const viewSubtitle = (view: ActivityView) => {
-  if (view === "focus-airports") return "Live focus airport activities from vAMSYS Operations API.";
-  if (view === "rosters") return "Live roster activities from vAMSYS Operations API.";
-  if (view === "curated-rosters") return "Roster activities flagged as curated by subtype, title, or tag metadata.";
-  if (view === "community") return "Live community goals and challenges from vAMSYS Operations API.";
-  return "Live events center sourced from vAMSYS Operations API.";
+const viewSubtitleKey = (view: ActivityView): string => {
+  if (view === "focus-airports") return "admin.events.subtitle.focusAirports";
+  if (view === "rosters") return "admin.events.subtitle.rosters";
+  if (view === "curated-rosters") return "admin.events.subtitle.curatedRosters";
+  if (view === "community") return "admin.events.subtitle.community";
+  return "admin.events.subtitle.events";
 };
 
 export function AdminEvents() {
+  const { t } = useLanguage();
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<ActivityCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -234,7 +236,7 @@ export function AdminEvents() {
     } catch (error) {
       console.error("Failed to load activities center", error);
       setItems([]);
-      toast.error("Failed to load activities");
+      toast.error(t("admin.events.error.load"));
     } finally {
       setIsLoading(false);
     }
@@ -273,7 +275,7 @@ export function AdminEvents() {
       });
   }, [currentView, items, query]);
 
-  const activeViewLabel = EVENT_VIEWS.find((item) => item.value === currentView)?.label || "Events";
+  const activeViewLabel = t(EVENT_VIEWS.find((item) => item.value === currentView)?.labelKey || "admin.events.view.events");
   const sectionOptions = getSectionOptionsForView(currentView);
 
   const openCreateDialog = () => {
@@ -328,7 +330,7 @@ export function AdminEvents() {
       toast.success("Activity deleted");
       await loadItems();
     } catch (error) {
-      toast.error(String((error as Error)?.message || "Failed to delete activity"));
+      toast.error(String((error as Error)?.message || t("admin.events.error.delete")));
     } finally {
       setIsBusy(false);
     }
@@ -339,7 +341,7 @@ export function AdminEvents() {
     try {
       payload = JSON.parse(payloadText);
     } catch {
-      toast.error("Payload must be valid JSON");
+      toast.error(t("admin.events.error.invalidJson"));
       return;
     }
 
@@ -361,11 +363,11 @@ export function AdminEvents() {
         throw new Error(data.error || `HTTP ${response.status}`);
       }
 
-      toast.success(editorMode === "create" ? "Activity created" : "Activity updated");
+      toast.success(editorMode === "create" ? t("admin.events.success.created") : t("admin.events.success.updated"));
       setEditorOpen(false);
       await loadItems();
     } catch (error) {
-      toast.error(String((error as Error)?.message || "Failed to save activity"));
+      toast.error(String((error as Error)?.message || t("admin.events.error.save")));
     } finally {
       setIsBusy(false);
     }
@@ -375,17 +377,17 @@ export function AdminEvents() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Events Center</h2>
-          <p className="text-sm text-gray-500">{viewSubtitle(currentView)}</p>
+          <h2 className="text-2xl font-bold text-gray-800">{t("admin.events.title")}</h2>
+          <p className="text-sm text-gray-500">{t(viewSubtitleKey(currentView))}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={openCreateDialog} className="bg-[#E31E24] hover:bg-[#c41a20]">
             <Plus className="mr-2 h-4 w-4" />
-            New {activeViewLabel}
+            {t("admin.events.new")} {activeViewLabel}
           </Button>
           <Button variant="outline" onClick={() => void loadItems()} disabled={isLoading || isBusy}>
             <RefreshCw className="mr-2 h-4 w-4" />
-            Refresh
+            {t("admin.events.refresh")}
           </Button>
         </div>
       </div>
@@ -394,7 +396,7 @@ export function AdminEvents() {
         {EVENT_VIEWS.map((view) => (
           <Card key={view.value} className={currentView === view.value ? "border-[#E31E24] shadow-sm" : "border-gray-200"}>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-gray-700">{view.label}</CardTitle>
+              <CardTitle className="text-sm font-semibold text-gray-700">{t(view.labelKey)}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-gray-900">{counts[view.value]}</div>
@@ -409,7 +411,7 @@ export function AdminEvents() {
             <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 bg-transparent p-0">
               {EVENT_VIEWS.map((view) => (
                 <TabsTrigger key={view.value} value={view.value} className="border border-gray-200 data-[state=active]:border-[#E31E24] data-[state=active]:bg-[#E31E24] data-[state=active]:text-white">
-                  {view.label}
+                  {t(view.labelKey)}
                 </TabsTrigger>
               ))}
             </TabsList>
@@ -418,22 +420,22 @@ export function AdminEvents() {
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div className="relative w-full lg:max-w-md">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Search ${activeViewLabel.toLowerCase()}...`} className="pl-9" />
+              <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`${t("admin.events.search")} ${activeViewLabel.toLowerCase()}...`} className="pl-9" />
             </div>
-            <div className="text-sm text-gray-500">{filteredItems.length} item(s)</div>
+            <div className="text-sm text-gray-500">{filteredItems.length} {t("admin.events.items")}</div>
           </div>
 
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Type</th>
-                  <th className="px-4 py-3 font-medium">Window</th>
-                  <th className="px-4 py-3 font-medium">Target</th>
-                  <th className="px-4 py-3 font-medium">Progress</th>
-                  <th className="px-4 py-3 font-medium">Updated</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  <th className="px-4 py-3 font-medium">{t("admin.events.table.name")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin.events.table.type")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin.events.table.window")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin.events.table.target")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin.events.table.progress")}</th>
+                  <th className="px-4 py-3 font-medium">{t("admin.events.table.updated")}</th>
+                  <th className="px-4 py-3 text-right font-medium">{t("admin.events.table.actions")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -442,7 +444,7 @@ export function AdminEvents() {
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
                       <div className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading activities...
+                        {t("admin.events.loading")}
                       </div>
                     </td>
                   </tr>
@@ -457,20 +459,20 @@ export function AdminEvents() {
                           {Array.isArray(item.tags) ? item.tags.slice(0, 3).map((tag) => (
                             <Badge key={`${item.id}-${tag}`} variant="outline" className="capitalize">{tag}</Badge>
                           )) : null}
-                          {item.registrationOpen ? <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">Registration open</Badge> : null}
+                          {item.registrationOpen ? <Badge variant="outline" className="border-green-200 bg-green-50 text-green-700">{t("admin.events.registrationOpen")}</Badge> : null}
                         </div>
                         {item.description ? <div className="mt-2 line-clamp-2 max-w-2xl text-xs text-gray-500">{item.description}</div> : null}
                       </td>
                       <td className="px-4 py-3 align-top text-gray-700">
                         <div className="space-y-1">
                           <Badge variant="outline">{item.type}</Badge>
-                          <div className="text-xs text-gray-500 capitalize">{item.status || "n/a"}</div>
+                          <div className="text-xs text-gray-500 capitalize">{item.status || t("admin.events.na")}</div>
                         </div>
                       </td>
                       <td className="px-4 py-3 align-top text-gray-700">
                         <div className="space-y-1 text-xs">
                           <div className="inline-flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5 text-gray-400" /><span>{formatDateTime(item.start)}</span></div>
-                          <div className="text-gray-500">to {formatDateTime(item.end)}</div>
+                          <div className="text-gray-500">{t("admin.events.to")} {formatDateTime(item.end)}</div>
                         </div>
                       </td>
                       <td className="px-4 py-3 align-top text-gray-700">
@@ -481,9 +483,9 @@ export function AdminEvents() {
                       </td>
                       <td className="px-4 py-3 align-top text-gray-700">
                         <div className="space-y-1 text-xs text-gray-500">
-                          <div>Registrations: {Number(item.registrationCount || 0)}</div>
-                          <div>Completions: {Number(item.completionCount || 0)}</div>
-                          <div>Points: {Number(item.points || 0)}</div>
+                          <div>{t("admin.events.registrations")} {Number(item.registrationCount || 0)}</div>
+                          <div>{t("admin.events.completions")} {Number(item.completionCount || 0)}</div>
+                          <div>{t("admin.events.points")} {Number(item.points || 0)}</div>
                         </div>
                       </td>
                       <td className="px-4 py-3 align-top text-gray-500">{formatDateTime(item.updatedAt)}</td>
@@ -491,11 +493,11 @@ export function AdminEvents() {
                         <div className="flex items-center justify-end gap-2">
                           <Button variant="outline" size="sm" onClick={() => void openEditDialog(item)} disabled={isBusy}>
                             <Pencil className="mr-2 h-4 w-4" />
-                            Edit
+                            {t("admin.events.edit")}
                           </Button>
                           <Button variant="outline" size="sm" className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700" onClick={() => void handleDelete(item)} disabled={isBusy}>
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
+                            {t("admin.events.delete")}
                           </Button>
                         </div>
                       </td>
@@ -504,7 +506,7 @@ export function AdminEvents() {
                 ) : (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No items found for {activeViewLabel.toLowerCase()}.
+                      {t("admin.events.table.empty")}
                     </td>
                   </tr>
                 )}
@@ -517,7 +519,7 @@ export function AdminEvents() {
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editorMode === "create" ? "Create activity" : "Edit activity"}</DialogTitle>
+            <DialogTitle>{editorMode === "create" ? t("admin.events.dialog.create") : t("admin.events.dialog.edit")}</DialogTitle>
             <DialogDescription>
               Live vAMSYS payload editor for {SECTION_LABELS[editorSection]}. Use API field names from operations docs.
             </DialogDescription>
