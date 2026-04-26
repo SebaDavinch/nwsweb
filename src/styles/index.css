@@ -1,0 +1,24 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+@import 'leaflet/dist/leaflet.css';
+
+/* Leaflet custom styles */
+.leaflet-popup-content-wrapper {
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+}
+
+.leaflet-popup-tip {
+  border-radius: 2px;
+}
+
+.airplane-marker, .airport-marker, .gradient-airplane-marker, .airport-marker-custom {
+  background: transparent !important;
+  border: none !important;
+}
+
+.leaflet-container {
+  background: #1a1a1a;
+  font-family: inherit;
+}

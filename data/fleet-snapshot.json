@@ -1,0 +1,564 @@
+{
+  "fleets": [
+    {
+      "id": 18341,
+      "name": "Airbus 321neo(STW)",
+      "code": "A21N",
+      "color": "#E31E24",
+      "aircraft": [
+        {
+          "id": 186094,
+          "model": "Airbus A321neo",
+          "registration": "TC-GRE",
+          "seats": 240,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17943,
+      "name": "Airbus A321-200",
+      "code": "A321",
+      "color": "#0066CC",
+      "aircraft": [
+        {
+          "id": 183935,
+          "model": "Airbus A321-211",
+          "registration": "RA-73273",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183934,
+          "model": "Airbus A321-231",
+          "registration": "RA-73271",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183938,
+          "model": "Airbus A321-231",
+          "registration": "RA-73326",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183936,
+          "model": "Airbus A321-232",
+          "registration": "RA-73324",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183937,
+          "model": "Airbus A321-232",
+          "registration": "RA-73325",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18340,
+      "name": "Airbus A321-200 (STW)",
+      "code": "A321",
+      "color": "#FF6B00",
+      "aircraft": [
+        {
+          "id": 186095,
+          "model": "Airbus A321-211",
+          "registration": "TC-GRC",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186098,
+          "model": "Airbus A321-231",
+          "registration": "TC-GRG",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186097,
+          "model": "Airbus A321-231",
+          "registration": "TC-GRF",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186096,
+          "model": "Airbus A321-231",
+          "registration": "TC-GRD",
+          "seats": 220,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17941,
+      "name": "Airbus A321neo",
+      "code": "A21N",
+      "color": "#2A2A2A",
+      "aircraft": [
+        {
+          "id": 183932,
+          "model": "Airbus A321-253N",
+          "registration": "RA-73322",
+          "seats": 218,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183933,
+          "model": "Airbus A321-253N",
+          "registration": "RA-73323",
+          "seats": 218,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17946,
+      "name": "Airbus A330-200",
+      "code": "A332",
+      "color": "#E31E24",
+      "aircraft": [
+        {
+          "id": 183940,
+          "model": "Airbus A330-223",
+          "registration": "RA-73328",
+          "seats": 361,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183939,
+          "model": "Airbus A330-243",
+          "registration": "RA-73270",
+          "seats": 365,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18339,
+      "name": "Airbus A330-200 (STW)",
+      "code": "A332",
+      "color": "#0066CC",
+      "aircraft": [
+        {
+          "id": 186093,
+          "model": "Airbus A330-223",
+          "registration": "TC-GRA",
+          "seats": 345,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17947,
+      "name": "Airbus A330-300",
+      "code": "A333",
+      "color": "#FF6B00",
+      "aircraft": [
+        {
+          "id": 183943,
+          "model": "Airbus A330-302",
+          "registration": "RA-73850",
+          "seats": 393,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183942,
+          "model": "Airbus A330-302",
+          "registration": "RA-73849",
+          "seats": 393,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183941,
+          "model": "Airbus A330-302",
+          "registration": "RA-73848",
+          "seats": 393,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18336,
+      "name": "Boeing 737 MAX 8",
+      "code": "B38M",
+      "color": "#2A2A2A",
+      "aircraft": [
+        {
+          "id": 186092,
+          "model": "Boeing 737 MAX 8",
+          "registration": "TC-GRO",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186091,
+          "model": "Boeing 737 MAX 8",
+          "registration": "TC-GRK",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186090,
+          "model": "Boeing 737 MAX 8",
+          "registration": "TC-GRJ",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17942,
+      "name": "Boeing 737-800",
+      "code": "B738",
+      "color": "#E31E24",
+      "aircraft": [
+        {
+          "id": 183924,
+          "model": "Boeing 737-82R",
+          "registration": "RA-73313",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183929,
+          "model": "Boeing 737-82R",
+          "registration": "RA-73318",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183927,
+          "model": "Boeing 737-82R",
+          "registration": "RA-73316",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183928,
+          "model": "Boeing 737-82R",
+          "registration": "RA-73317",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183923,
+          "model": "Boeing 737-8AS",
+          "registration": "RA-73312",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183922,
+          "model": "Boeing 737-8AS",
+          "registration": "RA-73311",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183925,
+          "model": "Boeing 737-8KN",
+          "registration": "RA-73314",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183926,
+          "model": "Boeing 737-8KN",
+          "registration": "RA-73315",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183931,
+          "model": "Boeing 737-8Q8",
+          "registration": "RA-73321",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183921,
+          "model": "Boeing 737-8Q8",
+          "registration": "RA-73269",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183930,
+          "model": "Boeing 737-8SH",
+          "registration": "RA-73319",
+          "seats": 189,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18166,
+      "name": "Boeing 737-900ER",
+      "code": "B739",
+      "color": "#0066CC",
+      "aircraft": [
+        {
+          "id": 184993,
+          "model": "Boeing 737-9GP(ER)",
+          "registration": "RA-73343",
+          "seats": 215,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 184994,
+          "model": "Boeing 737-9GP(ER)",
+          "registration": "RA-73344",
+          "seats": 215,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17944,
+      "name": "Boeing 777-200",
+      "code": "B772",
+      "color": "#FF6B00",
+      "aircraft": [
+        {
+          "id": 183945,
+          "model": "Boeing 777-212(ER)",
+          "registration": "RA-73341",
+          "seats": 440,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183944,
+          "model": "Boeing 777-212(ER)",
+          "registration": "RA-73340",
+          "seats": 440,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18165,
+      "name": "Boeing 777-200ER",
+      "code": "B772",
+      "color": "#2A2A2A",
+      "aircraft": [
+        {
+          "id": 184992,
+          "model": "Boeing 777-2Q8(ER)",
+          "registration": "RA-73347",
+          "seats": 440,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 184991,
+          "model": "Boeing 777-2Q8(ER)",
+          "registration": "RA-73272",
+          "seats": 440,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18337,
+      "name": "Boeing 777-300(STW)",
+      "code": "B773",
+      "color": "#E31E24",
+      "aircraft": [
+        {
+          "id": 186100,
+          "model": "Boeing 777-312",
+          "registration": "TC-GRV",
+          "seats": 550,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186101,
+          "model": "Boeing 777-312",
+          "registration": "TC-GRY",
+          "seats": 550,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 186099,
+          "model": "Boeing 777-312",
+          "registration": "TC-GRU",
+          "seats": 550,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 17945,
+      "name": "Boeing 777-300ER",
+      "code": "B77W",
+      "color": "#0066CC",
+      "aircraft": [
+        {
+          "id": 183947,
+          "model": "Boeing 777-35E(ER)",
+          "registration": "RA-73847",
+          "seats": 486,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 183946,
+          "model": "Boeing 777-35E(ER)",
+          "registration": "RA-73342",
+          "seats": 486,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18338,
+      "name": "Boeing 777-300ER (STW)",
+      "code": "B77W",
+      "color": "#FF6B00",
+      "aircraft": [
+        {
+          "id": 186102,
+          "model": "Boeing 777-31H(ER)",
+          "registration": "TC-GRZ",
+          "seats": 551,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    },
+    {
+      "id": 18167,
+      "name": "Embraer ERJ-190",
+      "code": "E190",
+      "color": "#2A2A2A",
+      "aircraft": [
+        {
+          "id": 184987,
+          "model": "Embraer E190LR",
+          "registration": "RA-02739",
+          "seats": 110,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 184989,
+          "model": "Embraer E190LR",
+          "registration": "RA-02741",
+          "seats": 110,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 184988,
+          "model": "Embraer E190LR",
+          "registration": "RA-02740",
+          "seats": 110,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        },
+        {
+          "id": 184990,
+          "model": "Embraer E190LR",
+          "registration": "RA-02743",
+          "seats": 110,
+          "range_nm": null,
+          "cruise_speed": null,
+          "serviceable": null
+        }
+      ]
+    }
+  ]
+}
