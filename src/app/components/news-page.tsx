@@ -12,6 +12,7 @@ import {
   Newspaper,
   Search,
   Trophy,
+  Users,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../context/auth-context";
@@ -125,9 +126,34 @@ const getActivityExcerpt = (item: NewsItem) => {
   return item.content;
 };
 
+const isRosterActivity = (item: NewsItem) =>
+  item.category === "Event" && String(item.activityType || "").trim().toLowerCase() === "roster";
+
 const renderActivityImage = (item: NewsItem, className: string) => {
-  if (!item.imageUrl) {
+  if (!item.imageUrl && !isRosterActivity(item)) {
     return null;
+  }
+
+  if (!item.imageUrl) {
+    const badgeLabel = String(item.activitySubtype || "").trim() || "Roster";
+    return (
+      <div className={`${className} bg-[linear-gradient(135deg,#172033_0%,#293548_52%,#c71f28_100%)]`}>
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.16),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(56,189,248,0.24),transparent_32%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.12)_0%,rgba(15,23,42,0.6)_100%)]" />
+        <div className="relative flex h-full items-end justify-between gap-4 p-5 text-white">
+          <div>
+            <div className="inline-flex items-center rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/85">
+              {badgeLabel}
+            </div>
+            <div className="mt-3 max-w-md text-lg font-semibold leading-tight text-white/95">Nordwind roster update</div>
+            <div className="mt-1 text-sm text-white/75">Default banner is shown because vAMSYS did not provide artwork for this roster card.</div>
+          </div>
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-white/15 bg-white/10 backdrop-blur-sm">
+            <Users className="h-7 w-7 text-white" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -674,13 +700,15 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
-                  <Megaphone className="h-4 w-4 text-[#E31E24]" />
-                  {t("news.kpi.news")}
+              {mode === "news" ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                    <Megaphone className="h-4 w-4 text-[#E31E24]" />
+                    {t("news.kpi.news")}
+                  </div>
+                  <div className="text-2xl font-bold text-[#1d1d1f]">{summary.news}</div>
                 </div>
-                <div className="text-2xl font-bold text-[#1d1d1f]">{summary.news}</div>
-              </div>
+              ) : null}
             </CardContent>
           </Card>
         </div>
@@ -839,10 +867,26 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
                       <CardContent className="p-5">
                         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                           <div className="flex min-w-0 flex-1 gap-4">
-                            {item.imageUrl ? (
+                            {item.imageUrl || isRosterActivity(item) ? (
                               <div className="relative h-24 w-28 shrink-0 overflow-hidden rounded-2xl">
-                                <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
-                                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent" />
+                                {item.imageUrl ? (
+                                  <>
+                                    <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" loading="lazy" />
+                                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent" />
+                                  </>
+                                ) : (
+                                  <div className="flex h-full w-full items-end bg-[linear-gradient(135deg,#172033_0%,#293548_55%,#c71f28_100%)] p-3 text-white">
+                                    <div>
+                                      <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-white/70">
+                                        {String(item.activitySubtype || "Roster").trim() || "Roster"}
+                                      </div>
+                                      <div className="mt-1 flex items-center gap-2 text-sm font-semibold">
+                                        <Users className="h-4 w-4" />
+                                        Nordwind roster
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             ) : null}
                             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">

@@ -114,8 +114,10 @@ const PILOTS_ROSTER_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilots-rost
 const FLEET_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "fleet-snapshot.json");
 const ADMIN_CONTENT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-content.json");
 const ADMIN_AUDIT_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-audit-log.json");
+const AUTH_ACTIVITY_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "auth-activity-log.json");
 const TELEMETRY_HISTORY_FILE = path.join(path.dirname(AUTH_STORE_FILE), "telemetry-history-cache.json");
 const ADMIN_AUDIT_MAX_ENTRIES = Math.max(Number(process.env.ADMIN_AUDIT_MAX_ENTRIES || 5000) || 5000, 500);
+const AUTH_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.AUTH_ACTIVITY_MAX_ENTRIES || 5000) || 5000, 500);
 const DISCORD_STATE_COOKIE = "nws_discord_oauth_state";
 const DISCORD_SESSION_COOKIE = "nws_discord_session";
 const DISCORD_STATE_TTL_MS = 10 * 60 * 1000;
@@ -425,6 +427,13 @@ const DEFAULT_DISCORD_BOT_SETTINGS = {
     news: "",
     notams: "",
     alerts: "",
+  },
+  pirepAlerts: {
+    awaitingReview: true,
+    reviewStarted: true,
+    staffComment: true,
+    pilotDmOnReviewStarted: true,
+    pilotDmOnStaffComment: true,
   },
   templates: DEFAULT_DISCORD_BOT_TEMPLATES,
   updatedAt: null,
@@ -816,6 +825,7 @@ const buildDefaultAdminContent = () => {
 
 let adminContentCache = null;
 let adminAuditLogCache = null;
+let authActivityLogCache = null;
 
 const readAdminContentStore = () => {
   if (adminContentCache) {
@@ -1001,6 +1011,130 @@ const sanitizeAuditValue = (value, depth = 0) => {
     ]);
 
   return Object.fromEntries(entries);
+};
+
+const readAuthActivityLogStore = () => {
+  if (authActivityLogCache) {
+    return authActivityLogCache;
+  }
+
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(AUTH_ACTIVITY_LOG_FILE)) {
+      fs.writeFileSync(AUTH_ACTIVITY_LOG_FILE, "[]\n", "utf8");
+      authActivityLogCache = [];
+      return authActivityLogCache;
+    }
+
+    const raw = fs.readFileSync(AUTH_ACTIVITY_LOG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    authActivityLogCache = Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    logger.warn("[auth-activity] read_failed", String(error));
+    authActivityLogCache = [];
+  }
+
+  return authActivityLogCache;
+};
+
+const persistAuthActivityLogStore = (entries) => {
+  try {
+    ensureAuthStoreDir();
+    const nextEntries = Array.isArray(entries) ? entries.slice(0, AUTH_ACTIVITY_MAX_ENTRIES) : [];
+    const tempPath = `${AUTH_ACTIVITY_LOG_FILE}.tmp`;
+    fs.writeFileSync(tempPath, `${JSON.stringify(nextEntries, null, 2)}\n`, "utf8");
+    fs.renameSync(tempPath, AUTH_ACTIVITY_LOG_FILE);
+    authActivityLogCache = nextEntries;
+  } catch (error) {
+    logger.warn("[auth-activity] persist_failed", String(error));
+  }
+};
+
+const formatAuthActorDisplay = ({ name = "", username = "", fallback = "Unknown user" } = {}) => {
+  const resolvedName = trimAuditText(name);
+  const resolvedUsername = trimAuditText(username);
+  if (resolvedName && resolvedUsername && resolvedName.toLowerCase() !== resolvedUsername.toLowerCase()) {
+    return `${resolvedName} - ${resolvedUsername}`;
+  }
+  return resolvedName || resolvedUsername || fallback;
+};
+
+const createAuthActivityActor = ({ provider = "unknown", user = null, fallbackName = "", fallbackUsername = "", role = "" } = {}) => {
+  const source = user && typeof user === "object" ? user : {};
+  const name = String(
+    source?.name ||
+      source?.vamsysPilotName ||
+      source?.globalName ||
+      `${source?.first_name || ""} ${source?.last_name || ""}` ||
+      fallbackName
+  ).trim();
+  const username = String(
+    source?.username || source?.vamsysPilotUsername || source?.callsign || fallbackUsername
+  ).trim();
+  const resolvedRole = String(role || source?.rank || source?.role || "").trim();
+  const resolvedId = String(source?.id || source?.vamsysPilotId || "").trim();
+
+  return {
+    id: resolvedId || null,
+    provider,
+    name: trimAuditText(name) || null,
+    username: trimAuditText(username) || null,
+    display: formatAuthActorDisplay({
+      name,
+      username,
+      fallback: fallbackName || fallbackUsername || "Unknown user",
+    }),
+    role: trimAuditText(resolvedRole) || null,
+  };
+};
+
+const appendAuthActivityEntry = (entry) => {
+  const current = readAuthActivityLogStore();
+  const next = [entry, ...current].slice(0, AUTH_ACTIVITY_MAX_ENTRIES);
+  persistAuthActivityLogStore(next);
+  return entry;
+};
+
+const filterAuthActivityEntries = ({ limit = 100, providers = [], outcomes = [] } = {}) => {
+  const normalizedProviders = Array.isArray(providers)
+    ? providers.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+  const normalizedOutcomes = Array.isArray(outcomes)
+    ? outcomes.map((value) => String(value || "").trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  return readAuthActivityLogStore()
+    .filter((entry) => {
+      if (normalizedProviders.length > 0 && !normalizedProviders.includes(String(entry?.provider || "").toLowerCase())) {
+        return false;
+      }
+      if (normalizedOutcomes.length > 0 && !normalizedOutcomes.includes(String(entry?.outcome || "").toLowerCase())) {
+        return false;
+      }
+      return true;
+    })
+    .slice(0, Math.max(1, Math.min(500, Number(limit || 100) || 100)));
+};
+
+const recordAuthActivity = ({ req, provider = "unknown", type = "login", outcome = "success", message = "", actor = null, details = null } = {}) => {
+  const actorEntry = actor && typeof actor === "object" ? actor : null;
+  return appendAuthActivityEntry({
+    id: randomUUID(),
+    createdAt: new Date().toISOString(),
+    provider: trimAuditText(provider) || "unknown",
+    type: trimAuditText(type) || "login",
+    outcome: trimAuditText(outcome) || "success",
+    message: trimAuditText(message, 400) || null,
+    actor: actorEntry,
+    request: req
+      ? {
+          path: trimAuditText(req.originalUrl || req.url || "", 300) || null,
+          ip: trimAuditText(req.headers?.["x-forwarded-for"] || req.socket?.remoteAddress || "", 120) || null,
+          userAgent: trimAuditText(req.headers?.["user-agent"] || "", 220) || null,
+        }
+      : null,
+    details: sanitizeAuditValue(details),
+  });
 };
 
 const appendUniqueAuditIds = (target, ...values) => {
@@ -2345,6 +2479,10 @@ const getDiscordBotSettingsStore = () => {
       ...defaults.channels,
       ...(existing?.channels && typeof existing.channels === "object" ? existing.channels : {}),
     },
+    pirepAlerts: {
+      ...defaults.pirepAlerts,
+      ...(existing?.pirepAlerts && typeof existing.pirepAlerts === "object" ? existing.pirepAlerts : {}),
+    },
     templates: {
       ...defaults.templates,
       ...(existing?.templates && typeof existing.templates === "object" ? existing.templates : {}),
@@ -2369,6 +2507,10 @@ const upsertDiscordBotSettingsStore = (payload = {}) => {
       channels: {
         ...current.channels,
         ...(payload?.channels && typeof payload.channels === "object" ? payload.channels : {}),
+      },
+      pirepAlerts: {
+        ...current.pirepAlerts,
+        ...(payload?.pirepAlerts && typeof payload.pirepAlerts === "object" ? payload.pirepAlerts : {}),
       },
       templates: {
         ...current.templates,
@@ -2478,6 +2620,14 @@ const getNextTicketNumber = () => {
   return maxNumber + 1;
 };
 
+const STALE_PIREP_AUTO_TICKET_WINDOW_MS = 24 * 60 * 60 * 1000;
+const STALE_PIREP_AUTO_TICKET_SCAN_INTERVAL_MS = 15 * 60 * 1000;
+const STALE_PIREP_AUTO_TICKET_PAGE_SIZE = 100;
+const STALE_PIREP_AUTO_TICKET_MAX_PAGES = 5;
+const STALE_PIREP_AUTO_TICKET_STATUSES = ["pending", "manual"];
+
+let stalePirepAutoTicketScanPromise = null;
+
 const resolveTicketActor = async (req) => {
   const vamsysSession = getVamsysSessionFromRequest(req);
   const discordSession = getDiscordSessionFromRequest(req);
@@ -2541,6 +2691,537 @@ const sanitizeTicketForViewer = (ticket, actor) => {
     unreadCount,
   };
 };
+
+const resolvePilotSupportTicketOwner = (context = {}) => {
+  const pilot = context?.pilot && typeof context.pilot === "object" ? context.pilot : {};
+  const pilotId = Number(context?.pilotId || pilot?.id || 0) || null;
+  const username = normalizeAdminText(pilot?.username || pilot?.callsign || "") || (pilotId ? `pilot-${pilotId}` : "pilot");
+  const name = normalizeAdminText(pilot?.name || username || "Pilot") || "Pilot";
+
+  return {
+    pilotId,
+    discordId: normalizeAdminText(readDiscordIdFromPilot(pilot) || "") || null,
+    username,
+    name,
+    provider: "vamsys",
+  };
+};
+
+const resolveOperationsTicketCategory = (config = getTicketConfigStore()) => {
+  const enabledCategories = Array.isArray(config?.categories)
+    ? config.categories.filter((item) => normalizeAdminBoolean(item?.enabled, true))
+    : [];
+
+  return (
+    enabledCategories.find((item) => normalizeAdminText(item?.id || "").toLowerCase() === "operations") ||
+    enabledCategories[0] ||
+    null
+  );
+};
+
+const resolveOutdatedFlightReportTags = (config = getTicketConfigStore()) => {
+  const enabledTagIds = new Set(
+    (Array.isArray(config?.tags) ? config.tags : [])
+      .filter((item) => normalizeAdminBoolean(item?.enabled, true))
+      .map((item) => normalizeAdminText(item?.id || ""))
+      .filter(Boolean)
+  );
+
+  return ["technical", "vamsys"].filter((item) => enabledTagIds.has(item));
+};
+
+const findActiveOutdatedRouteReportTicket = (tickets = [], routeId, owner = {}) => {
+  const normalizedRouteId = Number(routeId || 0) || 0;
+  const ownerPilotId = Number(owner?.pilotId || 0) || 0;
+  const ownerUsername = normalizeAdminText(owner?.username || "").toLowerCase();
+
+  return tickets.find((ticket) => {
+    const report = ticket?.routeReport && typeof ticket.routeReport === "object" ? ticket.routeReport : {};
+    const ticketRouteId = Number(report?.routeId || ticket?.relatedRouteId || 0) || 0;
+    if (ticketRouteId !== normalizedRouteId) {
+      return false;
+    }
+
+    if (normalizeTicketStatus(ticket?.status, "open") === "closed") {
+      return false;
+    }
+
+    const ticketOwner = ticket?.owner && typeof ticket.owner === "object" ? ticket.owner : {};
+    const ticketOwnerPilotId = Number(ticketOwner?.pilotId || 0) || 0;
+    const ticketOwnerUsername = normalizeAdminText(ticketOwner?.username || "").toLowerCase();
+
+    if (ownerPilotId > 0 && ticketOwnerPilotId === ownerPilotId) {
+      return true;
+    }
+
+    return Boolean(ownerUsername && ticketOwnerUsername && ticketOwnerUsername === ownerUsername);
+  }) || null;
+};
+
+const buildOutdatedRouteReportTicket = ({ route = {}, owner = {}, config = getTicketConfigStore() } = {}) => {
+  const category = resolveOperationsTicketCategory(config);
+  if (!category) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const routeId = Number(route?.id || 0) || 0;
+  const flightLabel =
+    normalizeAdminText(route?.flightNumber || route?.callsign || "") ||
+    (routeId > 0 ? `Route ${routeId}` : "Route");
+  const fromCode = normalizeAdminText(route?.fromCode || "").toUpperCase() || "—";
+  const toCode = normalizeAdminText(route?.toCode || "").toUpperCase() || "—";
+  const routeText = normalizeAdminMultilineText(route?.routeText || "") || null;
+  const contentLines = [
+    `Pilot reported route ${flightLabel} as outdated.`,
+    `Route ID: ${routeId || "unknown"}`,
+    `Sector: ${fromCode} -> ${toCode}`,
+    `Reporter: ${owner?.name || "Pilot"} (${owner?.username || "unknown"})`,
+    "Reason: the flight appears to be no longer active and should be reviewed by staff.",
+  ];
+
+  if (routeText) {
+    contentLines.push(`Filed route: ${routeText}`);
+  }
+
+  return {
+    id: randomUUID(),
+    number: getNextTicketNumber(),
+    subject: `Outdated flight report: ${flightLabel}`,
+    categoryId: category.id,
+    categoryName: category.name,
+    status: "open",
+    priority: "normal",
+    tags: resolveOutdatedFlightReportTags(config),
+    assigneeId: null,
+    assigneeName: null,
+    owner,
+    messages: [
+      {
+        id: randomUUID(),
+        authorRole: "pilot",
+        authorName: owner?.name || "Pilot",
+        authorUsername: owner?.username || "pilot",
+        content: contentLines.join("\n"),
+        createdAt: now,
+      },
+    ],
+    unreadByOwner: 0,
+    unreadByStaff: 1,
+    createdAt: now,
+    updatedAt: now,
+    closedAt: null,
+    source: "pilot-route-report",
+    relatedRouteId: routeId,
+    routeReport: {
+      type: "outdated-flight",
+      routeId,
+      flightNumber: flightLabel,
+      callsign: normalizeAdminText(route?.callsign || "") || null,
+      fromCode,
+      toCode,
+      routeText,
+      reportedAt: now,
+    },
+  };
+};
+
+const createOutdatedRouteReportTicket = ({ route = {}, context = {} } = {}) => {
+  const config = getTicketConfigStore();
+  if (!config.enabled) {
+    return { ticket: null, duplicate: false, error: "Ticket system is temporarily disabled" };
+  }
+
+  const owner = resolvePilotSupportTicketOwner(context);
+  const existingTicket = findActiveOutdatedRouteReportTicket(listTicketsStore(), route?.id, owner);
+  if (existingTicket) {
+    return { ticket: existingTicket, duplicate: true, error: null };
+  }
+
+  const ticket = buildOutdatedRouteReportTicket({ route, owner, config });
+  if (!ticket) {
+    return { ticket: null, duplicate: false, error: "No enabled ticket category is available" };
+  }
+
+  withAdminContentUpdate((draft) => {
+    const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+    items.push(ticket);
+    draft.tickets = items;
+    return draft;
+  });
+
+  void sendDiscordBotNotification({
+    eventKey: "ticketCreated",
+    title: `Ticket #${ticket.number}: ${ticket.subject}`,
+    description: ticket.messages[0]?.content?.slice(0, 500) || ticket.subject,
+    category: ticket.categoryName,
+    author: owner.name || "Pilot",
+    color: 0xe31e24,
+    content: owner.discordId ? `Outdated flight report #${ticket.number} from <@${owner.discordId}>` : "",
+    variables: {
+      ticketNumber: ticket.number,
+      subject: ticket.subject,
+      content: ticket.messages[0]?.content?.slice(0, 500) || ticket.subject,
+      status: ticket.status,
+      priority: ticket.priority,
+      pilotName: owner.name || "Pilot",
+      reporter: owner.name || "Pilot",
+      authorRole: "pilot",
+      route: `${ticket.routeReport?.fromCode || "—"} -> ${ticket.routeReport?.toCode || "—"}`,
+      aircraft: "",
+    },
+    fields: [
+      { name: "Category", value: ticket.categoryName, inline: true },
+      { name: "Flight", value: ticket.routeReport?.flightNumber || ticket.subject, inline: true },
+      { name: "Reporter", value: owner.name || owner.username || "Pilot", inline: true },
+    ],
+  }).catch(() => {});
+
+  return { ticket, duplicate: false, error: null };
+};
+
+const parseAdminTimestamp = (value) => {
+  const timestamp = Date.parse(String(value || "").trim());
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const normalizePirepAutoTicketStatus = (value) => normalizeAdminText(value || "").toLowerCase();
+
+const getStalePirepAutoTicketTimestamp = (pirep = {}) => {
+  const candidates = [
+    pirep?.created_at,
+    pirep?.submitted_at,
+    pirep?.filed_at,
+    pirep?.landing_time,
+    pirep?.arrival_time,
+    pirep?.updated_at,
+  ];
+
+  for (const candidate of candidates) {
+    const timestamp = parseAdminTimestamp(candidate);
+    if (timestamp > 0) {
+      return timestamp;
+    }
+  }
+
+  return 0;
+};
+
+const isPirepEligibleForAutoReviewTicket = (pirep = {}, now = Date.now()) => {
+  const pirepId = Number(pirep?.id || 0) || 0;
+  if (pirepId <= 0) {
+    return false;
+  }
+
+  const status = normalizePirepAutoTicketStatus(pirep?.status);
+  if (!STALE_PIREP_AUTO_TICKET_STATUSES.includes(status)) {
+    return false;
+  }
+
+  const ageTimestamp = getStalePirepAutoTicketTimestamp(pirep);
+  if (ageTimestamp <= 0) {
+    return false;
+  }
+
+  return now - ageTimestamp >= STALE_PIREP_AUTO_TICKET_WINDOW_MS;
+};
+
+const resolveStalePirepAutoTicketCategory = (config = getTicketConfigStore()) => {
+  const enabledCategories = Array.isArray(config?.categories)
+    ? config.categories.filter((item) => normalizeAdminBoolean(item?.enabled, true))
+    : [];
+
+  return (
+    enabledCategories.find((item) => normalizeAdminText(item?.id || "").toLowerCase() === "operations") ||
+    enabledCategories[0] ||
+    null
+  );
+};
+
+const resolveStalePirepAutoTicketTags = (config = getTicketConfigStore()) => {
+  const enabledTagIds = new Set(
+    (Array.isArray(config?.tags) ? config.tags : [])
+      .filter((item) => normalizeAdminBoolean(item?.enabled, true))
+      .map((item) => normalizeAdminText(item?.id || ""))
+      .filter(Boolean)
+  );
+
+  return ["technical", "vamsys"].filter((item) => enabledTagIds.has(item));
+};
+
+const hasAutoReviewTicketForPirep = (tickets = [], pirepId) => {
+  const normalizedPirepId = Number(pirepId || 0) || 0;
+  if (normalizedPirepId <= 0) {
+    return false;
+  }
+
+  return tickets.some((ticket) => {
+    const autoReview = ticket?.autoReview && typeof ticket.autoReview === "object" ? ticket.autoReview : {};
+    const metadataPirepId = Number(autoReview?.pirepId || ticket?.relatedPirepId || 0) || 0;
+    return metadataPirepId === normalizedPirepId;
+  });
+};
+
+const formatStalePirepAgeLabel = (ageMs) => {
+  const totalHours = Math.max(1, Math.floor(Number(ageMs || 0) / (60 * 60 * 1000)));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  if (days > 0 && hours > 0) {
+    return `${days}d ${hours}h`;
+  }
+  if (days > 0) {
+    return `${days}d`;
+  }
+  return `${totalHours}h`;
+};
+
+const buildStalePirepRouteLabel = (pirep = {}) => {
+  const departure = normalizeAdminText(
+    pirep?.departure_airport?.icao || pirep?.departure_airport?.iata || pirep?.departure_icao || pirep?.departure_iata || ""
+  ).toUpperCase();
+  const arrival = normalizeAdminText(
+    pirep?.arrival_airport?.icao || pirep?.arrival_airport?.iata || pirep?.arrival_icao || pirep?.arrival_iata || ""
+  ).toUpperCase();
+
+  return departure && arrival ? `${departure} -> ${arrival}` : departure || arrival || "Route unavailable";
+};
+
+const buildStalePirepAutoReviewTicket = (pirep = {}, config = getTicketConfigStore()) => {
+  const category = resolveStalePirepAutoTicketCategory(config);
+  if (!category) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  const pirepId = Number(pirep?.id || 0) || 0;
+  const status = normalizePirepAutoTicketStatus(pirep?.status) || "pending";
+  const ageTimestamp = getStalePirepAutoTicketTimestamp(pirep);
+  const ageMs = Math.max(0, Date.now() - ageTimestamp);
+  const ageLabel = formatStalePirepAgeLabel(ageMs);
+  const pilotName =
+    normalizeAdminText(pirep?.pilot?.name || pirep?.pilot_name || pirep?.pilot?.username || "") || "Unknown pilot";
+  const pilotUsername =
+    normalizeAdminText(pirep?.pilot?.username || pirep?.pilot?.callsign || pirep?.pilot_username || "") || "unknown";
+  const callsign = normalizeAdminText(pirep?.callsign || pirep?.flight_number || "") || `PIREP ${pirepId}`;
+  const routeLabel = buildStalePirepRouteLabel(pirep);
+  const content = [
+    `Automatic review ticket created for stale PIREP #${pirepId}.`,
+    `Callsign: ${callsign}`,
+    `Pilot: ${pilotName} (${pilotUsername})`,
+    `Route: ${routeLabel}`,
+    `Status: ${status}`,
+    `Age: ${ageLabel}`,
+    `Filed at: ${ageTimestamp > 0 ? new Date(ageTimestamp).toISOString() : "unknown"}`,
+    "Reason: PIREP has been waiting in review too long and should be rechecked by staff.",
+  ].join("\n");
+
+  return {
+    id: randomUUID(),
+    number: getNextTicketNumber(),
+    subject: `Review stale PIREP ${callsign}`,
+    categoryId: category.id,
+    categoryName: category.name,
+    status: "open",
+    priority: ageMs >= 48 * 60 * 60 * 1000 ? "critical" : "high",
+    tags: resolveStalePirepAutoTicketTags(config),
+    assigneeId: null,
+    assigneeName: null,
+    owner: {
+      pilotId: null,
+      discordId: null,
+      username: "review-bot",
+      name: "Auto Review",
+      provider: "system",
+    },
+    messages: [
+      {
+        id: randomUUID(),
+        authorRole: "staff",
+        authorName: "Auto Review",
+        authorUsername: "review-bot",
+        content,
+        createdAt: now,
+      },
+    ],
+    unreadByOwner: 0,
+    unreadByStaff: 1,
+    createdAt: now,
+    updatedAt: now,
+    closedAt: null,
+    source: "system-auto-review",
+    relatedPirepId: pirepId,
+    autoReview: {
+      type: "stale-pirep",
+      pirepId,
+      status,
+      callsign,
+      route: routeLabel,
+      pilotName,
+      pilotUsername,
+      staleSince: ageTimestamp > 0 ? new Date(ageTimestamp).toISOString() : null,
+      thresholdHours: STALE_PIREP_AUTO_TICKET_WINDOW_MS / (60 * 60 * 1000),
+      detectedAt: now,
+    },
+  };
+};
+
+const createStalePirepAutoReviewTicket = (pirep = {}) => {
+  const config = getTicketConfigStore();
+  if (!config.enabled) {
+    return null;
+  }
+
+  const ticket = buildStalePirepAutoReviewTicket(pirep, config);
+  if (!ticket) {
+    return null;
+  }
+
+  withAdminContentUpdate((draft) => {
+    const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+    if (hasAutoReviewTicketForPirep(items, pirep?.id)) {
+      draft.tickets = items;
+      return draft;
+    }
+    items.push(ticket);
+    draft.tickets = items;
+    return draft;
+  });
+
+  void sendDiscordBotNotification({
+    eventKey: "ticketCreated",
+    title: `Ticket #${ticket.number}: ${ticket.subject}`,
+    description: ticket.messages[0]?.content?.slice(0, 500) || ticket.subject,
+    category: ticket.categoryName,
+    author: "Auto Review",
+    color: 0xeab308,
+    variables: {
+      ticketNumber: ticket.number,
+      subject: ticket.subject,
+      content: ticket.messages[0]?.content?.slice(0, 500) || ticket.subject,
+      status: ticket.status,
+      priority: ticket.priority,
+      pilotName: ticket.autoReview?.pilotName || "Unknown pilot",
+      reporter: "Auto Review",
+      authorRole: "staff",
+      route: ticket.autoReview?.route || "",
+      aircraft: "",
+    },
+    fields: [
+      { name: "Category", value: ticket.categoryName, inline: true },
+      { name: "Priority", value: ticket.priority, inline: true },
+      { name: "Source", value: "Auto Review", inline: true },
+      { name: "PIREP", value: String(ticket.relatedPirepId || "-"), inline: true },
+    ],
+  }).catch(() => {});
+
+  return ticket;
+};
+
+const fetchPirepsForAutoReviewTickets = async ({ status = "pending", cursor = "" } = {}) => {
+  const params = new URLSearchParams();
+  params.set("page[size]", String(STALE_PIREP_AUTO_TICKET_PAGE_SIZE));
+  params.set("sort", "id");
+  params.set("filter[status]", normalizePirepAutoTicketStatus(status) || "pending");
+  if (cursor) {
+    params.set("page[cursor]", cursor);
+  }
+
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/pireps?${params.toString()}`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `Failed to load PIREPs for status ${status}: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  return {
+    items: Array.isArray(payload?.data) ? payload.data : [],
+    nextCursor: normalizeAdminText(payload?.meta?.next_cursor || "") || null,
+  };
+};
+
+const scanStalePirepsForAutoTickets = async ({ force = false } = {}) => {
+  if (stalePirepAutoTicketScanPromise && !force) {
+    return stalePirepAutoTicketScanPromise;
+  }
+
+  const run = (async () => {
+    const existingTickets = listTicketsStore();
+    const trackedPirepIds = new Set(
+      existingTickets
+        .map((item) => Number(item?.autoReview?.pirepId || item?.relatedPirepId || 0) || 0)
+        .filter((item) => item > 0)
+    );
+    const now = Date.now();
+    const createdTickets = [];
+
+    for (const status of STALE_PIREP_AUTO_TICKET_STATUSES) {
+      let cursor = "";
+      let pageCount = 0;
+
+      while (pageCount < STALE_PIREP_AUTO_TICKET_MAX_PAGES) {
+        const payload = await fetchPirepsForAutoReviewTickets({ status, cursor });
+        const items = Array.isArray(payload?.items) ? payload.items : [];
+        if (items.length === 0) {
+          break;
+        }
+
+        for (const pirep of items) {
+          const pirepId = Number(pirep?.id || 0) || 0;
+          if (pirepId <= 0 || trackedPirepIds.has(pirepId)) {
+            continue;
+          }
+          if (!isPirepEligibleForAutoReviewTicket(pirep, now)) {
+            continue;
+          }
+
+          const ticket = createStalePirepAutoReviewTicket(pirep);
+          if (ticket) {
+            trackedPirepIds.add(pirepId);
+            createdTickets.push(ticket.number);
+          }
+        }
+
+        pageCount += 1;
+        if (!payload?.nextCursor) {
+          break;
+        }
+        cursor = payload.nextCursor;
+      }
+    }
+
+    if (createdTickets.length > 0) {
+      logger.info("[tickets] stale_pirep_auto_tickets_created", {
+        count: createdTickets.length,
+        ticketNumbers: createdTickets,
+      });
+    }
+
+    return { created: createdTickets.length, ticketNumbers: createdTickets };
+  })()
+    .catch((error) => {
+      logger.warn("[tickets] stale_pirep_auto_ticket_scan_failed", String(error?.message || error || "unknown error"));
+      return { created: 0, ticketNumbers: [] };
+    })
+    .finally(() => {
+      if (stalePirepAutoTicketScanPromise === run) {
+        stalePirepAutoTicketScanPromise = null;
+      }
+    });
+
+  stalePirepAutoTicketScanPromise = run;
+  return run;
+};
+
+setTimeout(() => {
+  scanStalePirepsForAutoTickets().catch(() => {});
+  setInterval(() => {
+    scanStalePirepsForAutoTickets().catch(() => {});
+  }, STALE_PIREP_AUTO_TICKET_SCAN_INTERVAL_MS);
+}, 5000);
 
 const getAcarsConfigStore = () => {
   const store = readAdminContentStore();
@@ -5769,6 +6450,9 @@ const isWrappedOperationsActionResponse = (path, method, payload) => {
     /^\/transfers\/[^/]+\/(approve|reject)$/,
     /^\/ranks\/reorder$/,
     /^\/ranks\/[^/]+\/pilots\/[^/]+$/,
+    /^\/hubs\/[^/]+\/pilots\/[^/]+$/,
+  ].some((pattern) => pattern.test(path));
+};
 
 const normalizeAdminActivitySection = (value = "") => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -5786,9 +6470,6 @@ const resolveAdminActivitySectionPath = (section = "") => {
     return "";
   }
   return `/activities/${normalized}`;
-};
-    /^\/hubs\/[^/]+\/pilots\/[^/]+$/,
-  ].some((pattern) => pattern.test(path));
 };
 
 const normalizeOperationsActionResponse = (path, method, payload) => {
@@ -7584,6 +8265,14 @@ app.get("/api/auth/discord/callback", async (req, res) => {
     const stateFromCookie = cookies[DISCORD_STATE_COOKIE] || "";
 
     if (!code || !stateFromQuery || !stateFromCookie || stateFromQuery !== stateFromCookie) {
+      recordAuthActivity({
+        req,
+        provider: "discord",
+        type: "login",
+        outcome: "error",
+        message: "Discord login failed: invalid OAuth state",
+        details: { reason: "oauth_state_invalid" },
+      });
       res.setHeader("Set-Cookie", clearCookie(DISCORD_STATE_COOKIE));
       res.redirect(fallbackErrorUrl);
       return;
@@ -7599,6 +8288,14 @@ app.get("/api/auth/discord/callback", async (req, res) => {
     discordOauthRedirectCache.delete(stateFromQuery);
     persistAuthStore();
     if (!stateExpiresAt || Date.now() >= stateExpiresAt) {
+      recordAuthActivity({
+        req,
+        provider: "discord",
+        type: "login",
+        outcome: "error",
+        message: "Discord login failed: expired OAuth state",
+        details: { reason: "oauth_state_expired" },
+      });
       res.setHeader("Set-Cookie", clearCookie(DISCORD_STATE_COOKIE));
       res.redirect(fallbackErrorUrl);
       return;
@@ -7652,6 +8349,14 @@ app.get("/api/auth/discord/callback", async (req, res) => {
       const activePilotId = Number(activeSessionUser?.id || 0) || 0;
 
       if (!activeSessionUser || activePilotId <= 0) {
+        recordAuthActivity({
+          req,
+          provider: "discord",
+          type: "link",
+          outcome: "error",
+          message: "Discord link failed: vAMSYS login required",
+          details: { reason: "link_requires_vamsys_login" },
+        });
         res.setHeader("Set-Cookie", clearCookie(DISCORD_STATE_COOKIE));
         res.redirect(appendQueryParam(fallbackErrorUrl, "reason", "link_requires_vamsys_login"));
         return;
@@ -7660,6 +8365,15 @@ app.get("/api/auth/discord/callback", async (req, res) => {
       const existingDiscordLink = discordLinksCache.get(discordId) || null;
       const existingPilotId = Number(existingDiscordLink?.vamsysPilotId || 0) || 0;
       if (existingPilotId > 0 && existingPilotId !== activePilotId) {
+        recordAuthActivity({
+          req,
+          provider: "discord",
+          type: "link",
+          outcome: "error",
+          message: "Discord link failed: Discord account is already linked to another pilot",
+          actor: createAuthActivityActor({ provider: "vamsys", user: activeSessionUser }),
+          details: { reason: "discord_already_linked", existingPilotId, activePilotId },
+        });
         res.setHeader("Set-Cookie", clearCookie(DISCORD_STATE_COOKIE));
         res.redirect(appendQueryParam(fallbackErrorUrl, "reason", "discord_already_linked"));
         return;
@@ -7684,6 +8398,20 @@ app.get("/api/auth/discord/callback", async (req, res) => {
     } else {
       vamsysMatch = await resolveLinkedVamsysPilotForDiscordUser(user);
       if (!vamsysMatch?.pilot) {
+        recordAuthActivity({
+          req,
+          provider: "discord",
+          type: "login",
+          outcome: "error",
+          message: "Discord login failed: account is not linked to a vAMSYS pilot",
+          actor: createAuthActivityActor({
+            provider: "discord",
+            user,
+            fallbackName: String(user.global_name || "").trim(),
+            fallbackUsername: String(user.username || "").trim(),
+          }),
+          details: { reason: "discord_not_linked" },
+        });
         res.setHeader("Set-Cookie", clearCookie(DISCORD_STATE_COOKIE));
         res.redirect(appendQueryParam(fallbackErrorUrl, "reason", "discord_not_linked"));
         return;
@@ -7759,8 +8487,32 @@ app.get("/api/auth/discord/callback", async (req, res) => {
       clearCookie(DISCORD_STATE_COOKIE),
       buildCookie(DISCORD_SESSION_COOKIE, sessionId, DISCORD_SESSION_TTL_MS / 1000),
     ]);
+    recordAuthActivity({
+      req,
+      provider: "discord",
+      type: oauthIntent === DISCORD_OAUTH_INTENT_LINK ? "link" : "login",
+      outcome: "success",
+      message: oauthIntent === DISCORD_OAUTH_INTENT_LINK ? "Discord account linked successfully" : "Successful Discord login",
+      actor: createAuthActivityActor({ provider: "vamsys", user: vamsysMatch.pilot }),
+      details: {
+        discordUsername: sessionUser.username,
+        discordGlobalName: sessionUser.globalName,
+        matchType: vamsysMatch.matchType,
+      },
+    });
     res.redirect(successUrl);
   } catch (error) {
+    recordAuthActivity({
+      req,
+      provider: "discord",
+      type: "login",
+      outcome: "error",
+      message: "Discord login failed",
+      details: {
+        reason: "discord_callback_failed",
+        error: String(error),
+      },
+    });
     logger.error("[auth] discord_callback_failed", {
       error: String(error),
       code: String(req.query.code || "").slice(0, 12),
@@ -7792,10 +8544,24 @@ app.get("/api/auth/discord/me", (req, res) => {
 app.post("/api/auth/discord/logout", (req, res) => {
   const cookies = parseCookieHeader(req.headers.cookie || "");
   const sessionId = cookies[DISCORD_SESSION_COOKIE] || "";
+  const session = sessionId ? discordSessionCache.get(sessionId) || null : null;
   if (sessionId) {
     discordSessionCache.delete(sessionId);
     persistAuthStore();
   }
+  recordAuthActivity({
+    req,
+    provider: "discord",
+    type: "logout",
+    outcome: "success",
+    message: "Discord logout",
+    actor: createAuthActivityActor({
+      provider: session?.user?.vamsysPilotId ? "vamsys" : "discord",
+      user: session?.user || null,
+      fallbackName: String(session?.user?.globalName || "").trim(),
+      fallbackUsername: String(session?.user?.username || "").trim(),
+    }),
+  });
   res.setHeader("Set-Cookie", clearCookie(DISCORD_SESSION_COOKIE));
   res.json({ ok: true });
 });
@@ -8175,6 +8941,18 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
 
     const oauthError = String(req.query.error || "");
     if (oauthError) {
+      recordAuthActivity({
+        req,
+        provider: "vamsys",
+        type: "login",
+        outcome: "error",
+        message: "vAMSYS login failed: provider returned an OAuth error",
+        details: {
+          reason: "oauth_provider_error",
+          oauthError,
+          description: String(req.query.error_description || "").trim(),
+        },
+      });
       logVamsys("warn", "oauth_callback_provider_error", {
         ...requestContext(req),
         oauthError,
@@ -8191,6 +8969,14 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
     const stateFromCookie = String(cookies[VAMSYS_STATE_COOKIE] || "").trim();
 
     if (!code || !stateFromQuery || !stateFromCookie || stateFromQuery !== stateFromCookie) {
+      recordAuthActivity({
+        req,
+        provider: "vamsys",
+        type: "login",
+        outcome: "error",
+        message: "vAMSYS login failed: invalid OAuth state",
+        details: { reason: "oauth_state_invalid" },
+      });
       logVamsys("warn", "oauth_callback_state_invalid", {
         ...requestContext(req),
         hasCode: Boolean(code),
@@ -8205,6 +8991,14 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
     const stateExpiresAt = Number(vamsysOauthStateCache.get(stateFromQuery) || 0);
     vamsysOauthStateCache.delete(stateFromQuery);
     if (!stateExpiresAt || Date.now() >= stateExpiresAt) {
+      recordAuthActivity({
+        req,
+        provider: "vamsys",
+        type: "login",
+        outcome: "error",
+        message: "vAMSYS login failed: expired OAuth state",
+        details: { reason: "oauth_state_expired" },
+      });
       logVamsys("warn", "oauth_callback_state_expired", { ...requestContext(req) });
       res.setHeader("Set-Cookie", clearCookie(VAMSYS_STATE_COOKIE));
       res.redirect(failureUrl);
@@ -8283,8 +9077,33 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
       durationMs: Date.now() - startedAt,
     });
 
+    recordAuthActivity({
+      req,
+      provider: "vamsys",
+      type: "login",
+      outcome: "success",
+      message: "Successful vAMSYS login",
+      actor: createAuthActivityActor({ provider: "vamsys", user: enriched.user }),
+      details: {
+        durationMs: Date.now() - startedAt,
+        isAdmin: isVamsysAdmin(enriched.user || {}),
+      },
+    });
+
     res.redirect(successUrl);
   } catch (error) {
+    recordAuthActivity({
+      req,
+      provider: "vamsys",
+      type: "login",
+      outcome: "error",
+      message: "vAMSYS login failed",
+      details: {
+        reason: "oauth_callback_failed",
+        durationMs: Date.now() - startedAt,
+        error: String(error),
+      },
+    });
     logVamsys("error", "oauth_callback_failed", {
       ...requestContext(req),
       durationMs: Date.now() - startedAt,
@@ -8450,6 +9269,15 @@ app.get("/api/auth/pilot-api/callback", async (req, res) => {
     const activePilotId = Number(activeSession?.user?.id || 0) || 0;
 
     if (oauthError) {
+      recordAuthActivity({
+        req,
+        provider: "pilot-api",
+        type: intent === "login" ? "login" : "connect",
+        outcome: "error",
+        message: intent === "login" ? "Pilot API login failed: provider returned an OAuth error" : "Pilot API connect failed: provider returned an OAuth error",
+        actor: activeSession?.user ? createAuthActivityActor({ provider: "vamsys", user: activeSession.user }) : null,
+        details: { reason: "oauth_error", oauthError },
+      });
       res.setHeader("Set-Cookie", clearCookie(PILOT_API_STATE_COOKIE));
       if (stateFromQuery) {
         pilotApiOauthStateCache.delete(stateFromQuery);
@@ -8460,6 +9288,15 @@ app.get("/api/auth/pilot-api/callback", async (req, res) => {
     }
 
     if (!code || !stateFromQuery || !stateFromCookie || stateFromQuery !== stateFromCookie || !stateEntry) {
+      recordAuthActivity({
+        req,
+        provider: "pilot-api",
+        type: intent === "login" ? "login" : "connect",
+        outcome: "error",
+        message: intent === "login" ? "Pilot API login failed: invalid OAuth state" : "Pilot API connect failed: invalid OAuth state",
+        actor: activeSession?.user ? createAuthActivityActor({ provider: "vamsys", user: activeSession.user }) : null,
+        details: { reason: "oauth_state_invalid" },
+      });
       res.setHeader("Set-Cookie", clearCookie(PILOT_API_STATE_COOKIE));
       res.redirect(appendQueryParam(failureUrl, "reason", "oauth_state_invalid"));
       return;
@@ -8471,18 +9308,44 @@ app.get("/api/auth/pilot-api/callback", async (req, res) => {
     const stateExpiresAt = Number(stateEntry?.expiresAt || 0) || 0;
     const statePilotId = Number(stateEntry?.pilotId || 0) || 0;
     if (!stateExpiresAt || Date.now() >= stateExpiresAt) {
+      recordAuthActivity({
+        req,
+        provider: "pilot-api",
+        type: intent === "login" ? "login" : "connect",
+        outcome: "error",
+        message: intent === "login" ? "Pilot API login failed: expired OAuth state" : "Pilot API connect failed: expired OAuth state",
+        actor: activeSession?.user ? createAuthActivityActor({ provider: "vamsys", user: activeSession.user }) : null,
+        details: { reason: "oauth_state_expired" },
+      });
       res.setHeader("Set-Cookie", clearCookie(PILOT_API_STATE_COOKIE));
       res.redirect(appendQueryParam(failureUrl, "reason", "oauth_state_expired"));
       return;
     }
 
     if (intent !== "login" && (!activeSession || activePilotId <= 0)) {
+      recordAuthActivity({
+        req,
+        provider: "pilot-api",
+        type: "connect",
+        outcome: "error",
+        message: "Pilot API connect failed: vAMSYS login required",
+        details: { reason: "vamsys_login_required" },
+      });
       res.setHeader("Set-Cookie", clearCookie(PILOT_API_STATE_COOKIE));
       res.redirect(appendQueryParam(failureUrl, "reason", "vamsys_login_required"));
       return;
     }
 
     if (intent !== "login" && (statePilotId <= 0 || statePilotId !== activePilotId)) {
+      recordAuthActivity({
+        req,
+        provider: "pilot-api",
+        type: "connect",
+        outcome: "error",
+        message: "Pilot API connect failed: pilot session changed during OAuth flow",
+        actor: activeSession?.user ? createAuthActivityActor({ provider: "vamsys", user: activeSession.user }) : null,
+        details: { reason: "pilot_session_changed", statePilotId, activePilotId },
+      });
       res.setHeader("Set-Cookie", clearCookie(PILOT_API_STATE_COOKIE));
       res.redirect(appendQueryParam(failureUrl, "reason", "pilot_session_changed"));
       return;
@@ -8544,9 +9407,34 @@ app.get("/api/auth/pilot-api/callback", async (req, res) => {
       nextCookies.push(buildCookie(VAMSYS_SESSION_COOKIE, sessionId, VAMSYS_SESSION_TTL_MS / 1000));
     }
 
+    recordAuthActivity({
+      req,
+      provider: "pilot-api",
+      type: intent === "login" ? "login" : "connect",
+      outcome: "success",
+      message: intent === "login" ? "Successful login via Pilot API" : "Pilot API connected successfully",
+      actor: createAuthActivityActor({ provider: "vamsys", user: sessionUser }),
+      details: {
+        pilotId: targetPilotId,
+        intent,
+      },
+    });
+
     res.setHeader("Set-Cookie", nextCookies);
     res.redirect(stateEntry?.successUrl || resolveRedirectUrl(PILOT_API_SUCCESS_URL, "/dashboard?tab=settings&pilot_api=success"));
-  } catch {
+  } catch (error) {
+    recordAuthActivity({
+      req,
+      provider: "pilot-api",
+      type: activeSession ? "connect" : "login",
+      outcome: "error",
+      message: activeSession ? "Pilot API connect failed" : "Pilot API login failed",
+      actor: activeSession?.user ? createAuthActivityActor({ provider: "vamsys", user: activeSession.user }) : null,
+      details: {
+        reason: "pilot_api_connect_failed",
+        error: String(error),
+      },
+    });
     res.setHeader("Set-Cookie", clearCookie(PILOT_API_STATE_COOKIE));
     res.redirect(appendQueryParam(failureUrl, "reason", "pilot_api_connect_failed"));
   }
@@ -10662,10 +11550,19 @@ app.get("/api/auth/me", async (req, res) => {
 app.post("/api/auth/vamsys/logout", (req, res) => {
   const cookies = parseCookieHeader(req.headers.cookie || "");
   const sessionId = cookies[VAMSYS_SESSION_COOKIE] || "";
+  const session = sessionId ? vamsysSessionCache.get(sessionId) || null : null;
   if (sessionId) {
     vamsysSessionCache.delete(sessionId);
     persistAuthStore();
   }
+  recordAuthActivity({
+    req,
+    provider: "vamsys",
+    type: "logout",
+    outcome: "success",
+    message: "vAMSYS logout",
+    actor: createAuthActivityActor({ provider: "vamsys", user: session?.user || null }),
+  });
   res.setHeader("Set-Cookie", clearCookie(VAMSYS_SESSION_COOKIE));
   res.json({ ok: true });
 });
@@ -11010,6 +11907,47 @@ const serializeDiscordGuildMember = (member, roleLookup = new Map()) => {
       .map((role) => ({ id: role.id, name: role.name, color: role.color })),
   };
 };
+
+app.get("/api/public/discord-widget", async (_req, res) => {
+  const guildId = getManagedDiscordGuildId();
+  const inviteUrl = normalizeAdminText(process.env.DISCORD_INVITE_URL || "https://discord.gg/nordwind") || "https://discord.gg/nordwind";
+
+  if (!guildId) {
+    res.json({
+      configured: false,
+      guildId: null,
+      inviteUrl,
+      widgetUrl: null,
+      guild: null,
+    });
+    return;
+  }
+
+  let guild = null;
+  try {
+    if (DISCORD_BOT_TOKEN) {
+      const guildPayload = await discordApiRequest(`/guilds/${encodeURIComponent(guildId)}?with_counts=true`);
+      guild = {
+        id: String(guildPayload?.id || guildId),
+        name: String(guildPayload?.name || "Discord Server"),
+        iconUrl: guildPayload?.icon
+          ? `https://cdn.discordapp.com/icons/${guildPayload.id}/${guildPayload.icon}.png?size=128`
+          : null,
+        approximateMemberCount: Number(guildPayload?.approximate_member_count || 0) || null,
+      };
+    }
+  } catch {
+    guild = null;
+  }
+
+  res.json({
+    configured: true,
+    guildId,
+    inviteUrl,
+    widgetUrl: `https://discord.com/widget?id=${encodeURIComponent(guildId)}&theme=light`,
+    guild,
+  });
+});
 
 app.get("/api/admin/discord-bot/guild", requireAdmin, async (_req, res) => {
   try {
@@ -16275,6 +17213,46 @@ app.get("/api/vamsys/routes", async (_req, res) => {
   }
 });
 
+app.post("/api/pilot/routes/:id/report-outdated", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId && !context?.pilot?.username) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+
+  const routeId = Number(req.params.id || 0) || 0;
+  if (routeId <= 0) {
+    res.status(400).json({ ok: false, error: "Route ID is required", code: "route_id_required" });
+    return;
+  }
+
+  try {
+    const routesPayload = await loadRoutesData();
+    const route = (Array.isArray(routesPayload?.routes) ? routesPayload.routes : []).find(
+      (item) => Number(item?.id || 0) === routeId
+    );
+
+    if (!route) {
+      res.status(404).json({ ok: false, error: "Route not found", code: "route_not_found" });
+      return;
+    }
+
+    const result = createOutdatedRouteReportTicket({ route, context });
+    if (result.error) {
+      res.status(503).json({ ok: false, error: result.error, code: "ticket_unavailable" });
+      return;
+    }
+
+    res.status(result.duplicate ? 200 : 201).json({
+      ok: true,
+      duplicate: result.duplicate,
+      ticket: result.ticket,
+    });
+  } catch (error) {
+    res.status(502).json({ ok: false, error: String(error?.message || "Failed to submit outdated flight report"), code: "route_report_failed" });
+  }
+});
+
 app.get("/api/vamsys/notams", async (req, res) => {
   if (!requireCredentials(res)) {
     return;
@@ -17264,6 +18242,26 @@ app.get("/api/admin/audit-logs", (req, res) => {
       limit,
       entityTypes,
       pilotId,
+    }),
+  });
+});
+
+app.get("/api/admin/auth-logs", (req, res) => {
+  const providers = String(req.query.providers || req.query.provider || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const outcomes = String(req.query.outcomes || req.query.outcome || "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const limit = Math.max(1, Math.min(500, Number(req.query.limit || 100) || 100));
+
+  res.json({
+    entries: filterAuthActivityEntries({
+      limit,
+      providers,
+      outcomes,
     }),
   });
 });

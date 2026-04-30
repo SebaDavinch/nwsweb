@@ -43,6 +43,7 @@ interface FlightMapProps {
   originAirport?: Airport | null;
   selectedAirportCode?: string | null;
   onAirportSelect?: (airportCode: string) => void;
+  showOriginMarker?: boolean;
 }
 
 export function FlightMap({
@@ -52,6 +53,7 @@ export function FlightMap({
   originAirport = null,
   selectedAirportCode = null,
   onAirportSelect,
+  showOriginMarker = true,
 }: FlightMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -246,7 +248,14 @@ export function FlightMap({
       const destinationMarkers = new Map<string, Airport>();
       const effectiveOrigin = originAirport || availableRoutes[0]?.from || null;
 
-      if (effectiveOrigin) {
+      const originCodes = new Set(
+        availableRoutes
+          .map((item) => String(item.from.icao || item.from.code || "").trim().toUpperCase())
+          .filter(Boolean)
+      );
+      const shouldShowOriginMarker = showOriginMarker && originCodes.size <= 1;
+
+      if (effectiveOrigin && shouldShowOriginMarker) {
         const originLatLng = L.latLng(effectiveOrigin.lat, effectiveOrigin.lon);
         bounds.extend(originLatLng);
         const marker = L.marker(originLatLng, { icon: originIcon })
@@ -332,7 +341,7 @@ export function FlightMap({
       }
     }
 
-  }, [availableRoutes, airports, onAirportSelect, originAirport, route, selectedAirportCode]);
+  }, [availableRoutes, airports, onAirportSelect, originAirport, route, selectedAirportCode, showOriginMarker]);
 
   return (
     <div
