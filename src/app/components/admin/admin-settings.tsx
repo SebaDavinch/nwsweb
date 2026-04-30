@@ -177,6 +177,17 @@ export function AdminSettings() {
                   <Label>Tagline</Label>
                   <Input value={design.tagline} onChange={(event) => setDesign((current) => ({ ...current, tagline: event.target.value }))} />
                 </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>Banner generator URL</Label>
+                  <Input
+                    value={design.bannerGeneratorUrl}
+                    placeholder="https://banner-tool.example.com/create"
+                    onChange={(event) => setDesign((current) => ({ ...current, bannerGeneratorUrl: event.target.value }))}
+                  />
+                  <p className="text-xs text-gray-500">
+                    Optional external generator URL. Activity editor will append title, category, type, tag, summary, author, date and target as query params.
+                  </p>
+                </div>
                 <div className="space-y-2">
                   <Label>Primary color</Label>
                   <Input type="color" value={design.primaryColor} onChange={(event) => setDesign((current) => ({ ...current, primaryColor: event.target.value }))} className="h-11" />

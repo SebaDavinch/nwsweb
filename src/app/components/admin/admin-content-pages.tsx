@@ -38,6 +38,13 @@ interface AdminFieldDefinition {
   table?: boolean;
 }
 
+interface AdminFormTemplate {
+  id: string;
+  label: string;
+  description?: string;
+  defaults: Record<string, string | boolean | number>;
+}
+
 type AdminFormState = Record<string, string | boolean>;
 type AdminItem = Record<string, unknown>;
 
@@ -47,6 +54,7 @@ interface AdminCollectionPageProps {
   collection: string;
   createLabel: string;
   fields: AdminFieldDefinition[];
+  templates?: AdminFormTemplate[];
 }
 
 interface AdminActivityCatalogItem {
@@ -101,7 +109,7 @@ const buildInitialState = (fields: AdminFieldDefinition[], item?: AdminItem | nu
   return nextState;
 };
 
-function AdminCollectionPage({ title, subtitle, collection, createLabel, fields }: AdminCollectionPageProps) {
+function AdminCollectionPage({ title, subtitle, collection, createLabel, fields, templates = [] }: AdminCollectionPageProps) {
   const [items, setItems] = useState<AdminItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -109,6 +117,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<AdminItem | null>(null);
   const [formState, setFormState] = useState<AdminFormState>(() => buildInitialState(fields));
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
 
   const loadItems = async () => {
     setIsLoading(true);
@@ -160,13 +169,31 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields 
   const openCreate = () => {
     setEditingItem(null);
     setFormState(buildInitialState(fields));
+    setSelectedTemplateId("");
     setIsDialogOpen(true);
   };
 
   const openEdit = (item: AdminItem) => {
     setEditingItem(item);
     setFormState(buildInitialState(fields, item));
+    setSelectedTemplateId("");
     setIsDialogOpen(true);
+  };
+
+  const applyTemplate = (templateId: string) => {
+    setSelectedTemplateId(templateId);
+    const template = templates.find((item) => item.id === templateId) || null;
+    if (!template) {
+      return;
+    }
+
+    setFormState((current) => {
+      const nextState = { ...current };
+      Object.entries(template.defaults).forEach(([key, value]) => {
+        nextState[key] = typeof value === "boolean" ? value : String(value ?? "");
+      });
+      return nextState;
+    });
   };
 
   const setFieldValue = (key: string, value: string | boolean) => {
@@ -370,6 +397,29 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields 
           <DialogHeader>
             <DialogTitle>{editingItem ? `Edit ${title}` : createLabel}</DialogTitle>
           </DialogHeader>
+          {templates.length > 0 ? (
+            <div className="space-y-2 rounded-lg border border-dashed border-gray-200 bg-gray-50/70 p-4">
+              <Label htmlFor={`${collection}-template`}>Template</Label>
+              <Select value={selectedTemplateId || "none"} onValueChange={(value) => applyTemplate(value === "none" ? "" : value)}>
+                <SelectTrigger id={`${collection}-template`}>
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No template</SelectItem>
+                  {templates.map((template) => (
+                    <SelectItem key={template.id} value={template.id}>
+                      {template.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {selectedTemplateId ? (
+                <div className="text-xs text-gray-500">
+                  {templates.find((item) => item.id === selectedTemplateId)?.description || ""}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <div className="grid gap-4 py-2 md:grid-cols-2">
             {fields.map((field) => {
               const currentValue = formState[field.key];
@@ -601,12 +651,71 @@ export function AdminEvents() {
 }
 
 export function AdminStaff() {
+  const staffRoleTemplates: AdminFormTemplate[] = [
+    {
+      id: "operations-management",
+      label: "Operations Management",
+      description: "For Chief Operations, dispatch leads and route oversight roles.",
+      defaults: {
+        role: "Operations Manager",
+        division: "Operations",
+        status: "active",
+        bio: "Oversees daily operations, route quality and pilot support workflows.",
+      },
+    },
+    {
+      id: "training-management",
+      label: "Training Department",
+      description: "For instructors, examiners and onboarding staff.",
+      defaults: {
+        role: "Training Manager",
+        division: "Training",
+        status: "active",
+        bio: "Supports pilot onboarding, training standards and recurrent checks.",
+      },
+    },
+    {
+      id: "events-community",
+      label: "Events and Community",
+      description: "For event leads, media and community-facing staff.",
+      defaults: {
+        role: "Events Coordinator",
+        division: "Community",
+        status: "active",
+        bio: "Coordinates events, communications and external community activity.",
+      },
+    },
+    {
+      id: "hr-admin",
+      label: "HR and Recruitment",
+      description: "For roster maintenance, recruitment and internal people operations.",
+      defaults: {
+        role: "HR Manager",
+        division: "HR",
+        status: "active",
+        bio: "Maintains staff roster, recruitment flow and internal people processes.",
+      },
+    },
+    {
+      id: "executive-management",
+      label: "Executive Management",
+      description: "For directors, chiefs and executive oversight roles.",
+      defaults: {
+        role: "Executive Director",
+        division: "Management",
+        status: "active",
+        bio: "Provides executive oversight, cross-department coordination and strategic direction.",
+      },
+    },
+  ];
+
   return (
     <AdminCollectionPage
       title="VA Staff"
       subtitle="Maintain staff roles, contacts and department ownership."
       collection="staff"
       createLabel="Add staff"
+      templates={staffRoleTemplates}
       fields={[
         { key: "name", label: "Name" },
         { key: "role", label: "Role" },

@@ -27,6 +27,7 @@ npm run dev
 - `/start` — приветствие
 - `/help` — список команд
 - `/ping` — проверка, что бот жив
+- `/link CODE` — привязать Telegram к pilot profile на сайте через одноразовый код из Settings
 - `/news [count]` — последние новости сайта
 - `/notams [count]` — свежие NOTAM
 - `/ticket category | subject | message` — создать тикет на сайте
@@ -38,4 +39,6 @@ npm run dev
 
 - Admin-only команды ориентируются на `telegramBotSettings.adminChatIds` с сайта.
 - Сейчас бот работает через long polling.
+- Бот теперь также отправляет PIREP review/status alerts в `adminChatIds`, если заданы `VAMSYS_CLIENT_ID` и `VAMSYS_CLIENT_SECRET`.
+- После привязки через `/link CODE` бот также может отправлять персональные accepted/rejected/review/reply-needed уведомления в Telegram по настройкам пилота.
 - Следующим этапом можно добавить inline-кнопки, админ-панель сайта и двустороннюю синхронизацию тикетов.

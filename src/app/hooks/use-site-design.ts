@@ -5,6 +5,7 @@ export interface SiteDesignSettings {
   tagline: string;
   primaryColor: string;
   accentColor: string;
+  bannerGeneratorUrl: string;
   headerLogoDataUrl: string;
   footerLogoDataUrl: string;
   loginLogoDataUrl: string;
@@ -17,6 +18,7 @@ export const DEFAULT_SITE_DESIGN: SiteDesignSettings = {
   tagline: "nordwind virtual group",
   primaryColor: "#E31E24",
   accentColor: "#2A2A2A",
+  bannerGeneratorUrl: "",
   headerLogoDataUrl: "",
   footerLogoDataUrl: "",
   loginLogoDataUrl: "",

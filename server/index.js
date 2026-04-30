@@ -313,16 +313,23 @@ const DEFAULT_NOTIFICATION_SETTINGS = {
   channels: {
     email: true,
     discord: true,
+    telegram: false,
     browser: false,
   },
   notificationTypes: {
     booking: true,
     claim: true,
     review: true,
+    awaitingReview: true,
+    accepted: true,
+    rejected: true,
+    needsReply: true,
+    invalidated: true,
     notam: true,
     event: true,
     system: true,
     badge: true,
+    test: false,
   },
 };
 
@@ -769,6 +776,7 @@ const buildDefaultAdminContent = () => {
       tagline: "nordwind virtual group",
       primaryColor: "#E31E24",
       accentColor: "#2A2A2A",
+      bannerGeneratorUrl: "",
       headerLogoDataUrl: "",
       footerLogoDataUrl: "",
       loginLogoDataUrl: "",
@@ -1708,6 +1716,14 @@ const normalizeManagedAdminItem = (collection, payload = {}, existing = null) =>
     const category = normalizePublicActivityCategory(payload.category || existing?.category || payload.type || existing?.type || "news");
     const status = normalizePublicActivityStatus(payload.status || existing?.status || "Published");
     const type = normalizeAdminText(payload.type || existing?.type || (category === "Event" ? "event" : category === "NOTAM" ? "ops" : "news")) || "news";
+    const bannerUrl = normalizeAdminText(
+      payload.bannerUrl ??
+      existing?.bannerUrl ??
+      payload.imageUrl ??
+      existing?.imageUrl ??
+      payload.image ??
+      existing?.image
+    );
     const content = normalizeAdminText(payload.content ?? existing?.content ?? payload.description ?? existing?.description);
     const summary = normalizeAdminText(payload.summary ?? existing?.summary ?? payload.description ?? existing?.description);
     return {
@@ -1723,6 +1739,7 @@ const normalizeManagedAdminItem = (collection, payload = {}, existing = null) =>
       summary,
       content,
       description: summary,
+      bannerUrl,
       tag: normalizeAdminText(payload.tag ?? existing?.tag),
       linkUrl: normalizeAdminText(payload.linkUrl ?? existing?.linkUrl),
       published: normalizeAdminBoolean(payload.published, normalizeAdminBoolean(existing?.published, true)),
@@ -2402,6 +2419,7 @@ const normalizeSiteDesignPayload = (payload = {}, current = null) => {
     tagline: normalizeAdminText(payload.tagline ?? existing.tagline ?? "nordwind virtual group") || "nordwind virtual group",
     primaryColor: normalizeAdminText(payload.primaryColor ?? existing.primaryColor ?? "#E31E24") || "#E31E24",
     accentColor: normalizeAdminText(payload.accentColor ?? existing.accentColor ?? "#2A2A2A") || "#2A2A2A",
+    bannerGeneratorUrl: normalizeAdminText(payload.bannerGeneratorUrl ?? existing.bannerGeneratorUrl ?? ""),
     headerLogoDataUrl: normalizeAdminImageDataUrl(payload.headerLogoDataUrl, existing.headerLogoDataUrl),
     footerLogoDataUrl: normalizeAdminImageDataUrl(payload.footerLogoDataUrl, existing.footerLogoDataUrl),
     loginLogoDataUrl: normalizeAdminImageDataUrl(payload.loginLogoDataUrl, existing.loginLogoDataUrl),
@@ -5634,6 +5652,8 @@ const setPilotPreferences = (pilot = {}, partial = {}) => {
     updatedAt: new Date().toISOString(),
   };
 
+  nextValue.notifications.notificationTypes.review = true;
+
   setPilotScopedCacheValue(pilotPreferencesCache, pilot, nextValue);
   persistAuthStore();
   return nextValue;
@@ -6832,6 +6852,258 @@ const clearPilotApiConnection = ({ pilotId, sessionUser = {} }) => {
       },
     },
   });
+};
+
+const TELEGRAM_LINK_CODE_TTL_MS = 15 * 60 * 1000;
+
+const buildTelegramLinkCode = () => `TG-${randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+
+const sanitizeTelegramConnection = (value) => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const chatId = normalizeAdminText(value?.chatId || value?.telegramChatId || "") || null;
+  const telegramId = normalizeAdminText(value?.telegramId || value?.id || "") || null;
+  const username = normalizeAdminText(value?.username || "") || null;
+  const name = normalizeAdminText(value?.name || value?.displayName || "") || null;
+  const linkedAt = normalizeAdminText(value?.linkedAt || "") || null;
+  const updatedAt = normalizeAdminText(value?.updatedAt || "") || null;
+
+  if (!chatId && !telegramId && !username && !name) {
+    return null;
+  }
+
+  return {
+    chatId,
+    telegramId,
+    username,
+    name,
+    linkedAt,
+    updatedAt,
+  };
+};
+
+const sanitizeTelegramLinkCode = (value) => {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const code = normalizeAdminText(value?.code || "") || null;
+  const createdAt = normalizeAdminText(value?.createdAt || "") || null;
+  const expiresAt = Number(value?.expiresAt || 0) || 0;
+  if (!code || expiresAt <= 0) {
+    return null;
+  }
+
+  return {
+    code,
+    createdAt,
+    expiresAt,
+  };
+};
+
+const getStoredTelegramConnectionByPilotId = (pilotId) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return null;
+  }
+
+  const link = findStoredVamsysLink({ id: String(normalizedPilotId) });
+  return sanitizeTelegramConnection(link?.metadata?.telegram);
+};
+
+const clearTelegramLinkCode = ({ pilotId, sessionUser = {} }) => {
+  const normalizedPilotId = Number(pilotId || sessionUser?.id || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return;
+  }
+
+  updateAuthStoreLinks({
+    vamsysLink: {
+      id: String(normalizedPilotId),
+      username: String(sessionUser?.username || "").trim(),
+      name: String(sessionUser?.name || "").trim(),
+      email: String(sessionUser?.email || "").trim(),
+      metadata: {
+        telegramLinkCode: null,
+      },
+    },
+  });
+};
+
+const createTelegramLinkCode = ({ pilotId, sessionUser = {} }) => {
+  const normalizedPilotId = Number(pilotId || sessionUser?.id || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return null;
+  }
+
+  const createdAt = new Date().toISOString();
+  const linkCode = {
+    code: buildTelegramLinkCode(),
+    createdAt,
+    expiresAt: Date.now() + TELEGRAM_LINK_CODE_TTL_MS,
+  };
+
+  updateAuthStoreLinks({
+    vamsysLink: {
+      id: String(normalizedPilotId),
+      username: String(sessionUser?.username || "").trim(),
+      name: String(sessionUser?.name || "").trim(),
+      email: String(sessionUser?.email || "").trim(),
+      metadata: {
+        telegramLinkCode: linkCode,
+      },
+    },
+  });
+
+  return linkCode;
+};
+
+const pruneExpiredTelegramLinkCode = ({ pilotId, sessionUser = {}, linkCode }) => {
+  const normalized = sanitizeTelegramLinkCode(linkCode);
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.expiresAt > Date.now()) {
+    return normalized;
+  }
+
+  clearTelegramLinkCode({ pilotId, sessionUser });
+  return null;
+};
+
+const findStoredVamsysLinkByTelegramLinkCode = (code) => {
+  const normalizedCode = normalizeAdminText(code || "") || null;
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const links = Array.from(vamsysLinksCache.values());
+  return links.find((link) => {
+    const linkCode = sanitizeTelegramLinkCode(link?.metadata?.telegramLinkCode);
+    return Boolean(linkCode && linkCode.code === normalizedCode && linkCode.expiresAt > Date.now());
+  }) || null;
+};
+
+const clearTelegramConnection = ({ pilotId, sessionUser = {} }) => {
+  const normalizedPilotId = Number(pilotId || sessionUser?.id || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return;
+  }
+
+  updateAuthStoreLinks({
+    vamsysLink: {
+      id: String(normalizedPilotId),
+      username: String(sessionUser?.username || "").trim(),
+      name: String(sessionUser?.name || "").trim(),
+      email: String(sessionUser?.email || "").trim(),
+      metadata: {
+        telegram: null,
+        telegramLinkCode: null,
+      },
+    },
+  });
+};
+
+const clearTelegramConnectionByIdentity = ({ chatId, telegramId } = {}) => {
+  const normalizedChatId = normalizeAdminText(chatId || "") || null;
+  const normalizedTelegramId = normalizeAdminText(telegramId || "") || null;
+  if (!normalizedChatId && !normalizedTelegramId) {
+    return;
+  }
+
+  Array.from(vamsysLinksCache.values()).forEach((link) => {
+    const telegram = sanitizeTelegramConnection(link?.metadata?.telegram);
+    if (!telegram) {
+      return;
+    }
+
+    const sameChat = normalizedChatId && telegram.chatId === normalizedChatId;
+    const sameTelegramId = normalizedTelegramId && telegram.telegramId === normalizedTelegramId;
+    if (!sameChat && !sameTelegramId) {
+      return;
+    }
+
+    updateAuthStoreLinks({
+      vamsysLink: {
+        id: String(link?.id || "").trim(),
+        username: String(link?.username || "").trim(),
+        name: String(link?.name || "").trim(),
+        email: String(link?.email || "").trim(),
+        metadata: {
+          telegram: null,
+        },
+      },
+    });
+  });
+};
+
+const claimTelegramLinkCode = ({ code, chatId, telegramId, username, name } = {}) => {
+  const storedLink = findStoredVamsysLinkByTelegramLinkCode(code);
+  if (!storedLink?.id) {
+    return { ok: false, error: "Telegram link code is invalid or expired", code: "telegram_link_code_invalid" };
+  }
+
+  const activeCode = sanitizeTelegramLinkCode(storedLink?.metadata?.telegramLinkCode);
+  if (!activeCode || activeCode.expiresAt <= Date.now()) {
+    clearTelegramLinkCode({
+      pilotId: Number(storedLink?.id || 0) || 0,
+      sessionUser: storedLink,
+    });
+    return { ok: false, error: "Telegram link code is invalid or expired", code: "telegram_link_code_invalid" };
+  }
+
+  const normalizedChatId = normalizeAdminText(chatId || "") || null;
+  const normalizedTelegramId = normalizeAdminText(telegramId || "") || null;
+  if (!normalizedChatId && !normalizedTelegramId) {
+    return { ok: false, error: "Telegram identity is missing", code: "telegram_identity_missing" };
+  }
+
+  clearTelegramConnectionByIdentity({
+    chatId: normalizedChatId,
+    telegramId: normalizedTelegramId,
+  });
+
+  const existingTelegram = sanitizeTelegramConnection(storedLink?.metadata?.telegram);
+  const nowIso = new Date().toISOString();
+  updateAuthStoreLinks({
+    vamsysLink: {
+      id: String(storedLink.id),
+      username: String(storedLink.username || "").trim(),
+      name: String(storedLink.name || "").trim(),
+      email: String(storedLink.email || "").trim(),
+      metadata: {
+        telegram: {
+          chatId: normalizedChatId,
+          telegramId: normalizedTelegramId,
+          username: normalizeAdminText(username || "") || null,
+          name: normalizeAdminText(name || "") || null,
+          linkedAt: existingTelegram?.linkedAt || nowIso,
+          updatedAt: nowIso,
+        },
+        telegramLinkCode: null,
+      },
+    },
+  });
+
+  return {
+    ok: true,
+    pilot: {
+      id: String(storedLink.id),
+      username: String(storedLink.username || "").trim() || null,
+      name: String(storedLink.name || "").trim() || null,
+    },
+    telegram: sanitizeTelegramConnection({
+      chatId: normalizedChatId,
+      telegramId: normalizedTelegramId,
+      username,
+      name,
+      linkedAt: existingTelegram?.linkedAt || nowIso,
+      updatedAt: nowIso,
+    }),
+  };
 };
 
 const exchangePilotApiToken = async (body) => {
@@ -9496,6 +9768,76 @@ app.post("/api/auth/pilot-api/disconnect", (req, res) => {
   }
 
   clearPilotApiConnection({
+    pilotId: Number(session?.user?.id || 0) || 0,
+    sessionUser: session.user || {},
+  });
+
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/telegram/status", (req, res) => {
+  const session = getVamsysSessionFromRequest(req);
+  if (!session) {
+    res.setHeader("Set-Cookie", clearCookie(VAMSYS_SESSION_COOKIE));
+    res.status(401).json({ authenticated: false, linked: false, linkCode: null, user: null });
+    return;
+  }
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  const storedLink = findStoredVamsysLink({
+    id: String(pilotId),
+    username: session?.user?.username,
+    email: session?.user?.email,
+  });
+  const telegramUser = sanitizeTelegramConnection(storedLink?.metadata?.telegram);
+  const linkCode = pruneExpiredTelegramLinkCode({
+    pilotId,
+    sessionUser: session.user || {},
+    linkCode: storedLink?.metadata?.telegramLinkCode,
+  });
+
+  res.json({
+    authenticated: true,
+    linked: Boolean(telegramUser),
+    linkCode,
+    user: telegramUser,
+  });
+});
+
+app.post("/api/auth/telegram/link-code", (req, res) => {
+  const session = getVamsysSessionFromRequest(req);
+  if (!session) {
+    res.setHeader("Set-Cookie", clearCookie(VAMSYS_SESSION_COOKIE));
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot ID is missing", code: "pilot_id_missing" });
+    return;
+  }
+
+  const linkCode = createTelegramLinkCode({
+    pilotId,
+    sessionUser: session.user || {},
+  });
+
+  res.json({
+    ok: true,
+    linkCode,
+  });
+});
+
+app.post("/api/auth/telegram/disconnect", (req, res) => {
+  const session = getVamsysSessionFromRequest(req);
+  if (!session) {
+    res.setHeader("Set-Cookie", clearCookie(VAMSYS_SESSION_COOKIE));
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+
+  clearTelegramConnection({
     pilotId: Number(session?.user?.id || 0) || 0,
     sessionUser: session.user || {},
   });
@@ -16386,6 +16728,7 @@ const loadRecentFlights = async ({ pilotId, limit = 10 } = {}) => {
         ? `${Number(pirep.flight_distance)} nm`
         : "—",
       aircraft: aircraftLabel,
+      needReply: Boolean(pirep?.need_reply ?? pirep?.needReply ?? false),
       landing: Number.isFinite(Number(pirep.landing_rate))
         ? `${Number(pirep.landing_rate)} fpm`
         : "—",
@@ -16948,6 +17291,8 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
     const avgLandingRate = landingRates.length
       ? Math.round(landingRates.reduce((sum, value) => sum + value, 0) / landingRates.length)
       : null;
+    const recentFlightsPreview = flights.slice(0, 3);
+    const needsReplyFlights = flights.filter((item) => Boolean(item?.needReply)).slice(0, 3);
 
     res.json({
       stats: {
@@ -16990,6 +17335,8 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
         hours: Number(pilotApiDashboard?.statistics?.totalHours ?? pilot?.hours ?? pilot?.totalHours ?? 0) || 0,
       },
       upcomingFlights,
+      recentFlightsPreview,
+      needsReplyFlights,
       systemStatus,
       notams: {
         total: serializedNotams.length,
@@ -17730,6 +18077,31 @@ app.get("/api/telegram-bot/config", (req, res) => {
     botSettings: getTelegramBotSettingsStore(),
     ticketConfig: getTicketConfigStore(),
   });
+});
+
+app.post("/api/telegram-bot/link", express.json({ limit: "256kb" }), (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const code = normalizeAdminText(req.body?.code || req.body?.linkCode || "") || null;
+  const actor = req.body?.actor && typeof req.body.actor === "object" ? req.body.actor : {};
+  const result = claimTelegramLinkCode({
+    code,
+    chatId: req.body?.telegramChatId || req.body?.chatId || actor?.chatId,
+    telegramId: actor?.telegramId || actor?.id,
+    username: actor?.username,
+    name: actor?.name,
+  });
+
+  if (!result.ok) {
+    const status = result.code === "telegram_identity_missing" ? 400 : 404;
+    res.status(status).json({ ok: false, error: result.error, code: result.code });
+    return;
+  }
+
+  res.json(result);
 });
 
 app.post("/api/discord-bot/sync/content", express.json({ limit: "1mb" }), async (req, res) => {
@@ -19366,6 +19738,14 @@ app.get("/api/admin/pilots/:id/profile-page", async (req, res) => {
       apiRequest(`/pilots/${pilotId}/notes?sort=-created_at&page[size]=30`).catch(() => ({ data: [] })),
     ]);
 
+    const pilotSnapshot = {
+      ...(rosterPilot && typeof rosterPilot === "object" ? rosterPilot : {}),
+      ...(rawPilot && typeof rawPilot === "object" ? rawPilot : {}),
+      id: pilotId,
+      username: String(rawPilot?.username || rosterPilot?.username || "").trim() || undefined,
+      email: String(rawPilot?.email || rosterPilot?.email || "").trim() || undefined,
+    };
+
     const acceptedStatuses = new Set(["accepted", "auto_accepted", "approved", "completed"]);
     const acceptedPireps = (Array.isArray(pireps) ? pireps : []).filter((item) => acceptedStatuses.has(String(item?.status || "").toLowerCase()));
 
@@ -19445,6 +19825,167 @@ app.get("/api/admin/pilots/:id/profile-page", async (req, res) => {
       pirep: auditEntries.filter((entry) => String(entry?.target?.type || "") === "pirep").slice(0, 12),
     };
 
+    const storedVamsysLink = findStoredVamsysLink({
+      id: String(pilotId),
+      username: pilotSnapshot.username,
+      email: pilotSnapshot.email,
+    });
+    const discordId = String(readDiscordIdFromPilot(pilotSnapshot) || storedVamsysLink?.discordId || "").trim();
+    const discordLink = discordId ? discordLinksCache.get(discordId) || null : null;
+    const discordDisplayName = String(
+      discordLink?.globalName || discordLink?.username || readDiscordUsernameFromPilot(pilotSnapshot) || ""
+    ).trim() || null;
+    const pilotApiConnection = getStoredPilotApiConnectionByPilotId(pilotId);
+    const telegramConnection = getStoredTelegramConnectionByPilotId(pilotId);
+    const telegramBotSettings = getTelegramBotSettingsStore();
+    const pilotApiProfile =
+      pilotApiConnection?.profile && typeof pilotApiConnection.profile === "object"
+        ? pilotApiConnection.profile
+        : null;
+    const pilotApiProfileSyncedAt =
+      Number(pilotApiConnection?.profileSyncedAt || 0) > 0
+        ? new Date(Number(pilotApiConnection.profileSyncedAt)).toISOString()
+        : null;
+    const notificationPreferences = getPilotPreferences(pilotSnapshot);
+    const normalizedNotifications = cloneNotificationSettings(notificationPreferences.notifications);
+    const emailAddress = String(pilotSnapshot?.email || "").trim() || null;
+    const connections = {
+      services: [
+        {
+          key: "email",
+          label: "Email",
+          connected: Boolean(emailAddress),
+          available: true,
+          primary: emailAddress,
+          secondary: emailAddress ? "Primary pilot contact" : "No account email stored",
+          connectedAt: null,
+          updatedAt: null,
+          note: null,
+        },
+        {
+          key: "discord",
+          label: "Discord",
+          connected: Boolean(discordId || discordDisplayName),
+          available: true,
+          primary: discordDisplayName,
+          secondary: discordId ? `ID ${discordId}` : "No linked Discord account",
+          connectedAt: normalizeAdminText(discordLink?.linkedAt || storedVamsysLink?.linkedAt || "") || null,
+          updatedAt: normalizeAdminText(discordLink?.updatedAt || storedVamsysLink?.updatedAt || "") || null,
+          note: storedVamsysLink?.matchType
+            ? `Matched via ${String(storedVamsysLink.matchType).replace(/_/g, " ")}`
+            : null,
+        },
+        {
+          key: "pilotApi",
+          label: "Pilot API",
+          connected: Boolean(pilotApiConnection?.accessToken || pilotApiProfile),
+          available: isPilotApiConfigured(),
+          primary: String(pilotApiProfile?.name || pilotApiProfile?.username || "").trim() || null,
+          secondary:
+            String(pilotApiProfile?.email || pilotApiProfile?.location || "").trim() ||
+            (isPilotApiConfigured() ? "Pilot API account is not connected" : "Pilot API OAuth is not configured"),
+          connectedAt: normalizeAdminText(pilotApiConnection?.connectedAt || "") || null,
+          updatedAt: normalizeAdminText(pilotApiConnection?.updatedAt || pilotApiProfileSyncedAt || "") || null,
+          note: String(pilotApiConnection?.scope || "").trim()
+            ? `Scope: ${String(pilotApiConnection.scope).trim()}`
+            : null,
+        },
+        {
+          key: "telegram",
+          label: "Telegram",
+          connected: Boolean(telegramConnection),
+          available: telegramBotSettings.enabled !== false,
+          primary: String(telegramConnection?.name || telegramConnection?.username || "").trim() || null,
+          secondary:
+            String(telegramConnection?.username || "").trim()
+              ? `@${String(telegramConnection.username).trim().replace(/^@+/, "")}`
+              : telegramConnection?.chatId
+                ? `Chat ID ${telegramConnection.chatId}`
+                : (telegramBotSettings.enabled !== false
+                    ? "Telegram bot is enabled, but this pilot has not linked a chat yet"
+                    : "Telegram bot integration is disabled"),
+          connectedAt: normalizeAdminText(telegramConnection?.linkedAt || "") || null,
+          updatedAt: normalizeAdminText(telegramConnection?.updatedAt || "") || null,
+          note: telegramConnection?.telegramId ? `Telegram ID ${telegramConnection.telegramId}` : null,
+        },
+      ],
+    };
+    const alerts = {
+      updatedAt: notificationPreferences.updatedAt,
+      channels: [
+        {
+          key: "email",
+          label: "Email",
+          enabled: Boolean(normalizedNotifications.channels.email),
+          available: Boolean(emailAddress),
+          detail: emailAddress || "No email address stored",
+        },
+        {
+          key: "discord",
+          label: "Discord",
+          enabled: Boolean(normalizedNotifications.channels.discord),
+          available: Boolean(discordId || discordDisplayName),
+          detail: discordDisplayName || (discordId ? `Discord ID ${discordId}` : "Discord is not linked"),
+        },
+        {
+          key: "telegram",
+          label: "Telegram",
+          enabled: Boolean(normalizedNotifications.channels.telegram),
+          available: Boolean(telegramConnection),
+          detail:
+            String(telegramConnection?.username || "").trim()
+              ? `Linked as @${String(telegramConnection.username).trim().replace(/^@+/, "")}`
+              : telegramConnection?.chatId
+                ? `Linked chat ${telegramConnection.chatId}`
+                : "Telegram is not linked",
+        },
+        {
+          key: "browser",
+          label: "Browser",
+          enabled: Boolean(normalizedNotifications.channels.browser),
+          available: true,
+          detail: "On-site notification center and browser prompts",
+        },
+      ],
+      notificationTypes: [
+        "booking",
+        "claim",
+        "review",
+        "awaitingReview",
+        "accepted",
+        "rejected",
+        "needsReply",
+        "invalidated",
+        "notam",
+        "badge",
+        "event",
+        "system",
+        "test",
+      ].map((key) => ({
+        key,
+        label: String(key)
+          .replace(/([a-z])([A-Z])/g, "$1 $2")
+          .replace(/[_-]+/g, " ")
+          .replace(/\b\w/g, (character) => character.toUpperCase()),
+        enabled: Boolean(normalizedNotifications.notificationTypes?.[key]),
+        forced: key === "review",
+      })),
+      pilotApi: {
+        connected: Boolean(pilotApiConnection?.accessToken || pilotApiProfile),
+        preferredNetwork: String(
+          pilotApiProfile?.preferred_network || pilotApiConnection?.profile?.preferred_network || ""
+        ).trim() || "offline",
+        sbPreferences: Array.isArray(pilotApiProfile?.sb_preferences)
+          ? pilotApiProfile.sb_preferences.map((item) => String(item || "").trim()).filter(Boolean)
+          : Array.isArray(pilotApiConnection?.profile?.sb_preferences)
+            ? pilotApiConnection.profile.sb_preferences.map((item) => String(item || "").trim()).filter(Boolean)
+            : [],
+        useImperialUnits: Boolean(
+          pilotApiProfile?.use_imperial_units ?? pilotApiConnection?.profile?.use_imperial_units ?? false
+        ),
+      },
+    };
+
     res.json({
       profile: {
         id: pilotId,
@@ -19494,6 +20035,8 @@ app.get("/api/admin/pilots/:id/profile-page", async (req, res) => {
       },
       notes,
       audit,
+      connections,
+      alerts,
     });
   } catch (error) {
     res.status(502).json({ error: String(error?.message || "Failed to load admin pilot profile page") });
@@ -20869,7 +21412,16 @@ if (SERVE_STATIC) {
   });
 }
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`vAMSYS proxy listening on port ${PORT}`);
   startUnifiedCatalogSyncScheduler();
+});
+
+server.on("error", (error) => {
+  if (error && typeof error === "object" && error.code === "EADDRINUSE") {
+    console.error(`Failed to start API server: port ${PORT} is already in use.`);
+  } else {
+    console.error("Failed to start API server.", error);
+  }
+  process.exit(1);
 });

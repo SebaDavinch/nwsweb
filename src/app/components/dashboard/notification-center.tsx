@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import {
   Bell,
   BellRing,
@@ -8,6 +9,7 @@ import {
   ClipboardCheck,
   MessageSquareWarning,
   ShieldAlert,
+  Siren,
   Trash2,
   Trophy,
 } from "lucide-react";
@@ -42,6 +44,12 @@ const CATEGORY_META: Record<NotificationCategory, {
     icon: MessageSquareWarning,
     accentClass: "text-amber-600",
     badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+  },
+  reply: {
+    labelKey: "notifications.category.reply",
+    icon: Siren,
+    accentClass: "text-orange-600",
+    badgeClass: "border-orange-200 bg-orange-50 text-orange-700",
   },
   notam: {
     labelKey: "notifications.category.notam",
@@ -87,12 +95,14 @@ const NotificationCard = ({
   item,
   onRead,
   onDelete,
+  onAction,
   t,
   locale,
 }: {
   item: NotificationItem;
   onRead: (notificationId: string) => void;
   onDelete: (notificationId: string) => void;
+  onAction: (item: NotificationItem) => void;
   t: (key: string) => string;
   locale: string;
 }) => {
@@ -124,6 +134,11 @@ const NotificationCard = ({
                     {t("notifications.read")}
                   </Button>
                 ) : null}
+                {item.actionUrl ? (
+                  <Button variant="outline" size="sm" onClick={() => onAction(item)}>
+                    {t(item.actionLabelKey || "notifications.open")}
+                  </Button>
+                ) : null}
                 <Button
                   variant="outline"
                   size="sm"
@@ -144,6 +159,7 @@ const NotificationCard = ({
 
 export function NotificationCenter() {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
   const { t, language } = useLanguage();
   const {
     notifications,
@@ -165,6 +181,16 @@ export function NotificationCenter() {
 
     return Array.from(groups.entries());
   }, [notifications]);
+
+  const handleAction = (item: NotificationItem) => {
+    if (!item.actionUrl) {
+      return;
+    }
+
+    markAsRead(item.id);
+    setOpen(false);
+    navigate(item.actionUrl);
+  };
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -247,6 +273,7 @@ export function NotificationCenter() {
                           item={item}
                           onRead={markAsRead}
                           onDelete={deleteNotification}
+                          onAction={handleAction}
                           t={t}
                           locale={locale}
                         />

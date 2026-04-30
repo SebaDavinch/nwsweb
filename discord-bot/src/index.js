@@ -165,21 +165,30 @@ let notamNotificationTimer = null;
 let badgeNotificationTimer = null;
 
 const ACCEPTED_PIREP_STATUSES = new Set(['accepted', 'auto_accepted', 'approved']);
+const REJECTED_PIREP_STATUSES = new Set(['rejected', 'denied', 'declined', 'failed', 'cancelled']);
+const INVALIDATED_PIREP_STATUSES = new Set(['invalidated', 'invalid', 'void']);
 
 const DEFAULT_NOTIFICATION_SETTINGS = {
   channels: {
     email: true,
     discord: true,
+    telegram: false,
     browser: false,
   },
   notificationTypes: {
     booking: true,
     claim: true,
     review: true,
+    awaitingReview: true,
+    accepted: true,
+    rejected: true,
+    needsReply: true,
+    invalidated: true,
     notam: true,
     event: true,
     system: true,
     badge: true,
+    test: false,
   },
 };
 
@@ -590,8 +599,10 @@ function getPilotPreferences(candidate = {}) {
 
 function setPilotPreferences(candidate = {}, nextNotifications) {
   const store = loadBotAuthStore() || {};
+  const normalizedNotifications = cloneNotificationSettings(nextNotifications);
+  normalizedNotifications.notificationTypes.review = true;
   const nextValue = {
-    notifications: cloneNotificationSettings(nextNotifications),
+    notifications: normalizedNotifications,
     updatedAt: new Date().toISOString(),
   };
   setSharedStoreEntry(store, 'pilotPreferences', candidate, nextValue);
@@ -1920,28 +1931,30 @@ function buildClaimsComponents({ userId } = {}) {
 function buildSettingsEmbed(preferences) {
   const channels = preferences?.notifications?.channels || DEFAULT_NOTIFICATION_SETTINGS.channels;
   const types = preferences?.notifications?.notificationTypes || DEFAULT_NOTIFICATION_SETTINGS.notificationTypes;
+  const channelLines = Object.keys(DEFAULT_NOTIFICATION_SETTINGS.channels).map((key) => {
+    const label = key === 'discord' ? 'Discord DM' : toTitleCaseWords(key);
+    return `${label}: ${channels[key] ? 'On' : 'Off'}`;
+  });
+  const typeLines = Object.keys(DEFAULT_NOTIFICATION_SETTINGS.notificationTypes).map((key) => {
+    const suffix = key === 'review' ? ' (required)' : '';
+    return `${toTitleCaseWords(key)}: ${types[key] ? 'On' : 'Off'}${suffix}`;
+  });
   return new EmbedBuilder()
     .setColor(0x2563eb)
     .setTitle('Notification Settings')
     .addFields(
       {
         name: 'Channels',
-        value: [
-          `Email: ${channels.email ? 'On' : 'Off'}`,
-          `Discord DM: ${channels.discord ? 'On' : 'Off'}`,
-          `Browser: ${channels.browser ? 'On' : 'Off'}`,
-        ].join('\n'),
+        value: channelLines.join('\n'),
         inline: true,
       },
       {
         name: 'Types',
-        value: Object.entries(types)
-          .map(([key, enabled]) => `${toTitleCaseWords(key)}: ${enabled ? 'On' : 'Off'}`)
-          .join('\n'),
+        value: typeLines.join('\n'),
         inline: true,
       }
     )
-    .setFooter({ text: 'Use /settings scope:<channel|type> key:<name> enabled:<true|false> to update.' })
+    .setFooter({ text: 'Use /settings scope:<channel|type> key:<name> enabled:<true|false> to update. Review stays enabled.' })
     .setTimestamp(new Date());
 }
 
@@ -2309,8 +2322,14 @@ function getPirepAlertSettings() {
     awaitingReview: true,
     reviewStarted: true,
     staffComment: true,
+    accepted: true,
+    rejected: true,
+    invalidated: true,
     pilotDmOnReviewStarted: true,
     pilotDmOnStaffComment: true,
+    pilotDmOnAccepted: true,
+    pilotDmOnRejected: true,
+    pilotDmOnInvalidated: true,
     ...(remote && typeof remote === 'object' ? remote : {}),
   };
 }
@@ -3580,7 +3599,23 @@ function isPirepReviewStartedStatus(statusValue) {
 function resolvePirepStatusAlertEvent(previousStatus, nextStatus) {
   const normalizedPrevious = normalizePirepStatus(previousStatus);
   const normalizedNext = normalizePirepStatus(nextStatus);
-  if (!normalizedNext || !isPirepReviewStatus(normalizedNext) || isAcceptedPirepStatus(normalizedNext)) {
+  if (!normalizedNext) {
+    return null;
+  }
+
+  if (isAcceptedPirepStatus(normalizedNext)) {
+    return isAcceptedPirepStatus(normalizedPrevious) ? null : 'accepted';
+  }
+
+  if (isRejectedPirepStatus(normalizedNext)) {
+    return isRejectedPirepStatus(normalizedPrevious) ? null : 'rejected';
+  }
+
+  if (isInvalidatedPirepStatus(normalizedNext)) {
+    return isInvalidatedPirepStatus(normalizedPrevious) ? null : 'invalidated';
+  }
+
+  if (!isPirepReviewStatus(normalizedNext)) {
     return null;
   }
 
@@ -3602,6 +3637,15 @@ function shouldSendPirepStaffAlert(eventKey) {
   }
 
   const alertSettings = getPirepAlertSettings();
+  if (eventKey === 'accepted') {
+    return alertSettings.accepted !== false;
+  }
+  if (eventKey === 'rejected') {
+    return alertSettings.rejected !== false;
+  }
+  if (eventKey === 'invalidated') {
+    return alertSettings.invalidated !== false;
+  }
   if (eventKey === 'reviewStarted') {
     return alertSettings.reviewStarted !== false;
   }
@@ -3618,6 +3662,15 @@ function shouldSendPirepPilotDm(eventKey) {
   }
 
   const alertSettings = getPirepAlertSettings();
+  if (eventKey === 'accepted') {
+    return alertSettings.pilotDmOnAccepted !== false;
+  }
+  if (eventKey === 'rejected') {
+    return alertSettings.pilotDmOnRejected !== false;
+  }
+  if (eventKey === 'invalidated') {
+    return alertSettings.pilotDmOnInvalidated !== false;
+  }
   if (eventKey === 'staffComment') {
     return alertSettings.pilotDmOnStaffComment !== false;
   }
@@ -3631,6 +3684,34 @@ function normalizePirepStatus(statusValue) {
 
 function isAcceptedPirepStatus(statusValue) {
   return ACCEPTED_PIREP_STATUSES.has(normalizePirepStatus(statusValue));
+}
+
+function isRejectedPirepStatus(statusValue) {
+  return REJECTED_PIREP_STATUSES.has(normalizePirepStatus(statusValue));
+}
+
+function isInvalidatedPirepStatus(statusValue) {
+  return INVALIDATED_PIREP_STATUSES.has(normalizePirepStatus(statusValue));
+}
+
+function getPilotNotificationTypeForPirepEvent(eventKey) {
+  if (eventKey === 'reviewStarted') {
+    return 'awaitingReview';
+  }
+  if (eventKey === 'staffComment') {
+    return 'needsReply';
+  }
+  if (eventKey === 'accepted') {
+    return 'accepted';
+  }
+  if (eventKey === 'rejected') {
+    return 'rejected';
+  }
+  if (eventKey === 'invalidated') {
+    return 'invalidated';
+  }
+
+  return 'review';
 }
 
 function getPirepFiledTimestamp(pirep = {}) {
@@ -3963,6 +4044,45 @@ function buildPirepReviewStartedPilotEmbed(pirep, pilotName, departureCode, arri
     .setDescription(`The operations team started reviewing **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}**.`);
 }
 
+function buildPirepAcceptedEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setColor(0x16a34a)
+    .setTitle('PIREP Accepted')
+    .setDescription(`**${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** was accepted.`);
+}
+
+function buildPirepAcceptedPilotEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepAcceptedEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setTitle('Your PIREP Was Accepted')
+    .setDescription(`Your PIREP **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** was accepted.`);
+}
+
+function buildPirepRejectedEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setColor(0xdc2626)
+    .setTitle('PIREP Rejected')
+    .setDescription(`**${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** was rejected.`);
+}
+
+function buildPirepRejectedPilotEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepRejectedEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setTitle('Your PIREP Was Rejected')
+    .setDescription(`Your PIREP **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** was rejected. Open it to review staff notes.`);
+}
+
+function buildPirepInvalidatedEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setColor(0xea580c)
+    .setTitle('PIREP Invalidated')
+    .setDescription(`**${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** was invalidated.`);
+}
+
+function buildPirepInvalidatedPilotEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepInvalidatedEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setTitle('Your PIREP Was Invalidated')
+    .setDescription(`Your PIREP **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** was invalidated. Open it to review the details.`);
+}
+
 function buildPirepStaffCommentEmbed(pirep, pilotName, departureCode, arrivalCode, comment = {}) {
   return buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode)
     .setColor(0x7c3aed)
@@ -4041,7 +4161,31 @@ async function sendPirepReviewNotifications({ channel, pirep, trackedFlight = nu
   let pilotEmbed = buildPirepReviewPilotEmbed(pirep, pilotName, departureCode, arrivalCode);
   let staffContent = 'PIREP Review Required';
 
-  if (eventKey === 'reviewStarted') {
+  if (eventKey === 'accepted') {
+    staffEmbed = buildPirepAcceptedEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
+      name: 'Monitor Source',
+      value: monitorSource,
+      inline: false,
+    });
+    pilotEmbed = buildPirepAcceptedPilotEmbed(pirep, pilotName, departureCode, arrivalCode);
+    staffContent = 'PIREP Accepted';
+  } else if (eventKey === 'rejected') {
+    staffEmbed = buildPirepRejectedEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
+      name: 'Monitor Source',
+      value: monitorSource,
+      inline: false,
+    });
+    pilotEmbed = buildPirepRejectedPilotEmbed(pirep, pilotName, departureCode, arrivalCode);
+    staffContent = 'PIREP Rejected';
+  } else if (eventKey === 'invalidated') {
+    staffEmbed = buildPirepInvalidatedEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
+      name: 'Monitor Source',
+      value: monitorSource,
+      inline: false,
+    });
+    pilotEmbed = buildPirepInvalidatedPilotEmbed(pirep, pilotName, departureCode, arrivalCode);
+    staffContent = 'PIREP Invalidated';
+  } else if (eventKey === 'reviewStarted') {
     staffEmbed = buildPirepReviewStartedEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
       name: 'Monitor Source',
       value: monitorSource,
@@ -4071,7 +4215,11 @@ async function sendPirepReviewNotifications({ channel, pirep, trackedFlight = nu
   }
 
   const preferences = getPilotPreferences(binding).preferences;
-  if (!preferences.notifications.channels.discord || !preferences.notifications.notificationTypes.review) {
+  const notificationTypeKey = getPilotNotificationTypeForPirepEvent(eventKey);
+  if (
+    !preferences.notifications.channels.discord ||
+    preferences.notifications.notificationTypes[notificationTypeKey] === false
+  ) {
     return;
   }
 
@@ -5807,7 +5955,9 @@ client.on('interactionCreate', async (interaction) => {
         } else if (scope === 'type' && Object.prototype.hasOwnProperty.call(nextNotifications.notificationTypes, key)) {
           nextNotifications.notificationTypes[key] = enabled;
         } else {
-          await interaction.editReply('Unknown settings key. Use channel keys: email, discord, browser or type keys: booking, claim, review, notam, badge, event, system.');
+          const channelKeys = Object.keys(DEFAULT_NOTIFICATION_SETTINGS.channels).join(', ');
+          const typeKeys = Object.keys(DEFAULT_NOTIFICATION_SETTINGS.notificationTypes).join(', ');
+          await interaction.editReply(`Unknown settings key. Use channel keys: ${channelKeys} or type keys: ${typeKeys}.`);
           return;
         }
         setPilotPreferences(pilot, nextNotifications);
