@@ -40,6 +40,7 @@ import { PilotFleet } from "./pilot-fleet";
 import { PilotLiveries } from "./pilot-liveries";
 import { PilotAirports } from "./pilot-airports";
 import { PilotPirepDetail } from "./pilot-pirep-detail";
+import { PilotAllFlights } from "./pilot-all-flights";
 
 const normalizeDashboardTab = (value: string) => {
   if (value === "claims") {
@@ -238,7 +239,7 @@ export function PilotDashboard() {
     const discordState = String(params.get("discord") || "").trim();
 
     const normalizedRequestedTab = normalizeDashboardTab(requestedTab);
-    const allowedTabs = new Set(["home", "bookings", "manual-pirep", "notams", "badges", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "pirep", "settings"]);
+    const allowedTabs = new Set(["home", "bookings", "all-flights", "manual-pirep", "notams", "badges", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "pirep", "settings"]);
     if (normalizedRequestedTab && allowedTabs.has(normalizedRequestedTab)) {
       setActiveTab(normalizedRequestedTab);
       setSelectedPirepId(normalizedRequestedTab === "pirep" ? requestedPirepId : null);
@@ -324,6 +325,7 @@ export function PilotDashboard() {
   const navItems = [
     { id: "home", label: t("dashboard.tabs.overview"), icon: Home },
     { id: "bookings", label: "Bookings", icon: Plane },
+    { id: "all-flights", label: t("dashboard.tabs.allFlights"), icon: MapPin },
     { id: "manual-pirep", label: t("dashboard.tabs.claims"), icon: ClipboardCheck },
     { id: "notams", label: t("dashboard.tabs.notams"), icon: ShieldAlert },
     { id: "badges", label: t("dashboard.tabs.badges"), icon: Award },
@@ -859,6 +861,12 @@ export function PilotDashboard() {
             {activeTab === "bookings" && (
               <div className="animate-in fade-in duration-500">
                 <PilotBookings />
+              </div>
+            )}
+
+            {activeTab === "all-flights" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotAllFlights onOpenBookings={() => openDashboardTab("bookings")} />
               </div>
             )}
 

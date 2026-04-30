@@ -143,6 +143,7 @@ export function AdminLayout() {
           { path: "/admin/settings", icon: Settings, label: tr("Настройки", "Settings") },
           { path: "/admin/staff", icon: ShieldCheck, label: "Staff" },
           { path: "/admin/audit-logs", icon: ClipboardList, label: tr("Аудит лог", "Audit Log") },
+          { path: "/admin/auth-logs", icon: LogOut, label: tr("Журнал авторизации", "Auth Log") },
           { path: "/admin/acars", icon: Radio, label: tr("Кэш телеметрии", "Telemetry Cache") },
         ],
       },

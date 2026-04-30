@@ -106,6 +106,13 @@ interface DiscordBotSettings {
     notams: string;
     alerts: string;
   };
+  pirepAlerts: {
+    awaitingReview: boolean;
+    reviewStarted: boolean;
+    staffComment: boolean;
+    pilotDmOnReviewStarted: boolean;
+    pilotDmOnStaffComment: boolean;
+  };
   templates?: Record<string, NotificationTemplate>;
 }
 
@@ -133,6 +140,14 @@ const NOTIFICATION_FIELDS: Array<{ key: keyof DiscordBotSettings["notifications"
   { key: "newsCreated", label: "News Created", description: "Website news published." },
   { key: "notamCreated", label: "NOTAM Created", description: "NOTAM created or updated." },
   { key: "alertCreated", label: "Alert Created", description: "Alert created or updated." },
+];
+
+const PIREP_ALERT_FIELDS: Array<{ key: keyof DiscordBotSettings["pirepAlerts"]; label: string; description: string }> = [
+  { key: "awaitingReview", label: "Awaiting Review Alert", description: "Send staff alert when a new PIREP enters the review queue." },
+  { key: "reviewStarted", label: "In Review Alert", description: "Send staff alert when a PIREP moves from awaiting to in-review state." },
+  { key: "staffComment", label: "Staff Comment Alert", description: "Send staff alert when a new website staff comment is added to a PIREP." },
+  { key: "pilotDmOnReviewStarted", label: "Pilot DM: Review Started", description: "DM the pilot when staff move the PIREP into review." },
+  { key: "pilotDmOnStaffComment", label: "Pilot DM: Staff Comment", description: "DM the pilot when staff leave a comment on the PIREP." },
 ];
 
 export function AdminDiscordBot() {
@@ -192,6 +207,12 @@ export function AdminDiscordBot() {
 
   const updateChannel = (key: keyof DiscordBotSettings["channels"], value: string) => {
     setSettings((prev) => (prev ? { ...prev, channels: { ...prev.channels, [key]: value } } : prev));
+  };
+
+  const updatePirepAlert = (key: keyof DiscordBotSettings["pirepAlerts"], value: boolean) => {
+    setSettings((prev) =>
+      prev ? { ...prev, pirepAlerts: { ...prev.pirepAlerts, [key]: value } } : prev
+    );
   };
 
   const updateTemplate = (templateId: string, patch: Partial<NotificationTemplate>) => {
@@ -436,6 +457,31 @@ export function AdminDiscordBot() {
                   />
                 </div>
               ))}
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">PIREP review workflow</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Uses the configured PIREP Review channel for staff alerts and pilot direct messages for review-state updates.
+              </div>
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {PIREP_ALERT_FIELDS.map((item) => (
+                  <div key={item.key} className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                    <div className="pr-4">
+                      <div className="font-medium text-gray-900">{item.label}</div>
+                      <div className="text-xs text-gray-500">{item.description}</div>
+                    </div>
+                    <Switch
+                      checked={Boolean(settings.pirepAlerts?.[item.key])}
+                      onCheckedChange={(checked) => updatePirepAlert(item.key, Boolean(checked))}
+                    />
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

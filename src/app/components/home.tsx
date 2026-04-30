@@ -20,6 +20,16 @@ export function Home() {
     aircraftTotal?: number | null;
     flightHours?: number | null;
   } | null>(null);
+  const [discordCommunity, setDiscordCommunity] = useState<{
+    configured?: boolean;
+    guildId?: string | null;
+    inviteUrl?: string | null;
+    widgetUrl?: string | null;
+    guild?: {
+      name?: string | null;
+      approximateMemberCount?: number | null;
+    } | null;
+  } | null>(null);
 
   useEffect(() => {
     const loadSummary = async () => {
@@ -38,6 +48,24 @@ export function Home() {
     };
 
     loadSummary();
+  }, []);
+
+  useEffect(() => {
+    const loadDiscordCommunity = async () => {
+      try {
+        const response = await fetch("/api/public/discord-widget");
+        if (!response.ok) {
+          setDiscordCommunity(null);
+          return;
+        }
+        const payload = await response.json();
+        setDiscordCommunity(payload || null);
+      } catch {
+        setDiscordCommunity(null);
+      }
+    };
+
+    loadDiscordCommunity();
   }, []);
 
   const formatValue = (value: number | null | undefined, suffix = "") => {
@@ -205,28 +233,44 @@ export function Home() {
                         {t("home.discord.subtitle") || "Connect with other pilots, share your experiences, and get support in our active Discord server."}
                     </p>
                     <a 
-                        href="https://discord.gg/nordwind" 
+                        href={discordCommunity?.inviteUrl || "https://discord.gg/nordwind"} 
                         target="_blank" 
                         rel="noreferrer"
                         className="inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md text-white bg-[#5865F2] hover:bg-[#4752c4] transition-colors"
                     >
                         <Users className="w-5 h-5 mr-2" />
-                        Join Discord Server
+                        {t("home.discord.button") || "Join Discord Server"}
                     </a>
                 </div>
                 <div className="w-full md:w-[400px]">
-                    <iframe 
-                        src="https://discord.com/widget?id=YOUR_SERVER_ID&theme=light" 
-                        width="100%" 
-                        height="300" 
-                        allowTransparency={true} 
-                        sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-                        className="rounded-xl shadow-lg border-0 bg-white"
-                        title="Nordwind Virtual Discord"
-                    />
-                     <p className="text-xs text-center text-gray-400 mt-2">
-                        Замените <code>YOUR_SERVER_ID</code> в коде на ID вашего сервера
-                    </p>
+                    {discordCommunity?.widgetUrl ? (
+                      <iframe 
+                          src={discordCommunity.widgetUrl}
+                          width="100%" 
+                          height="300" 
+                          allowTransparency={true} 
+                          sandbox="allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                          className="rounded-xl shadow-lg border-0 bg-white"
+                          title={discordCommunity?.guild?.name || "Nordwind Virtual Discord"}
+                      />
+                    ) : (
+                      <Card className="rounded-xl shadow-lg border-0 bg-white">
+                        <CardContent className="flex min-h-[300px] flex-col items-center justify-center gap-3 p-6 text-center">
+                          <Users className="h-10 w-10 text-[#5865F2]" />
+                          <div className="text-lg font-semibold text-[#2A2A2A]">
+                            {t("home.discord.cardTitle") || "Discord community"}
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            {t("home.discord.unavailable") || "The Discord widget is temporarily unavailable, but the invite link is active."}
+                          </p>
+                        </CardContent>
+                      </Card>
+                    )}
+                    {discordCommunity?.guild?.approximateMemberCount ? (
+                      <p className="mt-2 text-center text-xs text-gray-400">
+                        {discordCommunity.guild.approximateMemberCount.toLocaleString()} {t("home.discord.members") || "members"}
+                      </p>
+                    ) : null}
                 </div>
             </div>
         </div>

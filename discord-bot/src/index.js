@@ -115,6 +115,8 @@ const NOTAM_VIEW_PREFIX = 'notam:view:';
 const NOTAM_READ_PREFIX = 'notam:read:';
 const CLAIM_SUBMIT_BUTTON_PREFIX = 'claims:submit:';
 const CLAIM_SUBMIT_MODAL_ID = 'claims:submit';
+const PIREP_COMMENT_BUTTON_PREFIX = 'pirep:comment:';
+const PIREP_COMMENT_MODAL_PREFIX = 'pirep:comment-modal:';
 
 const TOKEN_URL = String(process.env.VAMSYS_TOKEN_URL || process.env.TOKEN_URL || 'https://vamsys.io/oauth/token').trim();
 const OPERATIONS_BASE = String(process.env.VAMSYS_API_BASE || process.env.API_BASE || 'https://vamsys.io/api/v3/operations').trim();
@@ -150,12 +152,14 @@ let liveFeedMessageId = null;
 let liveFeedTimer = null;
 let remoteConfigTimer = null;
 let syncedAdminRoleIds = [...fallbackAdminRoleIds];
+let syncedDiscordBotSettings = null;
 let pilotStatusTimer = null;
 let pirepReviewTimer = null;
 let pirepReviewInitialized = false;
 const pirepReviewSeen = new Map();
 const pirepReviewActiveFlights = new Map();
 const pirepReviewPendingFlights = new Map();
+const pirepReviewCommentState = new Map();
 let pirepReviewPollInFlight = false;
 let notamNotificationTimer = null;
 let badgeNotificationTimer = null;
@@ -2293,6 +2297,29 @@ function getEffectiveAdminRoleIds() {
     : fallbackAdminRoleIds;
 }
 
+function getSyncedDiscordBotSettings() {
+  return syncedDiscordBotSettings && typeof syncedDiscordBotSettings === 'object'
+    ? syncedDiscordBotSettings
+    : null;
+}
+
+function getPirepAlertSettings() {
+  const remote = getSyncedDiscordBotSettings()?.pirepAlerts;
+  return {
+    awaitingReview: true,
+    reviewStarted: true,
+    staffComment: true,
+    pilotDmOnReviewStarted: true,
+    pilotDmOnStaffComment: true,
+    ...(remote && typeof remote === 'object' ? remote : {}),
+  };
+}
+
+function getConfiguredPirepReviewChannelId() {
+  const remoteChannelId = String(getSyncedDiscordBotSettings()?.channels?.pirepReview || '').trim();
+  return remoteChannelId || String(pirepReviewChannelId || '').trim();
+}
+
 async function refreshRemoteBotConfig() {
   const botToken = String(process.env.DISCORD_BOT_CONFIG_TOKEN || '').trim();
   if (!botToken) {
@@ -2310,6 +2337,9 @@ async function refreshRemoteBotConfig() {
   }
 
   const payload = await response.json().catch(() => ({}));
+  syncedDiscordBotSettings = payload?.botSettings && typeof payload.botSettings === 'object'
+    ? payload.botSettings
+    : null;
   const configuredAdminRoleIds = Array.isArray(payload?.botSettings?.adminRoleIds)
     ? payload.botSettings.adminRoleIds
         .map((item) => String(item || '').trim())
@@ -3542,6 +3572,59 @@ function isPirepReviewStatus(statusValue) {
   );
 }
 
+function isPirepReviewStartedStatus(statusValue) {
+  const status = normalizePirepStatus(statusValue);
+  return status === 'in_review' || status === 'under_review';
+}
+
+function resolvePirepStatusAlertEvent(previousStatus, nextStatus) {
+  const normalizedPrevious = normalizePirepStatus(previousStatus);
+  const normalizedNext = normalizePirepStatus(nextStatus);
+  if (!normalizedNext || !isPirepReviewStatus(normalizedNext) || isAcceptedPirepStatus(normalizedNext)) {
+    return null;
+  }
+
+  if (!isPirepReviewStartedStatus(normalizedPrevious) && isPirepReviewStartedStatus(normalizedNext)) {
+    return 'reviewStarted';
+  }
+
+  if (!normalizedPrevious || isAcceptedPirepStatus(normalizedPrevious) || !isPirepReviewStatus(normalizedPrevious)) {
+    return 'awaitingReview';
+  }
+
+  return null;
+}
+
+function shouldSendPirepStaffAlert(eventKey) {
+  const settings = getSyncedDiscordBotSettings();
+  if (settings?.notifications?.pirepReview === false) {
+    return false;
+  }
+
+  const alertSettings = getPirepAlertSettings();
+  if (eventKey === 'reviewStarted') {
+    return alertSettings.reviewStarted !== false;
+  }
+  if (eventKey === 'staffComment') {
+    return alertSettings.staffComment !== false;
+  }
+
+  return alertSettings.awaitingReview !== false;
+}
+
+function shouldSendPirepPilotDm(eventKey) {
+  if (eventKey === 'awaitingReview') {
+    return false;
+  }
+
+  const alertSettings = getPirepAlertSettings();
+  if (eventKey === 'staffComment') {
+    return alertSettings.pilotDmOnStaffComment !== false;
+  }
+
+  return alertSettings.pilotDmOnReviewStarted !== false;
+}
+
 function normalizePirepStatus(statusValue) {
   return String(statusValue || '').trim().toLowerCase();
 }
@@ -3715,6 +3798,106 @@ function resolvePirepReviewUrl(pirep) {
   return `${pirepWebBaseUrl}/${pirep.id}`;
 }
 
+function extractPirepComments(pirep = {}) {
+  const candidates = [
+    pirep?.comments,
+    pirep?.data?.comments,
+    pirep?.attributes?.comments,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter((item) => item && typeof item === 'object');
+    }
+  }
+
+  return [];
+}
+
+function getPirepCommentText(comment = {}) {
+  return String(comment?.comment || comment?.content || comment?.message || comment?.body || '').trim();
+}
+
+function getPirepCommentAuthorName(comment = {}) {
+  return String(
+    comment?.commenter_name ||
+      comment?.commenterName ||
+      comment?.author_name ||
+      comment?.authorName ||
+      comment?.user_name ||
+      comment?.username ||
+      ''
+  )
+    .trim();
+}
+
+function getPirepCommentSignature(comment = {}) {
+  const commentId = Number(
+    comment?.id || comment?.comment_id || comment?.commentId || comment?.author_comment_id || 0
+  ) || 0;
+  const createdAt = String(comment?.created_at || comment?.createdAt || comment?.updated_at || comment?.updatedAt || '').trim();
+  const text = getPirepCommentText(comment).slice(0, 120);
+  return `${commentId || createdAt || 'comment'}:${text}`;
+}
+
+function isStaffPirepComment(comment = {}, pirep = {}, trackedFlight = null) {
+  const pilotId = Number(pirep?.pilot_id || pirep?.pilot?.id || trackedFlight?.pilotId || 0) || 0;
+  const commenterId = Number(
+    comment?.commenter_id || comment?.commenterId || comment?.user_id || comment?.userId || comment?.author_id || comment?.authorId || 0
+  ) || 0;
+
+  if (pilotId > 0 && commenterId > 0) {
+    return pilotId !== commenterId;
+  }
+
+  const pilotNames = new Set(
+    [
+      pirep?.pilot?.name,
+      pirep?.pilot?.username,
+      pirep?.pilot_name,
+      pirep?.pilot_username,
+      trackedFlight?.pilotName,
+      trackedFlight?.pilotUsername,
+    ]
+      .map((value) => String(value || '').trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const authorName = getPirepCommentAuthorName(comment).toLowerCase();
+  if (!authorName) {
+    return true;
+  }
+
+  return !pilotNames.has(authorName);
+}
+
+function getLatestStaffPirepComment(pirep = {}, trackedFlight = null) {
+  const comments = extractPirepComments(pirep)
+    .filter((comment) => getPirepCommentText(comment))
+    .filter((comment) => isStaffPirepComment(comment, pirep, trackedFlight))
+    .sort((left, right) => {
+      const rightTime = Date.parse(String(right?.created_at || right?.createdAt || right?.updated_at || right?.updatedAt || '')) || 0;
+      const leftTime = Date.parse(String(left?.created_at || left?.createdAt || left?.updated_at || left?.updatedAt || '')) || 0;
+      if (rightTime !== leftTime) {
+        return rightTime - leftTime;
+      }
+      return (Number(right?.id || 0) || 0) - (Number(left?.id || 0) || 0);
+    });
+
+  return comments[0] || null;
+}
+
+function rememberPirepCommentState(pirep = {}, trackedFlight = null) {
+  if (!pirep?.id) {
+    return;
+  }
+
+  const latestComment = getLatestStaffPirepComment(pirep, trackedFlight);
+  pirepReviewCommentState.set(String(pirep.id), {
+    signature: latestComment ? getPirepCommentSignature(latestComment) : '',
+    updatedAt: String(pirep?.updated_at || pirep?.submitted_at || pirep?.created_at || '').trim() || null,
+  });
+}
+
 function buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode) {
   const callsign = pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`;
   const route = `${departureCode} → ${arrivalCode}`;
@@ -3767,6 +3950,60 @@ function buildPirepReviewPilotEmbed(pirep, pilotName, departureCode, arrivalCode
   return embed;
 }
 
+function buildPirepReviewStartedEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setColor(0x2563eb)
+    .setTitle('PIREP Review Started')
+    .setDescription(`Staff moved **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}** into active review.`);
+}
+
+function buildPirepReviewStartedPilotEmbed(pirep, pilotName, departureCode, arrivalCode) {
+  return buildPirepReviewStartedEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setTitle('Your PIREP Is Under Review')
+    .setDescription(`The operations team started reviewing **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}**.`);
+}
+
+function buildPirepStaffCommentEmbed(pirep, pilotName, departureCode, arrivalCode, comment = {}) {
+  return buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode)
+    .setColor(0x7c3aed)
+    .setTitle('New Staff Comment On PIREP')
+    .setDescription(`A staff comment was added to **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}**.`)
+    .addFields({
+      name: getPirepCommentAuthorName(comment) || 'Staff comment',
+      value: getPirepCommentText(comment).slice(0, 1024) || 'Comment added',
+      inline: false,
+    });
+}
+
+function buildPirepPilotCommentEmbed(pirep, pilotName, departureCode, arrivalCode, comment = {}) {
+  return buildPirepStaffCommentEmbed(pirep, pilotName, departureCode, arrivalCode, comment)
+    .setTitle('New Comment On Your PIREP')
+    .setDescription(`The operations team left a comment on **${pirep.callsign || pirep.flight_number || `PIREP ${pirep.id}`}**.`);
+}
+
+function buildPirepDmComponents(pirep, discordUserId) {
+  const reviewUrl = resolvePirepReviewUrl(pirep);
+  const row = new ActionRowBuilder();
+
+  row.addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${PIREP_COMMENT_BUTTON_PREFIX}${pirep.id}:${discordUserId}`)
+      .setLabel('Add comment')
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  if (reviewUrl) {
+    row.addComponents(
+      new ButtonBuilder()
+        .setLabel('Open PIREP')
+        .setStyle(ButtonStyle.Link)
+        .setURL(reviewUrl)
+    );
+  }
+
+  return [row];
+}
+
 function buildPirepCandidateFromPayload(pirep = {}, trackedFlight = null) {
   return {
     id: Number(pirep?.pilot_id || pirep?.pilot?.id || trackedFlight?.pilotId || 0) || 0,
@@ -3778,7 +4015,7 @@ function buildPirepCandidateFromPayload(pirep = {}, trackedFlight = null) {
   };
 }
 
-async function sendPirepReviewNotifications({ channel, pirep, trackedFlight = null, source = 'recent-feed' } = {}) {
+async function sendPirepReviewNotifications({ channel, pirep, trackedFlight = null, source = 'recent-feed', eventKey = 'awaitingReview', comment = null } = {}) {
   if (!pirep?.id) {
     return;
   }
@@ -3796,14 +4033,34 @@ async function sendPirepReviewNotifications({ channel, pirep, trackedFlight = nu
     source === 'flight-end'
       ? 'Detected after the live flight disappeared from the active flights feed.'
       : 'Detected from the recent PIREP submission feed.';
-  const staffEmbed = buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
+  let staffEmbed = buildPirepReviewEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
     name: 'Monitor Source',
     value: monitorSource,
     inline: false,
   });
+  let pilotEmbed = buildPirepReviewPilotEmbed(pirep, pilotName, departureCode, arrivalCode);
+  let staffContent = 'PIREP Review Required';
 
-  if (channel?.isTextBased()) {
-    await channel.send({ content: 'PIREP Review Required', embeds: [staffEmbed] });
+  if (eventKey === 'reviewStarted') {
+    staffEmbed = buildPirepReviewStartedEmbed(pirep, pilotName, departureCode, arrivalCode).addFields({
+      name: 'Monitor Source',
+      value: monitorSource,
+      inline: false,
+    });
+    pilotEmbed = buildPirepReviewStartedPilotEmbed(pirep, pilotName, departureCode, arrivalCode);
+    staffContent = 'PIREP Review Started';
+  } else if (eventKey === 'staffComment' && comment) {
+    staffEmbed = buildPirepStaffCommentEmbed(pirep, pilotName, departureCode, arrivalCode, comment).addFields({
+      name: 'Monitor Source',
+      value: monitorSource,
+      inline: false,
+    });
+    pilotEmbed = buildPirepPilotCommentEmbed(pirep, pilotName, departureCode, arrivalCode, comment);
+    staffContent = 'PIREP Staff Comment';
+  }
+
+  if (channel?.isTextBased() && shouldSendPirepStaffAlert(eventKey)) {
+    await channel.send({ content: staffContent, embeds: [staffEmbed] });
   }
 
   const candidate = buildPirepCandidateFromPayload(pirep, trackedFlight);
@@ -3818,18 +4075,24 @@ async function sendPirepReviewNotifications({ channel, pirep, trackedFlight = nu
     return;
   }
 
+  if (!shouldSendPirepPilotDm(eventKey)) {
+    return;
+  }
+
   const user = await client.users.fetch(discordUserId).catch(() => null);
   if (!user) {
     return;
   }
 
   await user.send({
-    embeds: [buildPirepReviewPilotEmbed(pirep, pilotName, departureCode, arrivalCode)],
+    embeds: [pilotEmbed],
+    components: buildPirepDmComponents(pirep, discordUserId),
   }).catch(() => null);
 }
 
 async function notifyPirepReviewStatus() {
-  if (!pirepReviewChannelId) {
+  const configuredPirepReviewChannelId = getConfiguredPirepReviewChannelId();
+  if (!configuredPirepReviewChannelId) {
     return;
   }
   if (!client.isReady()) {
@@ -3845,7 +4108,7 @@ async function notifyPirepReviewStatus() {
   pirepReviewPollInFlight = true;
 
   try {
-    const channel = await client.channels.fetch(pirepReviewChannelId);
+    const channel = await client.channels.fetch(configuredPirepReviewChannelId);
     if (!channel || !channel.isTextBased()) {
       return;
     }
@@ -3869,6 +4132,7 @@ async function notifyPirepReviewStatus() {
       pireps.forEach((item) => {
         if (item?.id) {
           pirepReviewSeen.set(String(item.id), normalizePirepStatus(item.status));
+          rememberPirepCommentState(item);
         }
       });
       pirepReviewInitialized = true;
@@ -3878,6 +4142,7 @@ async function notifyPirepReviewStatus() {
     if (pirepReviewSeen.size > 2000) {
       const keys = Array.from(pirepReviewSeen.keys()).slice(0, 1000);
       keys.forEach((key) => pirepReviewSeen.delete(key));
+      keys.forEach((key) => pirepReviewCommentState.delete(key));
     }
 
     const now = Date.now();
@@ -3914,17 +4179,20 @@ async function notifyPirepReviewStatus() {
       const pirepKey = String(detailedPirep.id);
       const previousStatus = pirepReviewSeen.get(pirepKey);
       const normalizedStatus = normalizePirepStatus(detailedPirep.status);
+      const alertEvent = resolvePirepStatusAlertEvent(previousStatus, normalizedStatus);
 
-      if (shouldAlertForPirepStatus(previousStatus, normalizedStatus)) {
+      if (alertEvent) {
         await sendPirepReviewNotifications({
           channel,
           pirep: detailedPirep,
           trackedFlight,
           source: 'flight-end',
+          eventKey: alertEvent,
         });
       }
 
       pirepReviewSeen.set(pirepKey, normalizedStatus);
+      rememberPirepCommentState(detailedPirep, trackedFlight);
       pirepReviewPendingFlights.delete(key);
     }
 
@@ -3936,21 +4204,56 @@ async function notifyPirepReviewStatus() {
       const key = String(pirep.id);
       const normalizedStatus = normalizePirepStatus(pirep.status);
       const previousStatus = pirepReviewSeen.get(key);
+      const alertEvent = resolvePirepStatusAlertEvent(previousStatus, normalizedStatus);
+      let detailedPirep = null;
+
       if (previousStatus === normalizedStatus) {
+        const previousCommentState = pirepReviewCommentState.get(key) || null;
+        const payloadUpdatedAt = String(pirep?.updated_at || pirep?.submitted_at || pirep?.created_at || '').trim() || null;
+        const shouldRefreshComments =
+          isPirepReviewStatus(normalizedStatus) &&
+          (!previousCommentState || (payloadUpdatedAt && payloadUpdatedAt !== previousCommentState.updatedAt));
+
+        if (!shouldRefreshComments) {
+          continue;
+        }
+
+        detailedPirep = (await loadPirepDetails(pirep.id).catch(() => null)) || pirep;
+        const latestStaffComment = getLatestStaffPirepComment(detailedPirep);
+        const nextSignature = latestStaffComment ? getPirepCommentSignature(latestStaffComment) : '';
+        if (
+          latestStaffComment &&
+          previousCommentState &&
+          previousCommentState.signature &&
+          nextSignature !== previousCommentState.signature
+        ) {
+          await sendPirepReviewNotifications({
+            channel,
+            pirep: detailedPirep,
+            trackedFlight: null,
+            source: 'recent-feed',
+            eventKey: 'staffComment',
+            comment: latestStaffComment,
+          });
+        }
+
+        rememberPirepCommentState(detailedPirep);
         continue;
       }
 
-      if (shouldAlertForPirepStatus(previousStatus, normalizedStatus)) {
-        const detailedPirep = (await loadPirepDetails(pirep.id).catch(() => null)) || pirep;
+      if (alertEvent) {
+        detailedPirep = (await loadPirepDetails(pirep.id).catch(() => null)) || pirep;
         await sendPirepReviewNotifications({
           channel,
           pirep: detailedPirep,
           trackedFlight: null,
           source: 'recent-feed',
+          eventKey: alertEvent,
         });
       }
 
       pirepReviewSeen.set(key, normalizedStatus);
+      rememberPirepCommentState(detailedPirep || pirep);
     }
   } catch (error) {
     console.error('PIREP review notifier failed:', error?.message || error);
@@ -4021,6 +4324,60 @@ client.once('clientReady', () => {
 
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isModalSubmit()) {
+    if (interaction.customId.startsWith(PIREP_COMMENT_MODAL_PREFIX)) {
+      const ownerId = extractOwnerIdFromCustomId(interaction.customId);
+      if (ownerId && ownerId !== interaction.user.id) {
+        await interaction.reply({
+          content: 'This control belongs to another user.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const parts = interaction.customId.split(':');
+      const pirepId = Number(parts[3] || 0) || 0;
+      const content = interaction.fields.getTextInputValue('pirep-comment-content').trim();
+      if (pirepId <= 0) {
+        await interaction.reply({
+          content: 'PIREP ID is missing.',
+          ephemeral: true,
+        });
+        return;
+      }
+      if (!content) {
+        await interaction.reply({
+          content: 'Comment content is required.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      try {
+        const pilot = await resolvePilotForInteraction(interaction);
+        if (!pilot) {
+          throw new Error('Pilot profile not found. Link your Discord account in vAMSYS first.');
+        }
+
+        await executePilotApiRequest({
+          candidate: pilot,
+          path: `/pireps/${encodeURIComponent(String(pirepId))}/comments`,
+          method: 'POST',
+          body: { content },
+        });
+
+        await interaction.reply({
+          content: `Comment added to PIREP #${pirepId}.`,
+          ephemeral: true,
+        });
+      } catch (error) {
+        await interaction.reply({
+          content: String(error?.message || 'Failed to add a PIREP comment.'),
+          ephemeral: true,
+        });
+      }
+      return;
+    }
+
     if (interaction.customId === CLAIM_SUBMIT_MODAL_ID) {
       const pilot = await resolvePilotForInteraction(interaction).catch(() => null);
       if (!pilot) {
@@ -4592,6 +4949,38 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.isButton()) {
+    if (interaction.customId.startsWith(PIREP_COMMENT_BUTTON_PREFIX)) {
+      if (!(await ensureInteractionOwner(interaction))) {
+        return;
+      }
+
+      const parts = interaction.customId.split(':');
+      const pirepId = Number(parts[2] || 0) || 0;
+      if (pirepId <= 0) {
+        await interaction.reply({
+          content: 'PIREP ID is missing.',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const modal = new ModalBuilder()
+        .setCustomId(`${PIREP_COMMENT_MODAL_PREFIX}${pirepId}:${interaction.user.id}`)
+        .setTitle(`Comment on PIREP #${pirepId}`);
+
+      const commentInput = new TextInputBuilder()
+        .setCustomId('pirep-comment-content')
+        .setLabel('Comment')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true)
+        .setMaxLength(2000)
+        .setPlaceholder('Write your reply for the operations team');
+
+      modal.addComponents(new ActionRowBuilder().addComponents(commentInput));
+      await interaction.showModal(modal);
+      return;
+    }
+
     if (interaction.customId.startsWith(CLAIM_SUBMIT_BUTTON_PREFIX)) {
       if (!(await ensureInteractionOwner(interaction))) {
         return;
@@ -4645,6 +5034,8 @@ client.on('interactionCreate', async (interaction) => {
       );
 
       await interaction.showModal(modal);
+      return;
+    }
 
     if (interaction.customId.startsWith(BOOKING_MENU_PREFIX)) {
       if (!(await ensureInteractionOwner(interaction))) {
@@ -4702,9 +5093,6 @@ client.on('interactionCreate', async (interaction) => {
       }
       return;
     }
-      return;
-    }
-
     if (interaction.customId.startsWith(NOTAM_READ_PREFIX)) {
       if (!(await ensureInteractionOwner(interaction))) {
         return;

@@ -34,6 +34,7 @@ import { AdminTickets } from "./components/admin/admin-tickets";
 import { AdminDiscordBot } from "./components/admin/admin-discord-bot";
 import { AdminTelegramBot } from "./components/admin/admin-telegram-bot";
 import { AdminAuditLogs } from "./components/admin/admin-audit-logs";
+import { AdminAuthLogs } from "./components/admin/admin-auth-logs";
 
 export const router = createBrowserRouter([
   {
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
       { path: "badges", Component: AdminBadges },
       { path: "activities", Component: AdminActivities },
       { path: "audit-logs", Component: AdminAuditLogs },
+      { path: "auth-logs", Component: AdminAuthLogs },
       { path: "bookings", Component: AdminBookingsManagement },
       { path: "routes", Component: AdminRoutesManagement },
       { path: "pireps", Component: AdminPireps },

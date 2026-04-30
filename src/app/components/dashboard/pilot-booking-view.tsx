@@ -212,6 +212,7 @@ export function PilotBookingView() {
 
   const [booking, setBooking] = useState<Booking | null>(null);
   const [route, setRoute] = useState<RouteOption | null>(null);
+  const [isReportingRoute, setIsReportingRoute] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDispatching, setIsDispatching] = useState(false);
   const [isUpdatingNetwork, setIsUpdatingNetwork] = useState(false);
@@ -473,6 +474,46 @@ export function PilotBookingView() {
     }
   };
 
+  const handleReportOutdatedRoute = async () => {
+    const routeId = Number(booking?.routeId || 0) || 0;
+    if (routeId <= 0) {
+      toast.error(t("bookings.toast.reportInactiveError"));
+      return;
+    }
+
+    setIsReportingRoute(true);
+    try {
+      const response = await fetch(`/api/pilot/routes/${routeId}/report-outdated`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        duplicate?: boolean;
+        ticket?: { number?: number } | null;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || t("bookings.toast.reportInactiveError"));
+      }
+
+      if (payload.duplicate) {
+        toast.success(
+          t("bookings.toast.reportInactiveDuplicate").replace("{{ticket}}", String(payload?.ticket?.number || "#"))
+        );
+      } else {
+        toast.success(
+          t("bookings.toast.reportInactiveSuccess").replace("{{ticket}}", String(payload?.ticket?.number || "#"))
+        );
+      }
+    } catch (error) {
+      toast.error(String(error || t("bookings.toast.reportInactiveError")));
+    } finally {
+      setIsReportingRoute(false);
+    }
+  };
+
   const openSimbrief = async () => {
     if (!booking) {
       return;
@@ -649,6 +690,16 @@ export function PilotBookingView() {
                 </div>
 
                 <Button
+                                    variant="outline"
+                                    className="w-full justify-start border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                    onClick={handleReportOutdatedRoute}
+                                    disabled={isReportingRoute || !booking.routeId}
+                                  >
+                                    {isReportingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
+                                    {t("bookings.reportInactive")}
+                                  </Button>
+
+                                  <Button
                   variant="outline"
                   className="w-full justify-start"
                   onClick={() => window.open(`https://map.vatsim.net/?search=${encodeURIComponent(booking.callsign || booking.flightNumber)}`, "_blank", "noopener,noreferrer")}

@@ -11,6 +11,7 @@ import {
   Plane,
   RefreshCcw,
   Trash2,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLanguage } from "../../context/language-context";
@@ -423,6 +424,7 @@ export function PilotBookings() {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [dispatchingBookingId, setDispatchingBookingId] = useState<number | null>(null);
   const [cancelBookingId, setCancelBookingId] = useState<number | null>(null);
+  const [reportingRouteId, setReportingRouteId] = useState<number | null>(null);
   const [connectionMessage, setConnectionMessage] = useState("");
   const [bookingGateMessage, setBookingGateMessage] = useState("");
   const [pilotLocationCode, setPilotLocationCode] = useState("");
@@ -1147,6 +1149,49 @@ export function PilotBookings() {
     }
   };
 
+  const handleReportOutdatedRoute = async (route: RouteOption) => {
+    const routeId = Number(route.id || 0) || 0;
+    if (routeId <= 0) {
+      toast.error(t("bookings.toast.reportInactiveError"));
+      return;
+    }
+
+    setReportingRouteId(routeId);
+    try {
+      const response = await fetch(`/api/pilot/routes/${routeId}/report-outdated`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        ok?: boolean;
+        duplicate?: boolean;
+        ticket?: { number?: number } | null;
+        error?: string;
+      } | null;
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error || t("bookings.toast.reportInactiveError"));
+      }
+
+      if (payload.duplicate) {
+        toast.success(tr("bookings.toast.reportInactiveDuplicate", { ticket: payload?.ticket?.number || "#" }));
+      } else {
+        toast.success(tr("bookings.toast.reportInactiveSuccess", { ticket: payload?.ticket?.number || "#" }));
+        addNotification({
+          category: "system",
+          title: t("bookings.notification.reportTitle"),
+          description: tr("bookings.notification.reportDescription", {
+            flight: route.flightNumber || route.callsign || `Route ${routeId}`,
+          }),
+        });
+      }
+    } catch (error) {
+      toast.error(String(error || t("bookings.toast.reportInactiveError")));
+    } finally {
+      setReportingRouteId(null);
+    }
+  };
+
   const handleCancelBooking = async () => {
     if (!cancelBookingId) {
       return;
@@ -1393,6 +1438,24 @@ export function PilotBookings() {
                       {selectedRoute.routeText}
                     </div>
                   ) : null}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="border-amber-400/30 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20 hover:text-white"
+                      disabled={reportingRouteId === selectedRoute.id}
+                      onClick={() => void handleReportOutdatedRoute(selectedRoute)}
+                    >
+                      {reportingRouteId === selectedRoute.id ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <AlertTriangle className="mr-2 h-4 w-4" />
+                      )}
+                      {t("bookings.reportInactive")}
+                    </Button>
+                  </div>
+                  <div className="mt-2 text-xs text-slate-400">{t("bookings.reportInactiveHint")}</div>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-sm text-slate-300">
