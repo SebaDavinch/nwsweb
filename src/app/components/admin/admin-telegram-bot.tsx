@@ -49,7 +49,7 @@ const SYNC_FIELDS: Array<{ key: keyof TelegramBotSettings["sync"]; label: string
   { key: "tickets", label: "Tickets", description: "Allow Telegram bot to create and update tickets." },
   { key: "news", label: "News", description: "Allow Telegram bot to publish website news." },
   { key: "notams", label: "NOTAMs", description: "Allow Telegram bot to create NOTAM entries." },
-  { key: "alerts", label: "Alerts", description: "Allow Telegram bot to create dashboard alerts." },
+  { key: "alerts", label: "Alerts", description: "Allow Telegram bot to create dashboard alerts and send PIREP review/status alerts to admin chats." },
 ];
 
 const COMMAND_FIELDS: Array<{ key: keyof TelegramBotSettings["commands"]; label: string; description: string }> = [
@@ -143,7 +143,7 @@ export function AdminTelegramBot() {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Telegram Bot</h2>
           <p className="text-sm text-gray-500">
-            Manage Telegram bot runtime, allowed commands, content sync and admin chats.
+            Manage Telegram bot runtime, allowed commands, content sync, admin chats and staff-side PIREP alerts.
           </p>
         </div>
         <Button onClick={save} disabled={isSaving} className="bg-[#E31E24] hover:bg-[#c91a1f]">

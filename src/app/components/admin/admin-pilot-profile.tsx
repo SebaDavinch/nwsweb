@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { ArrowLeft, Award, Building2, Clock3, Edit, Loader2, Plane, Route, Send, ShieldCheck, Trash2, UserRound, Wifi, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -98,6 +99,15 @@ interface AdminPilotProfilePayload {
     airport: AuditLogEntry[];
     pirep: AuditLogEntry[];
   };
+  connections: {
+    services: ConnectionServiceEntry[];
+  };
+  alerts: {
+    updatedAt?: string | null;
+    channels: AlertChannelEntry[];
+    notificationTypes: AlertTypeEntry[];
+    pilotApi?: AlertPilotApiSnapshot | null;
+  };
 }
 
 interface PilotNote {
@@ -125,6 +135,40 @@ interface AuditLogEntry {
     type?: string | null;
     label?: string | null;
   } | null;
+}
+
+interface ConnectionServiceEntry {
+  key: string;
+  label: string;
+  connected: boolean;
+  available?: boolean;
+  primary?: string | null;
+  secondary?: string | null;
+  connectedAt?: string | null;
+  updatedAt?: string | null;
+  note?: string | null;
+}
+
+interface AlertChannelEntry {
+  key: string;
+  label: string;
+  enabled: boolean;
+  available?: boolean;
+  detail?: string | null;
+}
+
+interface AlertTypeEntry {
+  key: string;
+  label: string;
+  enabled: boolean;
+  forced?: boolean;
+}
+
+interface AlertPilotApiSnapshot {
+  connected: boolean;
+  preferredNetwork?: string | null;
+  sbPreferences: string[];
+  useImperialUnits: boolean;
 }
 
 const formatDateTime = (value?: string | null) => {
@@ -171,6 +215,78 @@ const normalizeBreakdownRows = (value: unknown): BreakdownRow[] => {
       };
     })
     .filter(Boolean) as BreakdownRow[];
+};
+
+const normalizeConnectionServices = (value: unknown): ConnectionServiceEntry[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as ConnectionServiceEntry) : null;
+      if (!row) {
+        return null;
+      }
+
+      return {
+        key: String(row.key || "service").trim() || "service",
+        label: String(row.label || row.key || "Service").trim() || "Service",
+        connected: Boolean(row.connected),
+        available: row.available == null ? true : Boolean(row.available),
+        primary: String(row.primary || "").trim() || null,
+        secondary: String(row.secondary || "").trim() || null,
+        connectedAt: String(row.connectedAt || "").trim() || null,
+        updatedAt: String(row.updatedAt || "").trim() || null,
+        note: String(row.note || "").trim() || null,
+      };
+    })
+    .filter(Boolean) as ConnectionServiceEntry[];
+};
+
+const normalizeAlertChannels = (value: unknown): AlertChannelEntry[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as AlertChannelEntry) : null;
+      if (!row) {
+        return null;
+      }
+
+      return {
+        key: String(row.key || "channel").trim() || "channel",
+        label: String(row.label || row.key || "Channel").trim() || "Channel",
+        enabled: Boolean(row.enabled),
+        available: row.available == null ? true : Boolean(row.available),
+        detail: String(row.detail || "").trim() || null,
+      };
+    })
+    .filter(Boolean) as AlertChannelEntry[];
+};
+
+const normalizeAlertTypes = (value: unknown): AlertTypeEntry[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      const row = item && typeof item === "object" ? (item as AlertTypeEntry) : null;
+      if (!row) {
+        return null;
+      }
+
+      return {
+        key: String(row.key || "type").trim() || "type",
+        label: String(row.label || row.key || "Type").trim() || "Type",
+        enabled: Boolean(row.enabled),
+        forced: Boolean(row.forced),
+      };
+    })
+    .filter(Boolean) as AlertTypeEntry[];
 };
 
 const normalizePayload = (value: unknown): AdminPilotProfilePayload | null => {
@@ -263,52 +379,59 @@ const normalizePayload = (value: unknown): AdminPilotProfilePayload | null => {
       airport: Array.isArray(payload.audit?.airport) ? payload.audit.airport as AuditLogEntry[] : [],
       pirep: Array.isArray(payload.audit?.pirep) ? payload.audit.pirep as AuditLogEntry[] : [],
     },
+    connections: {
+      services: normalizeConnectionServices((payload as { connections?: { services?: ConnectionServiceEntry[] } }).connections?.services),
+    },
+    alerts: {
+      updatedAt: String((payload as { alerts?: { updatedAt?: string | null } }).alerts?.updatedAt || "").trim() || null,
+      channels: normalizeAlertChannels((payload as { alerts?: { channels?: AlertChannelEntry[] } }).alerts?.channels),
+      notificationTypes: normalizeAlertTypes((payload as { alerts?: { notificationTypes?: AlertTypeEntry[] } }).alerts?.notificationTypes),
+      pilotApi: (payload as { alerts?: { pilotApi?: AlertPilotApiSnapshot | null } }).alerts?.pilotApi
+        ? {
+            connected: Boolean((payload as { alerts?: { pilotApi?: AlertPilotApiSnapshot | null } }).alerts?.pilotApi?.connected),
+            preferredNetwork: String((payload as { alerts?: { pilotApi?: AlertPilotApiSnapshot | null } }).alerts?.pilotApi?.preferredNetwork || "").trim() || null,
+            sbPreferences: Array.isArray((payload as { alerts?: { pilotApi?: AlertPilotApiSnapshot | null } }).alerts?.pilotApi?.sbPreferences)
+              ? ((payload as { alerts?: { pilotApi?: AlertPilotApiSnapshot | null } }).alerts?.pilotApi?.sbPreferences || [])
+                  .map((item) => String(item || "").trim())
+                  .filter(Boolean)
+              : [],
+            useImperialUnits: Boolean((payload as { alerts?: { pilotApi?: AlertPilotApiSnapshot | null } }).alerts?.pilotApi?.useImperialUnits),
+          }
+        : null,
+    },
   };
 };
 
-const AuditTrailCard = ({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: AuditLogEntry[];
-}) => {
+const AuditTrailList = ({ rows }: { rows: AuditLogEntry[] }) => {
   return (
-    <Card className="border-none shadow-sm">
-      <CardHeader>
-        <CardTitle className="text-base text-gray-900">{title}</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {rows.length > 0 ? (
-          <div className="space-y-3">
-            {rows.map((row) => (
-              <div key={row.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-gray-900">{row.action}</span>
-                  <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">{row.method}</Badge>
-                </div>
-                <div className="mt-1 text-gray-600">{row.target?.label || row.path}</div>
-                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                  <span>{formatDateTime(row.createdAt)}</span>
+    rows.length > 0 ? (
+      <div className="space-y-3">
+        {rows.map((row) => (
+          <div key={row.id} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-gray-900">{row.action}</span>
+              <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">{row.method}</Badge>
+            </div>
+            <div className="mt-1 text-gray-600">{row.target?.label || row.path}</div>
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+              <span>{formatDateTime(row.createdAt)}</span>
+              <span>•</span>
+              <span>{row.admin?.name || row.admin?.username || "Admin"}</span>
+              {Array.isArray(row.changedKeys) && row.changedKeys.length > 0 ? (
+                <>
                   <span>•</span>
-                  <span>{row.admin?.name || row.admin?.username || "Admin"}</span>
-                  {Array.isArray(row.changedKeys) && row.changedKeys.length > 0 ? (
-                    <>
-                      <span>•</span>
-                      <span>{row.changedKeys.slice(0, 4).join(", ")}</span>
-                    </>
-                  ) : null}
-                </div>
-              </div>
-            ))}
+                  <span>{row.changedKeys.slice(0, 4).join(", ")}</span>
+                </>
+              ) : null}
+            </div>
           </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-            No audit lines recorded for this category yet.
-          </div>
-        )}
-      </CardContent>
-    </Card>
+        ))}
+      </div>
+    ) : (
+      <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
+        No audit lines recorded for this category yet.
+      </div>
+    )
   );
 };
 
@@ -625,6 +748,29 @@ export function AdminPilotProfile() {
     ];
   }, [payload]);
 
+  const auditSections = useMemo(() => {
+    if (!payload) {
+      return [];
+    }
+
+    return [
+      { key: "pilot", title: "Pilot edits", rows: payload.audit?.pilot || [] },
+      { key: "aircraft", title: "Aircraft edits", rows: payload.audit?.aircraft || [] },
+      { key: "airport", title: "Airport edits", rows: payload.audit?.airport || [] },
+      { key: "pirep", title: "PIREP edits", rows: payload.audit?.pirep || [] },
+    ];
+  }, [payload]);
+
+  const connectedServiceCount = useMemo(
+    () => payload?.connections.services.filter((service) => service.connected).length || 0,
+    [payload]
+  );
+
+  const enabledAlertCount = useMemo(
+    () => payload?.alerts.notificationTypes.filter((type) => type.enabled).length || 0,
+    [payload]
+  );
+
   if (isLoading) {
     return (
       <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500">
@@ -727,6 +873,129 @@ export function AdminPilotProfile() {
             ) : null}
             {isChangingHub ? <span className="text-sm text-gray-500">Updating...</span> : null}
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-none shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg"><ShieldCheck className="h-5 w-5 text-[#E31E24]" /> Connected services and alert snapshot</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Accordion type="multiple" className="w-full">
+            <AccordionItem value="connections">
+              <AccordionTrigger className="hover:no-underline">
+                <div className="text-left">
+                  <div className="text-sm font-semibold text-gray-900">Connected services</div>
+                  <div className="text-xs text-gray-500">{connectedServiceCount} linked of {payload.connections.services.length} tracked integrations</div>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  {payload.connections.services.map((service) => (
+                    <div key={service.key} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="font-semibold text-gray-900">{service.label}</div>
+                          <div className="mt-1 text-sm text-gray-600">{service.primary || service.secondary || "No connection data yet."}</div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={service.connected
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : service.available
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-gray-200 bg-white text-gray-700"}
+                        >
+                          {service.connected ? "Linked" : service.available ? "Not linked" : "Pending"}
+                        </Badge>
+                      </div>
+                      {service.primary && service.secondary ? (
+                        <div className="mt-2 text-sm text-gray-500">{service.secondary}</div>
+                      ) : null}
+                      <div className="mt-3 space-y-1 text-xs text-gray-500">
+                        {service.connectedAt ? <div>Connected {formatDateTime(service.connectedAt)}</div> : null}
+                        {service.updatedAt ? <div>Updated {formatDateTime(service.updatedAt)}</div> : null}
+                        {service.note ? <div>{service.note}</div> : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+
+            <AccordionItem value="alerts">
+              <AccordionTrigger className="hover:no-underline">
+                <div className="text-left">
+                  <div className="text-sm font-semibold text-gray-900">Selected alerts</div>
+                  <div className="text-xs text-gray-500">{enabledAlertCount} alert types enabled · updated {formatDateTime(payload.alerts.updatedAt)}</div>
+                </div>
+              </AccordionTrigger>
+              <AccordionContent>
+                <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+                  <div className="space-y-3">
+                    <div className="text-sm font-semibold text-gray-900">Delivery channels</div>
+                    {payload.alerts.channels.map((channel) => (
+                      <div key={channel.key} className="flex items-start justify-between gap-4 rounded-xl border border-gray-100 bg-gray-50 p-3">
+                        <div>
+                          <div className="font-medium text-gray-900">{channel.label}</div>
+                          <div className="mt-1 text-sm text-gray-500">{channel.detail || "No additional details."}</div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={channel.enabled
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                            : channel.available
+                              ? "border-gray-200 bg-white text-gray-700"
+                              : "border-amber-200 bg-amber-50 text-amber-700"}
+                        >
+                          {channel.enabled ? "On" : channel.available ? "Off" : "Unavailable"}
+                        </Badge>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">Alert types</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {payload.alerts.notificationTypes.map((type) => (
+                          <Badge
+                            key={type.key}
+                            variant="outline"
+                            className={type.enabled
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                              : "border-gray-200 bg-white text-gray-700"}
+                          >
+                            {type.label}{type.forced ? " (forced)" : ""}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+
+                    {payload.alerts.pilotApi?.connected ? (
+                      <div className="rounded-xl border border-gray-100 bg-white p-4">
+                        <div className="text-sm font-semibold text-gray-900">Pilot API preferences</div>
+                        <div className="mt-3 grid gap-3 sm:grid-cols-3 text-sm text-gray-600">
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-gray-400">Network</div>
+                            <div className="mt-1 text-gray-900">{payload.alerts.pilotApi.preferredNetwork || "offline"}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-gray-400">SimBrief</div>
+                            <div className="mt-1 text-gray-900">{payload.alerts.pilotApi.sbPreferences.length > 0 ? payload.alerts.pilotApi.sbPreferences.join(", ") : "Not set"}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-gray-400">Units</div>
+                            <div className="mt-1 text-gray-900">{payload.alerts.pilotApi.useImperialUnits ? "Imperial" : "Metric"}</div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </CardContent>
       </Card>
 
@@ -928,12 +1197,28 @@ export function AdminPilotProfile() {
         <BreakdownCard title="By time of day" description="Day versus night activity from accepted flights." icon={Clock3} rows={payload.breakdown.byTimeOfDay} color="#7c3aed" />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <AuditTrailCard title="Pilot edits" rows={payload.audit?.pilot || []} />
-        <AuditTrailCard title="Aircraft edits" rows={payload.audit?.aircraft || []} />
-        <AuditTrailCard title="Airport edits" rows={payload.audit?.airport || []} />
-        <AuditTrailCard title="PIREP edits" rows={payload.audit?.pirep || []} />
-      </div>
+      <Card className="border-none shadow-sm">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg"><Wifi className="h-5 w-5 text-[#E31E24]" /> Audit and activity logs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Accordion type="multiple" className="w-full">
+            {auditSections.map((section) => (
+              <AccordionItem key={section.key} value={section.key}>
+                <AccordionTrigger className="hover:no-underline">
+                  <div className="text-left">
+                    <div className="text-sm font-semibold text-gray-900">{section.title}</div>
+                    <div className="text-xs text-gray-500">{section.rows.length} recent log entries</div>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <AuditTrailList rows={section.rows} />
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        </CardContent>
+      </Card>
     </div>
   );
 }

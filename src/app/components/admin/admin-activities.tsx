@@ -1,5 +1,7 @@
 import { Badge } from "../ui/badge";
 import { AdminContentManager } from "./admin-content-manager";
+import { Button } from "../ui/button";
+import { useSiteDesign } from "../../hooks/use-site-design";
 
 interface ActivityItem {
   id: string;
@@ -11,6 +13,7 @@ interface ActivityItem {
   date?: string;
   tag?: string;
   linkUrl?: string;
+  bannerUrl?: string;
   published?: boolean;
   featured?: boolean;
   target?: string;
@@ -19,15 +22,72 @@ interface ActivityItem {
 }
 
 export function AdminActivities() {
+  const design = useSiteDesign();
+
+  const openBannerGenerator = (formData: Record<string, string | boolean>) => {
+    const baseUrl = String(design.bannerGeneratorUrl || "").trim();
+    if (!baseUrl || typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URL(baseUrl, window.location.origin);
+    const push = (key: string, value: string | boolean | undefined) => {
+      const normalized = String(value ?? "").trim();
+      if (normalized) {
+        params.searchParams.set(key, normalized);
+      }
+    };
+
+    push("title", formData.title);
+    push("category", formData.category);
+    push("type", formData.type);
+    push("tag", formData.tag);
+    push("summary", formData.summary);
+    push("author", formData.author);
+    push("date", formData.date);
+    push("target", formData.target);
+    push("brand", design.siteTitle);
+
+    window.open(params.toString(), "_blank", "noopener,noreferrer");
+  };
+
   return (
     <AdminContentManager<ActivityItem>
       collection="activities"
       title="Activities"
       subtitle="Manage the public Activities page with fully manual News, Event, and NOTAM entries."
       singularLabel="Activity"
-      searchKeys={["title", "category", "type", "author", "tag", "summary", "content"]}
+      searchKeys={["title", "category", "type", "author", "tag", "summary", "content", "bannerUrl"]}
       filterKeys={["category", "status", "type"]}
+      renderFieldExtras={({ field, formData }) => {
+        if (field.key !== "bannerUrl") {
+          return null;
+        }
+
+        const generatorUrl = String(design.bannerGeneratorUrl || "").trim();
+        return generatorUrl ? (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2">
+            <span className="text-xs text-gray-500">Open the configured banner generator with the current activity fields prefilled.</span>
+            <Button type="button" variant="outline" size="sm" onClick={() => openBannerGenerator(formData)}>
+              Open generator
+            </Button>
+          </div>
+        ) : (
+          <div className="text-xs text-gray-500">
+            Configure Banner generator URL in System Settings to launch a prefilled generator from this editor.
+          </div>
+        );
+      }}
       columns={[
+        {
+          key: "bannerUrl",
+          label: "Banner",
+          render: (item) => item.bannerUrl ? (
+            <div className="h-12 w-24 overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
+              <img src={item.bannerUrl} alt={item.title || "Banner"} className="h-full w-full object-cover" loading="lazy" />
+            </div>
+          ) : "—",
+        },
         { key: "title", label: "Activity" },
         {
           key: "category",
@@ -78,6 +138,7 @@ export function AdminActivities() {
         { key: "date", label: "Date", type: "text", placeholder: "2026-04-18" },
         { key: "tag", label: "Tag", type: "text" },
         { key: "linkUrl", label: "Link URL", type: "text", placeholder: "https://..." },
+        { key: "bannerUrl", label: "Banner URL", type: "text", placeholder: "https://cdn.example.com/banner.webp" },
         { key: "target", label: "Target", type: "text" },
         { key: "summary", label: "Summary", type: "textarea" },
         { key: "content", label: "Content", type: "textarea" },

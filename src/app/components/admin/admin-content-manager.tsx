@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Plus, Search, Trash2, Pencil } from "lucide-react";
+import { ExternalLink, Plus, Search, Trash2, Pencil } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -63,6 +63,12 @@ interface AdminContentManagerProps<T extends { id: string }> {
   itemFilter?: (item: T) => boolean;
   fixedValues?: Record<string, string | boolean | number>;
   toolbarActions?: ReactNode;
+  renderFieldExtras?: (args: {
+    field: AdminFormField;
+    value: string | boolean;
+    formData: Record<string, string | boolean>;
+    updateFormValue: (key: string, value: string | boolean) => void;
+  }) => ReactNode;
   reloadToken?: string | number;
 }
 
@@ -94,6 +100,8 @@ const renderPrimitiveValue = (value: unknown) => {
   return normalized || "—";
 };
 
+const looksLikeImageUrl = (value: string) => /^(https?:)?\/\//i.test(value);
+
 export function AdminContentManager<T extends { id: string }>({
   collection,
   title,
@@ -106,6 +114,7 @@ export function AdminContentManager<T extends { id: string }>({
   itemFilter,
   fixedValues,
   toolbarActions,
+  renderFieldExtras,
   reloadToken,
 }: AdminContentManagerProps<T>) {
   const [items, setItems] = useState<T[]>([]);
@@ -413,13 +422,40 @@ export function AdminContentManager<T extends { id: string }>({
                       </Label>
                     </div>
                   ) : (
-                    <Input
-                      id={field.key}
-                      type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : field.type}
-                      placeholder={field.placeholder}
-                      value={String(value || "")}
-                      onChange={(event) => updateFormValue(field.key, event.target.value)}
-                    />
+                    <div className="space-y-3">
+                      <Input
+                        id={field.key}
+                        type={field.type === "number" ? "number" : field.type === "datetime" ? "datetime-local" : field.type}
+                        placeholder={field.placeholder}
+                        value={String(value || "")}
+                        onChange={(event) => updateFormValue(field.key, event.target.value)}
+                      />
+                      {field.key === "bannerUrl" && looksLikeImageUrl(String(value || "")) ? (
+                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-gray-50">
+                          <div className="aspect-[16/6] w-full overflow-hidden bg-gray-100">
+                            <img
+                              src={String(value || "")}
+                              alt="Banner preview"
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </div>
+                          <div className="flex items-center justify-between gap-3 px-3 py-2 text-xs text-gray-500">
+                            <span className="truncate">Banner preview</span>
+                            <a
+                              href={String(value || "")}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1 text-[#E31E24] hover:text-[#c41a20]"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open
+                            </a>
+                          </div>
+                        </div>
+                      ) : null}
+                      {renderFieldExtras ? renderFieldExtras({ field, value, formData, updateFormValue }) : null}
+                    </div>
                   )}
                 </div>
               );

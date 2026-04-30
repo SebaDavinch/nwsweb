@@ -89,6 +89,26 @@ export function PilotDashboard() {
       departureTime?: string | null;
       aircraft: string;
     }>;
+    recentFlightsPreview?: Array<{
+      id: number;
+      flightNumber: string;
+      departure?: string;
+      arrival?: string;
+      aircraft?: string;
+      status?: string;
+      completedAt?: string;
+      needReply?: boolean;
+    }>;
+    needsReplyFlights?: Array<{
+      id: number;
+      flightNumber: string;
+      departure?: string;
+      arrival?: string;
+      aircraft?: string;
+      status?: string;
+      completedAt?: string;
+      needReply?: boolean;
+    }>;
     systemStatus?: {
       services?: Array<{
         id: string;
@@ -264,6 +284,12 @@ export function PilotDashboard() {
 
   const upcomingBookings = Array.isArray(dashboardHome?.upcomingFlights)
     ? dashboardHome.upcomingFlights
+    : [];
+  const recentFlightsPreview = Array.isArray(dashboardHome?.recentFlightsPreview)
+    ? dashboardHome.recentFlightsPreview
+    : [];
+  const needsReplyFlights = Array.isArray(dashboardHome?.needsReplyFlights)
+    ? dashboardHome.needsReplyFlights
     : [];
   const totalHours = Number(dashboardHome?.stats?.totalHours ?? pilot.totalHours ?? 0) || 0;
   const totalFlights = Number(dashboardHome?.stats?.totalFlights ?? pilot.totalFlights ?? 0) || 0;
@@ -762,6 +788,71 @@ export function PilotDashboard() {
                             })
                           ) : (
                             <div className="text-sm text-gray-500">{t("dashboard.system.noData")}</div>
+                          )}
+                        </CardContent>
+                     </Card>
+
+                     {needsReplyFlights.length > 0 ? (
+                       <Card className="border-amber-200 bg-linear-to-r from-amber-50 via-orange-50 to-white shadow-sm">
+                          <CardHeader>
+                            <CardTitle className="text-base text-[#1d1d1f]">{t("dashboard.home.replyNeeded.title")}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-3">
+                            <div className="text-sm text-gray-600">{t("dashboard.home.replyNeeded.subtitle")}</div>
+                            {needsReplyFlights.map((flight) => (
+                              <button
+                                key={flight.id}
+                                type="button"
+                                onClick={() => openPirepDetail(flight.id)}
+                                className="w-full rounded-xl border border-amber-100 bg-white px-4 py-3 text-left transition-colors hover:border-amber-300 hover:bg-amber-50"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="font-semibold text-[#1d1d1f]">{flight.flightNumber || "—"}</div>
+                                    <div className="mt-1 text-sm text-gray-500">{flight.departure || "—"} → {flight.arrival || "—"}</div>
+                                  </div>
+                                  <Badge className="bg-amber-500 text-white">{t("dashboard.recent.status.needsReply")}</Badge>
+                                </div>
+                              </button>
+                            ))}
+                          </CardContent>
+                       </Card>
+                     ) : null}
+
+                     <Card className="border-none shadow-sm">
+                        <CardHeader>
+                          <CardTitle className="text-base">{t("dashboard.home.lastFlights.title")}</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          {recentFlightsPreview.length > 0 ? (
+                            recentFlightsPreview.map((flight) => (
+                              <button
+                                key={flight.id}
+                                type="button"
+                                onClick={() => openPirepDetail(flight.id)}
+                                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition-colors hover:border-[#E31E24] hover:bg-white"
+                              >
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="font-semibold text-[#1d1d1f]">{flight.flightNumber || "—"}</div>
+                                    <div className="mt-1 text-sm text-gray-500">{flight.departure || "—"} → {flight.arrival || "—"}</div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{flight.status || "—"}</div>
+                                    <div className="mt-1 text-xs text-gray-500">
+                                      {flight.completedAt
+                                        ? new Date(flight.completedAt).toLocaleDateString(undefined, {
+                                            month: "short",
+                                            day: "numeric",
+                                          })
+                                        : "—"}
+                                    </div>
+                                  </div>
+                                </div>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="text-sm text-gray-500">{t("dashboard.home.lastFlights.empty")}</div>
                           )}
                         </CardContent>
                      </Card>

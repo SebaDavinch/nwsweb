@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -82,6 +82,7 @@ interface ClaimFormState {
 type ClaimStatusFilter = "all" | "pending" | "waiting" | "accepted" | "rejected";
 
 const CLAIM_STATUS_FILTERS: ClaimStatusFilter[] = ["all", "pending", "waiting", "accepted", "rejected"];
+const CLAIM_NOTIFICATION_STATE_KEY = "nws.dashboard.claims.notifications.v1";
 
 const CLAIM_STATUS_BADGE_CLASSNAMES: Record<string, string> = {
   pending: "border-amber-200 bg-amber-50 text-amber-700",
@@ -168,9 +169,36 @@ const getStatusSortOrder = (status: string) => {
   }
 };
 
+const loadClaimNotificationState = () => {
+  if (typeof window === "undefined") {
+    return {} as Record<string, string>;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CLAIM_NOTIFICATION_STATE_KEY);
+    if (!raw) {
+      return {} as Record<string, string>;
+    }
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed as Record<string, string> : {};
+  } catch {
+    return {} as Record<string, string>;
+  }
+};
+
+const persistClaimNotificationState = (value: Record<string, string>) => {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem(CLAIM_NOTIFICATION_STATE_KEY, JSON.stringify(value));
+};
+
 export function PilotClaims() {
   const { t } = useLanguage();
   const { addNotification } = useNotifications();
+  const claimNotificationStateRef = useRef<Record<string, string>>(loadClaimNotificationState());
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [bookings, setBookings] = useState<ClaimBooking[]>([]);
   const [statusFilter, setStatusFilter] = useState<ClaimStatusFilter>("all");
@@ -283,6 +311,76 @@ export function PilotClaims() {
   useEffect(() => {
     void loadClaims(statusFilter);
   }, [statusFilter]);
+
+  useEffect(() => {
+    if (!claims.length) {
+      return;
+    }
+
+    const nextState = { ...claimNotificationStateRef.current };
+    let hasChanges = false;
+
+    claims.forEach((claim) => {
+      const claimKey = String(claim.id || 0);
+      if (!claimKey || claimKey === "0") {
+        return;
+      }
+
+      const signature = `${String(claim.status || "pending").trim().toLowerCase()}:${claim.needsReply ? "reply" : "clear"}`;
+      const previousSignature = nextState[claimKey] || "";
+      const actionUrl = claim.pirepId && claim.pirepId > 0
+        ? `/dashboard?tab=pirep&id=${claim.pirepId}`
+        : "/dashboard?tab=manual-pirep";
+
+      if (!previousSignature) {
+        if (claim.needsReply) {
+          addNotification({
+            category: "reply",
+            title: t("claims.notification.replyTitle"),
+            description: `${claim.routeLabel} • ${t("claims.notification.replyDescription")}`,
+            dedupeKey: `claim-reply-${claim.id}-${signature}`,
+            actionUrl,
+          });
+        }
+      } else if (previousSignature !== signature) {
+        if (claim.needsReply && !previousSignature.endsWith(":reply")) {
+          addNotification({
+            category: "reply",
+            title: t("claims.notification.replyTitle"),
+            description: `${claim.routeLabel} • ${t("claims.notification.replyDescription")}`,
+            dedupeKey: `claim-reply-${claim.id}-${signature}`,
+            actionUrl,
+          });
+        } else if (claim.status === "accepted") {
+          addNotification({
+            category: "review",
+            title: t("claims.notification.acceptedTitle"),
+            description: `${claim.routeLabel} • ${t("claims.notification.acceptedDescription")}`,
+            dedupeKey: `claim-status-${claim.id}-accepted`,
+            actionUrl,
+          });
+        } else if (claim.status === "rejected") {
+          addNotification({
+            category: "review",
+            title: t("claims.notification.rejectedTitle"),
+            description: `${claim.routeLabel} • ${t("claims.notification.rejectedDescription")}`,
+            dedupeKey: `claim-status-${claim.id}-rejected`,
+            actionUrl,
+          });
+        }
+      }
+
+      if (nextState[claimKey] !== signature) {
+        nextState[claimKey] = signature;
+        hasChanges = true;
+      }
+    });
+
+    if (hasChanges) {
+      claimNotificationStateRef.current = nextState;
+      persistClaimNotificationState(nextState);
+    }
+  }, [claims, addNotification, t]);
 
   useEffect(() => {
     if (!form.bookingId) {

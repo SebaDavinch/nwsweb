@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Bell, Lock, MapPinned, MessageSquare, Plane, Shield } from "lucide-react";
+import { Bell, Lock, MapPinned, MessageSquare, Plane, Send, Shield } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useLanguage } from "../../context/language-context";
@@ -37,20 +37,47 @@ interface PilotApiStatus {
   profile?: PilotApiProfile | null;
 }
 
+interface TelegramLinkedUser {
+  chatId?: string | null;
+  telegramId?: string | null;
+  username?: string | null;
+  name?: string | null;
+  linkedAt?: string | null;
+  updatedAt?: string | null;
+}
+
+interface TelegramLinkStatus {
+  authenticated?: boolean;
+  linked?: boolean;
+  user?: TelegramLinkedUser | null;
+  linkCode?: {
+    code?: string | null;
+    createdAt?: string | null;
+    expiresAt?: number | null;
+  } | null;
+}
+
 interface NotificationPreferences {
   channels: {
     email: boolean;
     discord: boolean;
+    telegram: boolean;
     browser: boolean;
   };
   notificationTypes: {
     booking: boolean;
     claim: boolean;
     review: boolean;
+    awaitingReview: boolean;
+    accepted: boolean;
+    rejected: boolean;
+    needsReply: boolean;
+    invalidated: boolean;
     notam: boolean;
     badge: boolean;
     event: boolean;
     system: boolean;
+    test: boolean;
   };
 }
 
@@ -64,17 +91,43 @@ const defaultNotificationPreferences: NotificationPreferences = {
   channels: {
     email: true,
     discord: true,
+    telegram: false,
     browser: false,
   },
   notificationTypes: {
     booking: true,
     claim: true,
     review: true,
+    awaitingReview: true,
+    accepted: true,
+    rejected: true,
+    needsReply: true,
+    invalidated: true,
     notam: true,
     badge: true,
     event: true,
     system: true,
+    test: false,
   },
+};
+
+const formatDateTime = (value?: string | number | null) => {
+  if (!value) {
+    return "-";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value);
+  }
+
+  return parsed.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
 export function PilotSettings() {
@@ -86,6 +139,8 @@ export function PilotSettings() {
   const [notifications, setNotifications] = useState<NotificationPreferences>(defaultNotificationPreferences);
   const [discordUser, setDiscordUser] = useState<DiscordSessionUser | null>(null);
   const [isLoadingDiscord, setIsLoadingDiscord] = useState(true);
+  const [telegramStatus, setTelegramStatus] = useState<TelegramLinkStatus | null>(null);
+  const [isLoadingTelegram, setIsLoadingTelegram] = useState(true);
   const [pilotApiStatus, setPilotApiStatus] = useState<PilotApiStatus | null>(null);
   const [isLoadingPilotApi, setIsLoadingPilotApi] = useState(true);
   const [pilotLocationCode, setPilotLocationCode] = useState("");
@@ -98,6 +153,9 @@ export function PilotSettings() {
   const [isSavingPilotLocation, setIsSavingPilotLocation] = useState(false);
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const [isSavingPilotPreferences, setIsSavingPilotPreferences] = useState(false);
+  const [isGeneratingTelegramCode, setIsGeneratingTelegramCode] = useState(false);
+  const [isDisconnectingTelegram, setIsDisconnectingTelegram] = useState(false);
+  const forcedNotificationTypes = new Set<keyof NotificationPreferences["notificationTypes"]>(["review"]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -254,6 +312,10 @@ export function PilotSettings() {
   };
 
   const updateTypePreference = (typeKey: keyof NotificationPreferences["notificationTypes"], checked: boolean) => {
+    if (forcedNotificationTypes.has(typeKey)) {
+      return;
+    }
+
     const nextNotifications = {
       ...notifications,
       notificationTypes: {
@@ -267,6 +329,32 @@ export function PilotSettings() {
 
   useEffect(() => {
     let isMounted = true;
+
+    const loadTelegramStatus = async () => {
+      setIsLoadingTelegram(true);
+      try {
+        const response = await fetch("/api/auth/telegram/status", { credentials: "include" });
+        if (!isMounted) {
+          return;
+        }
+
+        if (!response.ok) {
+          setTelegramStatus(null);
+          return;
+        }
+
+        const payload = await response.json().catch(() => null);
+        setTelegramStatus(payload || null);
+      } catch {
+        if (isMounted) {
+          setTelegramStatus(null);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoadingTelegram(false);
+        }
+      }
+    };
 
     const loadDiscordSession = async () => {
       setIsLoadingDiscord(true);
@@ -295,6 +383,7 @@ export function PilotSettings() {
     };
 
     loadDiscordSession();
+    loadTelegramStatus();
 
     return () => {
       isMounted = false;
@@ -311,6 +400,89 @@ export function PilotSettings() {
       // ignore
     }
     setDiscordUser(null);
+  };
+
+  const refreshTelegramStatus = async () => {
+    setIsLoadingTelegram(true);
+    try {
+      const response = await fetch("/api/auth/telegram/status", { credentials: "include" });
+      if (!response.ok) {
+        setTelegramStatus(null);
+        return;
+      }
+
+      const payload = await response.json().catch(() => null);
+      setTelegramStatus(payload || null);
+    } catch {
+      setTelegramStatus(null);
+    } finally {
+      setIsLoadingTelegram(false);
+    }
+  };
+
+  const handleGenerateTelegramLinkCode = async () => {
+    setIsGeneratingTelegramCode(true);
+    try {
+      const response = await fetch("/api/auth/telegram/link-code", {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(String(payload?.error || t("settings.telegram.codeError")));
+      }
+
+      setTelegramStatus((prev) => ({
+        ...(prev || {}),
+        authenticated: true,
+        linked: Boolean(prev?.linked),
+        user: prev?.user || null,
+        linkCode: payload?.linkCode || null,
+      }));
+      toast.success(t("settings.telegram.codeCreated"));
+    } catch (error) {
+      toast.error(String(error || t("settings.telegram.codeError")));
+    } finally {
+      setIsGeneratingTelegramCode(false);
+    }
+  };
+
+  const handleDisconnectTelegram = async () => {
+    setIsDisconnectingTelegram(true);
+    try {
+      const response = await fetch("/api/auth/telegram/disconnect", {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(String(payload?.error || t("settings.telegram.disconnectError")));
+      }
+
+      if (notifications.channels.telegram) {
+        const nextNotifications = {
+          ...notifications,
+          channels: {
+            ...notifications.channels,
+            telegram: false,
+          },
+        };
+        setNotifications(nextNotifications);
+        await persistNotifications(nextNotifications);
+      }
+
+      setTelegramStatus((prev) => ({
+        ...(prev || {}),
+        linked: false,
+        user: null,
+        linkCode: null,
+      }));
+      toast.success(t("settings.telegram.disconnectSuccess"));
+    } catch (error) {
+      toast.error(String(error || t("settings.telegram.disconnectError")));
+    } finally {
+      setIsDisconnectingTelegram(false);
+    }
   };
 
   const refreshPilotApiStatus = async () => {
@@ -430,6 +602,14 @@ export function PilotSettings() {
   const pilotApiConfigured = Boolean(pilotApiStatus?.configured);
   const pilotApiDisplayName =
     String(pilotApiProfile?.name || "").trim() || String(pilotApiProfile?.username || "").trim() || "vAMSYS";
+  const telegramUser = telegramStatus?.user || null;
+  const telegramLinked = Boolean(telegramStatus?.linked && telegramUser);
+  const telegramDisplayName =
+    String(telegramUser?.name || "").trim() ||
+    String(telegramUser?.username || "").trim() ||
+    String(telegramUser?.chatId || "").trim() ||
+    "Telegram";
+  const telegramLinkCode = String(telegramStatus?.linkCode?.code || "").trim() || "";
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -478,6 +658,21 @@ export function PilotSettings() {
             </div>
 
             <div className="flex items-center justify-between space-x-2">
+              <Label htmlFor="telegram-notifications" className="flex flex-col space-y-1">
+                <span>{t("settings.notifications.telegram")}</span>
+                <span className="font-normal text-xs text-muted-foreground">
+                  {t("settings.notifications.telegram.desc")}
+                </span>
+              </Label>
+              <Switch
+                id="telegram-notifications"
+                checked={notifications.channels.telegram}
+                disabled={!telegramLinked || isSavingNotifications}
+                onCheckedChange={(checked) => updateChannelPreference("telegram", checked)}
+              />
+            </div>
+
+            <div className="flex items-center justify-between space-x-2">
               <Label htmlFor="browser-notifications" className="flex flex-col space-y-1">
                 <span>{t("settings.notifications.browser")}</span>
                 <span className="font-normal text-xs text-muted-foreground">
@@ -502,19 +697,28 @@ export function PilotSettings() {
                 "booking",
                 "claim",
                 "review",
+                "awaitingReview",
+                "accepted",
+                "rejected",
+                "needsReply",
+                "invalidated",
                 "notam",
                 "badge",
                 "event",
                 "system",
+                "test",
               ] as Array<keyof NotificationPreferences["notificationTypes"]>).map((typeKey) => (
                 <div key={typeKey} className="flex items-center justify-between space-x-2">
                   <Label htmlFor={`notification-type-${typeKey}`} className="flex flex-col space-y-1">
                     <span>{t(`settings.notifications.types.${typeKey}`)}</span>
+                    {typeKey === "review" ? (
+                      <span className="text-xs text-muted-foreground">{t("settings.notifications.types.review.forced")}</span>
+                    ) : null}
                   </Label>
                   <Switch
                     id={`notification-type-${typeKey}`}
                     checked={notifications.notificationTypes[typeKey]}
-                    disabled={isSavingNotifications}
+                    disabled={isSavingNotifications || forcedNotificationTypes.has(typeKey)}
                     onCheckedChange={(checked) => updateTypePreference(typeKey, checked)}
                   />
                 </div>
@@ -719,6 +923,85 @@ export function PilotSettings() {
                   <MessageSquare className="w-4 h-4 mr-2" />
                   {t("settings.discord.connect")}
                 </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Send className="w-5 h-5 text-[#229ED9]" />
+              <CardTitle>{t("settings.telegram.title")}</CardTitle>
+            </div>
+            <CardDescription>{t("settings.telegram.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {isLoadingTelegram ? (
+              <div className="text-sm text-gray-500">Loading...</div>
+            ) : telegramLinked ? (
+              <div className="space-y-4">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 bg-[#229ED9] rounded-full flex items-center justify-center text-white">
+                      <Send size={20} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="font-bold text-gray-900">{t("settings.telegram.connected")}</div>
+                      <div className="text-sm text-green-700 truncate">{telegramDisplayName}</div>
+                      {telegramUser?.username ? (
+                        <div className="text-xs text-green-700 truncate">@{String(telegramUser.username).replace(/^@+/, "")}</div>
+                      ) : null}
+                      {telegramUser?.linkedAt ? (
+                        <div className="text-xs text-green-700 truncate">
+                          {t("settings.telegram.linkedAt").replace("{{date}}", formatDateTime(telegramUser.linkedAt))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={handleDisconnectTelegram}
+                    disabled={isDisconnectingTelegram}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-200"
+                  >
+                    {t("settings.telegram.disconnect")}
+                  </Button>
+                </div>
+                <div className="text-sm text-gray-500">{t("settings.telegram.linkedHint")}</div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-gray-200 bg-gray-50/80 p-4 space-y-3">
+                  <div className="text-sm text-gray-600">{t("settings.telegram.instructions")}</div>
+                  {telegramLinkCode ? (
+                    <div className="space-y-2">
+                      <Label htmlFor="telegram-link-code">{t("settings.telegram.codeLabel")}</Label>
+                      <Input id="telegram-link-code" value={telegramLinkCode} readOnly />
+                      <div className="text-xs text-gray-500">
+                        {t("settings.telegram.codeHint").replace(
+                          "{{date}}",
+                          formatDateTime(telegramStatus?.linkCode?.expiresAt || null)
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-gray-500">{t("settings.telegram.notLinked")}</div>
+                  )}
+                </div>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <Button
+                    onClick={handleGenerateTelegramLinkCode}
+                    disabled={isGeneratingTelegramCode}
+                    className="bg-[#229ED9] hover:bg-[#1b8abf] text-white w-full sm:w-auto"
+                  >
+                    <Send className="w-4 h-4 mr-2" />
+                    {telegramLinkCode ? t("settings.telegram.regenerateCode") : t("settings.telegram.generateCode")}
+                  </Button>
+                  <Button variant="outline" onClick={refreshTelegramStatus} disabled={isLoadingTelegram}>
+                    {t("settings.pilotApi.refresh")}
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

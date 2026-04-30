@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-export type NotificationCategory = "booking" | "claim" | "review" | "notam" | "event" | "badge" | "system";
+export type NotificationCategory = "booking" | "claim" | "review" | "reply" | "notam" | "event" | "badge" | "system";
 
 export interface NotificationItem {
   id: string;
@@ -9,12 +9,18 @@ export interface NotificationItem {
   description: string;
   createdAt: string;
   isRead: boolean;
+  dedupeKey?: string;
+  actionUrl?: string;
+  actionLabelKey?: string;
 }
 
 interface CreateNotificationInput {
   category: NotificationCategory;
   title: string;
   description: string;
+  dedupeKey?: string;
+  actionUrl?: string;
+  actionLabelKey?: string;
 }
 
 interface NotificationsContextType {
@@ -68,21 +74,30 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const value = useMemo<NotificationsContextType>(() => ({
     notifications,
     unreadCount: notifications.filter((item) => !item.isRead).length,
-    addNotification: ({ category, title, description }) => {
-      setNotifications((current) => [
-        {
-          id:
-            typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-          category,
-          title,
-          description,
-          createdAt: new Date().toISOString(),
-          isRead: false,
-        },
-        ...current,
-      ].slice(0, MAX_NOTIFICATIONS));
+    addNotification: ({ category, title, description, dedupeKey, actionUrl, actionLabelKey }) => {
+      setNotifications((current) => {
+        if (dedupeKey && current.some((item) => item.dedupeKey === dedupeKey)) {
+          return current;
+        }
+
+        return [
+          {
+            id:
+              typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+            category,
+            title,
+            description,
+            createdAt: new Date().toISOString(),
+            isRead: false,
+            dedupeKey: dedupeKey || undefined,
+            actionUrl: actionUrl || undefined,
+            actionLabelKey: actionLabelKey || undefined,
+          },
+          ...current,
+        ].slice(0, MAX_NOTIFICATIONS);
+      });
     },
     markAsRead: (notificationId) => {
       setNotifications((current) =>

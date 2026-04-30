@@ -31,6 +31,7 @@ interface Flight {
   landingRate?: number | null;
   gForce?: number | null;
   completedDate?: string;
+  needReply?: boolean;
 }
 
 interface RecentFlightsResponse {
@@ -85,31 +86,77 @@ const normalizePirepStatus = (value?: string | null) => {
     .replace(/\s+/g, "_");
 };
 
-const formatPirepStatusLabel = (value?: string | null) => {
-  const normalized = normalizePirepStatus(value);
-  if (!normalized) {
-    return "Completed";
+const getRecentFlightStatusKey = (flight: Pick<Flight, "status" | "needReply">) => {
+  if (flight.needReply) {
+    return "needs_reply";
   }
 
-  return normalized
+  const normalized = normalizePirepStatus(flight.status);
+
+  if (["accepted", "auto_accepted", "approved", "completed"].includes(normalized)) {
+    return "accepted";
+  }
+
+  if (["rejected", "denied", "failed", "cancelled"].includes(normalized)) {
+    return "rejected";
+  }
+
+  if (["invalidated", "invalid", "void"].includes(normalized)) {
+    return "invalidated";
+  }
+
+  if (["pending", "submitted", "in_review", "processing", "awaiting_review"].includes(normalized)) {
+    return "awaiting_review";
+  }
+
+  return normalized || "completed";
+};
+
+const formatPirepStatusLabel = (
+  flight: Pick<Flight, "status" | "needReply">,
+  t: (key: string) => string
+) => {
+  const key = getRecentFlightStatusKey(flight);
+
+  if (key === "accepted") {
+    return t("dashboard.recent.status.accepted");
+  }
+  if (key === "rejected") {
+    return t("dashboard.recent.status.rejected");
+  }
+  if (key === "awaiting_review") {
+    return t("dashboard.recent.status.awaitingReview");
+  }
+  if (key === "needs_reply") {
+    return t("dashboard.recent.status.needsReply");
+  }
+  if (key === "invalidated") {
+    return t("dashboard.recent.status.invalidated");
+  }
+
+  return key
     .split(/[_-]+/)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 };
 
-const getPirepStatusBadgeClassName = (value?: string | null) => {
-  const normalized = normalizePirepStatus(value);
+const getPirepStatusBadgeClassName = (flight: Pick<Flight, "status" | "needReply">) => {
+  const normalized = getRecentFlightStatusKey(flight);
 
-  if (["accepted", "auto_accepted", "approved", "completed"].includes(normalized)) {
+  if (["accepted"].includes(normalized)) {
     return "bg-green-100 text-green-800";
   }
 
-  if (["rejected", "denied", "failed", "cancelled"].includes(normalized)) {
+  if (["rejected"].includes(normalized)) {
     return "bg-red-100 text-red-800";
   }
 
-  if (["pending", "submitted", "in_review", "processing"].includes(normalized)) {
+  if (["awaiting_review", "needs_reply"].includes(normalized)) {
     return "bg-amber-100 text-amber-800";
+  }
+
+  if (["invalidated"].includes(normalized)) {
+    return "bg-slate-200 text-slate-800";
   }
 
   return "bg-gray-100 text-gray-700";
@@ -189,6 +236,7 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                   duration: String(item?.duration || "—").trim() || "—",
                   aircraft: String(item?.aircraft || "—").trim() || "—",
                   status: String(item?.status || "Completed").trim() || "Completed",
+                  needReply: Boolean(item?.needReply),
                   distance: String(item?.distance || "—").trim() || "—",
                   landing: landingLabel,
                   landingRate,
@@ -230,22 +278,36 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
 
   const statusOptions = Array.from(
     flights.reduce((map, flight) => {
-      const key = normalizePirepStatus(flight.status);
+      const key = getRecentFlightStatusKey(flight);
       map.set(key, (map.get(key) || 0) + 1);
       return map;
     }, new Map<string, number>())
   )
-    .sort((left, right) => right[1] - left[1])
+    .sort((left, right) => {
+      const order = ["needs_reply", "awaiting_review", "accepted", "rejected", "invalidated"];
+      const leftIndex = order.indexOf(left[0]);
+      const rightIndex = order.indexOf(right[0]);
+      if (leftIndex >= 0 || rightIndex >= 0) {
+        if (leftIndex < 0) {
+          return 1;
+        }
+        if (rightIndex < 0) {
+          return -1;
+        }
+        return leftIndex - rightIndex;
+      }
+      return right[1] - left[1];
+    })
     .map(([status, count]) => ({
       status,
       count,
-      label: formatPirepStatusLabel(status),
+      label: formatPirepStatusLabel({ status, needReply: status === "needs_reply" }, t),
     }));
 
   const filteredFlights =
     statusFilter === "all"
       ? flights
-      : flights.filter((flight) => normalizePirepStatus(flight.status) === statusFilter);
+      : flights.filter((flight) => getRecentFlightStatusKey(flight) === statusFilter);
 
   return (
     <div className="space-y-6">
@@ -329,8 +391,8 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                       <p className="text-sm text-gray-600">{flight.aircraft}</p>
                     </div>
                   </div>
-                  <div className={`text-xs px-3 py-1 rounded-full font-semibold ${getPirepStatusBadgeClassName(flight.status)}`}>
-                    {formatPirepStatusLabel(flight.status)}
+                  <div className={`text-xs px-3 py-1 rounded-full font-semibold ${getPirepStatusBadgeClassName(flight)}`}>
+                    {formatPirepStatusLabel(flight, t)}
                   </div>
                 </div>
 
@@ -429,8 +491,8 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <h3 className="text-lg font-bold text-[#2A2A2A]">{flight.flightNumber || "—"}</h3>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getPirepStatusBadgeClassName(flight.status)}`}>
-                          {formatPirepStatusLabel(flight.status)}
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getPirepStatusBadgeClassName(flight)}`}>
+                          {formatPirepStatusLabel(flight, t)}
                         </span>
                       </div>
                       <p className="text-sm text-gray-600">{flight.aircraft}</p>
