@@ -6,7 +6,10 @@ import "leaflet/dist/leaflet.css";
 export interface Airport {
   code?: string; // Support both code (old) and icao (new)
   icao?: string;
+  iata?: string;
   name: string;
+  city?: string;
+  country?: string;
   lat: number;
   lon: number;
 }
@@ -279,9 +282,10 @@ export function FlightMap({
 
         const curvedPath = createCurvedPath(fromLatLng, toLatLng);
         const pathLine = L.polyline(curvedPath, {
-          color: isActive ? "#E31E24" : "#94a3b8",
-          weight: isActive ? 3 : 1.5,
-          opacity: isActive ? 0.85 : 0.35,
+          color: isActive ? "#E31E24" : "#6366f1",
+          weight: isActive ? 3 : 1.2,
+          opacity: isActive ? 0.9 : 0.28,
+          dashArray: isActive ? undefined : "6 9",
           smoothFactor: 1,
         })
           .bindTooltip(selectionRoute.label || `${selectionRoute.from.icao || selectionRoute.from.code || "—"} → ${selectionRoute.to.icao || selectionRoute.to.code || "—"}`, {
@@ -329,9 +333,17 @@ export function FlightMap({
         const latLng = L.latLng(airport.lat, airport.lon);
         bounds.extend(latLng);
 
+        const iataLine = airport.iata ? ` / ${airport.iata}` : "";
+        const cityLine = airport.city ? `<br/>${airport.city}` : "";
+        const countryLine = airport.country ? `<br/><span style="color:#888">${airport.country}</span>` : "";
         const marker = L.marker(latLng, { icon: airportIcon })
-          .bindTooltip(`<b>${code}</b><br/>${airport.name}`, { direction: "top" })
+          .bindTooltip(`<b>${code}${iataLine}</b><br/>${airport.name}${cityLine}${countryLine}`, { direction: "top", opacity: 0.95 })
           .addTo(map);
+
+        if (onAirportSelect) {
+          marker.on("click", () => onAirportSelect(code));
+        }
+
         markersRef.current.push(marker);
       });
 

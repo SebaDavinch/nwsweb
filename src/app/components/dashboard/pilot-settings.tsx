@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
-import { Bell, Lock, MapPinned, MessageSquare, Plane, Send, Shield } from "lucide-react";
+import { ChangeEvent, useEffect, useRef, useState } from "react";
+import { Bell, ImageUp, Lock, MapPinned, MessageSquare, Plane, RotateCcw, Send, Shield } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useLanguage } from "../../context/language-context";
 import { useAuth } from "../../context/auth-context";
+import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
@@ -15,6 +16,14 @@ interface DiscordSessionUser {
   id?: string;
   username?: string;
   globalName?: string;
+  avatar?: string | null;
+  avatarUrl?: string | null;
+}
+
+interface ProfilePreferences {
+  avatarMode?: "default" | "custom" | "discord";
+  customAvatar?: string | null;
+  discordAvatar?: string | null;
 }
 
 interface PilotApiProfile {
@@ -130,11 +139,57 @@ const formatDateTime = (value?: string | number | null) => {
   });
 };
 
+const normalizeProfilePreferences = (value?: ProfilePreferences | null): Required<ProfilePreferences> => ({
+  avatarMode: value?.avatarMode === "custom" || value?.avatarMode === "discord" ? value.avatarMode : "default",
+  customAvatar: String(value?.customAvatar || "").trim() || null,
+  discordAvatar: String(value?.discordAvatar || "").trim() || null,
+});
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Failed to read selected image"));
+    reader.readAsDataURL(file);
+  });
+
+const loadImage = (src: string) =>
+  new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Failed to process selected image"));
+    image.src = src;
+  });
+
+const resizeAvatarToDataUrl = async (file: File) => {
+  const source = await readFileAsDataUrl(file);
+  const image = await loadImage(source);
+  const size = 256;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error("Canvas is not available");
+  }
+
+  const minSide = Math.min(image.width, image.height);
+  const offsetX = (image.width - minSide) / 2;
+  const offsetY = (image.height - minSide) / 2;
+  context.clearRect(0, 0, size, size);
+  context.drawImage(image, offsetX, offsetY, minSide, minSide, 0, 0, size, size);
+
+  const webp = canvas.toDataURL("image/webp", 0.9);
+  return webp.length > 420000 ? canvas.toDataURL("image/jpeg", 0.86) : webp;
+};
+
 export function PilotSettings() {
   const { t } = useLanguage();
-  const { connectPilotApi, loginWithDiscord } = useAuth();
+  const { connectPilotApi, loginWithDiscord, pilot, refreshAuth } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const [notifications, setNotifications] = useState<NotificationPreferences>(defaultNotificationPreferences);
   const [discordUser, setDiscordUser] = useState<DiscordSessionUser | null>(null);
@@ -153,6 +208,8 @@ export function PilotSettings() {
   const [isSavingPilotLocation, setIsSavingPilotLocation] = useState(false);
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const [isSavingPilotPreferences, setIsSavingPilotPreferences] = useState(false);
+  const [profilePreferences, setProfilePreferences] = useState<Required<ProfilePreferences>>(normalizeProfilePreferences());
+  const [isSavingAvatar, setIsSavingAvatar] = useState(false);
   const [isGeneratingTelegramCode, setIsGeneratingTelegramCode] = useState(false);
   const [isDisconnectingTelegram, setIsDisconnectingTelegram] = useState(false);
   const forcedNotificationTypes = new Set<keyof NotificationPreferences["notificationTypes"]>(["review"]);
@@ -220,6 +277,8 @@ export function PilotSettings() {
             },
           });
         }
+
+        setProfilePreferences(normalizeProfilePreferences(payload?.preferences?.profile));
 
         const nextPilotPreferences = payload?.pilotApiPreferences;
         if (nextPilotPreferences && typeof nextPilotPreferences === "object") {
@@ -610,6 +669,94 @@ export function PilotSettings() {
     String(telegramUser?.chatId || "").trim() ||
     "Telegram";
   const telegramLinkCode = String(telegramStatus?.linkCode?.code || "").trim() || "";
+  const displayName = `${pilot?.firstName || "Pilot"} ${pilot?.lastName || ""}`.trim() || pilot?.callsign || "Pilot";
+  const avatarPreview =
+    profilePreferences.avatarMode === "custom"
+      ? profilePreferences.customAvatar
+      : profilePreferences.avatarMode === "discord"
+        ? String(discordUser?.avatarUrl || profilePreferences.discordAvatar || "").trim() || null
+        : String(pilot?.avatar || pilotApiProfile?.avatar || "").trim() || null;
+  const avatarModeLabel =
+    profilePreferences.avatarMode === "custom"
+      ? t("settings.avatar.source.custom")
+      : profilePreferences.avatarMode === "discord"
+        ? t("settings.avatar.source.discord")
+        : t("settings.avatar.source.default");
+
+  const saveAvatarPreferences = async (nextProfile: Required<ProfilePreferences>) => {
+    setIsSavingAvatar(true);
+    try {
+      const response = await fetch("/api/pilot/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          profile: nextProfile,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(String(payload?.error || t("settings.avatar.saveError")));
+      }
+
+      const normalized = normalizeProfilePreferences(payload?.preferences?.profile || nextProfile);
+      setProfilePreferences(normalized);
+      await refreshAuth();
+      toast.success(t("settings.avatar.saved"));
+    } catch (error) {
+      toast.error(String(error || t("settings.avatar.saveError")));
+    } finally {
+      setIsSavingAvatar(false);
+    }
+  };
+
+  const handleSelectCustomAvatar = () => {
+    avatarInputRef.current?.click();
+  };
+
+  const handleAvatarFileChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = "";
+    if (!file) {
+      return;
+    }
+
+    try {
+      const dataUrl = await resizeAvatarToDataUrl(file);
+      await saveAvatarPreferences({
+        avatarMode: "custom",
+        customAvatar: dataUrl,
+        discordAvatar: profilePreferences.discordAvatar,
+      });
+    } catch (error) {
+      toast.error(String(error || t("settings.avatar.invalidFile")));
+    }
+  };
+
+  const handleUseDiscordAvatar = async () => {
+    const discordAvatarUrl = String(discordUser?.avatarUrl || "").trim();
+    if (!discordUser || !discordAvatarUrl) {
+      toast.error(t("settings.avatar.discordRequired"));
+      return;
+    }
+
+    await saveAvatarPreferences({
+      avatarMode: "discord",
+      customAvatar: profilePreferences.customAvatar,
+      discordAvatar: discordAvatarUrl,
+    });
+  };
+
+  const handleResetAvatar = async () => {
+    await saveAvatarPreferences({
+      avatarMode: "default",
+      customAvatar: profilePreferences.customAvatar,
+      discordAvatar: profilePreferences.discordAvatar,
+    });
+  };
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
@@ -618,6 +765,57 @@ export function PilotSettings() {
       </div>
 
       <div className="grid gap-6">
+        <Card className="border-none shadow-sm">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <ImageUp className="w-5 h-5 text-[#E31E24]" />
+              <CardTitle>{t("settings.avatar.title")}</CardTitle>
+            </div>
+            <CardDescription>{t("settings.avatar.desc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-gray-50/80 p-4 sm:flex-row sm:items-center">
+              <Avatar className="h-24 w-24 border border-gray-200 bg-white shadow-sm">
+                {avatarPreview ? <AvatarImage src={avatarPreview} alt={displayName} /> : null}
+                <AvatarFallback className="bg-[#E31E24] text-xl font-bold text-white">
+                  {(pilot?.firstName?.[0] || "P")}{(pilot?.lastName?.[0] || "I")}
+                </AvatarFallback>
+              </Avatar>
+
+              <div className="min-w-0 flex-1 space-y-2">
+                <div>
+                  <div className="text-sm font-semibold text-gray-900">{displayName}</div>
+                  <div className="text-xs text-gray-500">{t("settings.avatar.currentSource").replace("{{source}}", avatarModeLabel)}</div>
+                </div>
+                <div className="text-sm text-gray-500">{t("settings.avatar.hint")}</div>
+              </div>
+            </div>
+
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={handleAvatarFileChange}
+            />
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <Button variant="outline" onClick={handleSelectCustomAvatar} disabled={isSavingAvatar}>
+                <ImageUp className="w-4 h-4 mr-2" />
+                {t("settings.avatar.upload")}
+              </Button>
+              <Button variant="outline" onClick={handleUseDiscordAvatar} disabled={isSavingAvatar}>
+                <MessageSquare className="w-4 h-4 mr-2" />
+                {t("settings.avatar.discord")}
+              </Button>
+              <Button variant="outline" onClick={handleResetAvatar} disabled={isSavingAvatar}>
+                <RotateCcw className="w-4 h-4 mr-2" />
+                {t("settings.avatar.reset")}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card className="border-none shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2">

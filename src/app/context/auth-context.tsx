@@ -49,6 +49,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAuthLoading: boolean;
   isAdmin: boolean;
+  isStaff: boolean;
   pilot: Pilot | null;
   loginWithPilotApi: (returnTo?: string) => Promise<void>;
   loginWithVAMSYS: () => Promise<void>;
@@ -64,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isStaff, setIsStaff] = useState(false);
   const [pilot, setPilot] = useState<Pilot | null>(null);
 
   const mapDiscordUserToPilot = (user: {
@@ -231,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAuthenticated(true);
         setPilot(mappedPilot);
         setIsAdmin(Boolean(payload?.isAdmin));
+        setIsStaff(Boolean(payload?.isStaff || payload?.user?.isStaff));
         setIsAuthLoading(false);
         return;
       }
@@ -245,6 +248,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setIsAuthenticated(true);
         setPilot(mappedPilot);
         setIsAdmin(Boolean(payload?.isAdmin));
+        setIsStaff(Boolean(payload?.isStaff || payload?.user?.isStaff));
         setIsAuthLoading(false);
         return;
       }
@@ -254,6 +258,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(false);
     setPilot(null);
     setIsAdmin(false);
+    setIsStaff(false);
     setIsAuthLoading(false);
   };
 
@@ -314,6 +319,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setIsAuthenticated(false);
     setIsAdmin(false);
+    setIsStaff(false);
     setPilot(null);
   };
 
@@ -323,6 +329,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated,
         isAuthLoading,
         isAdmin,
+        isStaff,
         pilot,
         loginWithPilotApi,
         loginWithVAMSYS,

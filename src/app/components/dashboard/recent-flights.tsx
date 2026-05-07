@@ -4,7 +4,8 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Card, CardContent } from "../ui/card";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
-import { Plane, Clock, MapPin, Calendar, TrendingUp, LayoutGrid, List } from "lucide-react";
+import { Plane, Clock, MapPin, Calendar, TrendingUp, LayoutGrid, List, Scale, Star } from "lucide-react";
+import { toast } from "sonner";
 import { CountryFlag } from "./country-flag";
 import { createDashboardSessionCache, fetchDashboardSessionCache, getDashboardSessionCache } from "./dashboard-session-cache";
 
@@ -41,6 +42,11 @@ interface RecentFlightsResponse {
 
 interface RecentFlightsProps {
   onOpenPirep?: (pirepId: number) => void;
+}
+
+interface FlightLogPreferences {
+  savedPirepIds: number[];
+  comparePirepIds: number[];
 }
 
 type RecentFlightsViewMode = "gallery" | "list";
@@ -177,6 +183,11 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
   const [hasError, setHasError] = useState(false);
   const [viewMode, setViewMode] = useState<RecentFlightsViewMode>("gallery");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [preferences, setPreferences] = useState<FlightLogPreferences>({
+    savedPirepIds: [],
+    comparePirepIds: [],
+  });
+  const [isSavingPreferences, setIsSavingPreferences] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -199,6 +210,39 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
       window.localStorage.setItem(RECENT_FLIGHTS_VIEW_MODE_KEY, nextViewMode);
     }
   };
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPreferences = async () => {
+      try {
+        const response = await fetch("/api/pilot/preferences", { credentials: "include" });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !active) {
+          return;
+        }
+        const nextPreferences = payload?.preferences?.flightLog;
+        setPreferences({
+          savedPirepIds: Array.isArray(nextPreferences?.savedPirepIds)
+            ? nextPreferences.savedPirepIds.map((item: unknown) => Number(item || 0) || 0).filter((item: number) => item > 0)
+            : [],
+          comparePirepIds: Array.isArray(nextPreferences?.comparePirepIds)
+            ? nextPreferences.comparePirepIds.map((item: unknown) => Number(item || 0) || 0).filter((item: number) => item > 0).slice(0, 3)
+            : [],
+        });
+      } catch {
+        if (active) {
+          setPreferences({ savedPirepIds: [], comparePirepIds: [] });
+        }
+      }
+    };
+
+    void loadPreferences();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -264,6 +308,57 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
     load();
   }, []);
 
+  const persistFlightLogPreferences = async (nextPreferences: FlightLogPreferences) => {
+    setPreferences(nextPreferences);
+    setIsSavingPreferences(true);
+    try {
+      const response = await fetch("/api/pilot/preferences", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          flightLog: nextPreferences,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(String(payload?.error || "Failed to save flight log preferences"));
+      }
+    } catch (error) {
+      toast.error(String(error instanceof Error ? error.message : "Failed to save flight log preferences"));
+    } finally {
+      setIsSavingPreferences(false);
+    }
+  };
+
+  const toggleSavedFlight = async (flightId: number) => {
+    const isSaved = preferences.savedPirepIds.includes(flightId);
+    const nextPreferences = {
+      ...preferences,
+      savedPirepIds: isSaved
+        ? preferences.savedPirepIds.filter((item) => item !== flightId)
+        : [flightId, ...preferences.savedPirepIds.filter((item) => item !== flightId)].slice(0, 48),
+    };
+    await persistFlightLogPreferences(nextPreferences);
+  };
+
+  const toggleCompareFlight = async (flightId: number) => {
+    const isCompared = preferences.comparePirepIds.includes(flightId);
+    const nextCompare = isCompared
+      ? preferences.comparePirepIds.filter((item) => item !== flightId)
+      : [...preferences.comparePirepIds, flightId].slice(0, 3);
+
+    if (!isCompared && preferences.comparePirepIds.length >= 3) {
+      toast.error(t("dashboard.recent.compareMax"));
+      return;
+    }
+
+    await persistFlightLogPreferences({
+      ...preferences,
+      comparePirepIds: nextCompare,
+    });
+  };
+
   if (isLoading) {
     return <div className="text-gray-500">{t("dashboard.recent.loading")}</div>;
   }
@@ -308,6 +403,8 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
     statusFilter === "all"
       ? flights
       : flights.filter((flight) => getRecentFlightStatusKey(flight) === statusFilter);
+  const savedFlights = flights.filter((flight) => preferences.savedPirepIds.includes(flight.id));
+  const comparedFlights = flights.filter((flight) => preferences.comparePirepIds.includes(flight.id));
 
   return (
     <div className="space-y-6">
@@ -334,6 +431,64 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
           </ToggleGroupItem>
         </ToggleGroup>
       </div>
+
+      {(savedFlights.length > 0 || comparedFlights.length > 0) ? (
+        <div className="grid gap-4 xl:grid-cols-2">
+          <Card className="border-none shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-[#2A2A2A]">{t("dashboard.recent.savedFlights")}</div>
+                  <div className="text-xs text-gray-500">{t("dashboard.recent.savedFlightsDesc")}</div>
+                </div>
+                <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-700">{savedFlights.length}</Badge>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {savedFlights.length > 0 ? savedFlights.map((flight) => (
+                  <button
+                    key={`saved-${flight.id}`}
+                    type="button"
+                    onClick={() => onOpenPirep?.(flight.id)}
+                    className="rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 transition hover:border-[#E31E24] hover:text-[#E31E24]"
+                  >
+                    {flight.flightNumber} · {flight.departure} - {flight.arrival}
+                  </button>
+                )) : <div className="text-sm text-gray-500">{t("dashboard.recent.noSaved")}</div>}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-sm">
+            <CardContent className="p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-[#2A2A2A]">{t("dashboard.recent.compareFlights")}</div>
+                  <div className="text-xs text-gray-500">{t("dashboard.recent.compareFlightsDesc")}</div>
+                </div>
+                <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">{comparedFlights.length}/3</Badge>
+              </div>
+              {comparedFlights.length > 0 ? (
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {comparedFlights.map((flight) => (
+                    <div key={`compare-${flight.id}`} className="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                      <div className="text-sm font-semibold text-[#2A2A2A]">{flight.flightNumber}</div>
+                      <div className="mt-1 text-xs text-gray-500">{flight.departure} - {flight.arrival}</div>
+                      <div className="mt-3 space-y-1 text-xs text-gray-600">
+                        <div>{t("dashboard.recent.duration")}: <span className="font-semibold text-[#2A2A2A]">{flight.duration}</span></div>
+                        <div>{t("dashboard.recent.distance")}: <span className="font-semibold text-[#2A2A2A]">{flight.distance}</span></div>
+                        <div>{t("dashboard.recent.landing")}: <span className={`font-semibold ${getLandingRateClassName(flight.landingRate)}`}>{flight.landing}</span></div>
+                        <div>{t("dashboard.recent.gForce")}: <span className="font-semibold text-[#2A2A2A]">{formatGForce(flight.gForce)}</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 text-sm text-gray-500">{t("dashboard.recent.compareHint")}</div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
       <div className="space-y-2">
         <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{t("dashboard.recent.filters")}</div>
@@ -378,6 +533,8 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
           {filteredFlights.map((flight) => {
             const departureDisplay = formatAirportDisplay(flight.departureCity, flight.departureAirport, flight.departureIcao || flight.departure);
             const arrivalDisplay = formatAirportDisplay(flight.destinationCity, flight.arrivalAirport, flight.arrivalIcao || flight.arrival);
+            const isSaved = preferences.savedPirepIds.includes(flight.id);
+            const isCompared = preferences.comparePirepIds.includes(flight.id);
             return (
             <Card key={flight.id} className="border-2 hover:border-[#E31E24] transition-colors">
               <CardContent className="p-6">
@@ -396,12 +553,23 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                   </div>
                 </div>
 
+                <div className="mb-4 flex flex-wrap gap-2">
+                  <Button size="sm" variant={isSaved ? "default" : "outline"} className={isSaved ? "bg-amber-500 text-white hover:bg-amber-600" : ""} onClick={() => void toggleSavedFlight(flight.id)} disabled={isSavingPreferences}>
+                    <Star className={`mr-2 h-4 w-4 ${isSaved ? "fill-current" : ""}`} />
+                    {isSaved ? t("dashboard.recent.saved") : t("dashboard.recent.save")}
+                  </Button>
+                  <Button size="sm" variant={isCompared ? "default" : "outline"} className={isCompared ? "bg-sky-600 text-white hover:bg-sky-700" : ""} onClick={() => void toggleCompareFlight(flight.id)} disabled={isSavingPreferences}>
+                    <Scale className="mr-2 h-4 w-4" />
+                    {isCompared ? t("dashboard.recent.compared") : t("dashboard.recent.compare")}
+                  </Button>
+                </div>
+
                 <div className="mb-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0 flex-1 text-left">
-                      <div className="flex items-center gap-2">
-                        <CountryFlag iso2={flight.departureCountryIso2} className="h-4 w-6" fallbackText={flight.departure.slice(0, 2)} />
-                        <div className="truncate text-lg font-bold text-[#2A2A2A]">{departureDisplay.primary}</div>
+                      <div className="flex items-start gap-2">
+                        <CountryFlag iso2={flight.departureCountryIso2} className="h-4 w-6 mt-1 shrink-0" fallbackText={flight.departure.slice(0, 2)} />
+                        <div className="break-words text-lg font-bold text-[#2A2A2A]">{departureDisplay.primary}</div>
                       </div>
                       <div className="mt-1 text-xs text-gray-600">{departureDisplay.secondary}</div>
                     </div>
@@ -410,9 +578,9 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                       <Plane className="absolute top-1/2 left-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 text-[#E31E24]" />
                     </div>
                     <div className="min-w-0 flex-1 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <div className="truncate text-lg font-bold text-[#2A2A2A]">{arrivalDisplay.primary}</div>
-                        <CountryFlag iso2={flight.arrivalCountryIso2} className="h-4 w-6" fallbackText={flight.arrival.slice(0, 2)} />
+                      <div className="flex items-start justify-end gap-2">
+                        <div className="break-words text-lg font-bold text-[#2A2A2A]">{arrivalDisplay.primary}</div>
+                        <CountryFlag iso2={flight.arrivalCountryIso2} className="h-4 w-6 mt-1 shrink-0" fallbackText={flight.arrival.slice(0, 2)} />
                       </div>
                       <div className="mt-1 text-xs text-gray-600">{arrivalDisplay.secondary}</div>
                     </div>
@@ -480,6 +648,8 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
           {filteredFlights.map((flight) => {
             const departureDisplay = formatAirportDisplay(flight.departureCity, flight.departureAirport, flight.departureIcao || flight.departure);
             const arrivalDisplay = formatAirportDisplay(flight.destinationCity, flight.arrivalAirport, flight.arrivalIcao || flight.arrival);
+            const isSaved = preferences.savedPirepIds.includes(flight.id);
+            const isCompared = preferences.comparePirepIds.includes(flight.id);
             return (
             <Card key={flight.id} className="border hover:border-[#E31E24] transition-colors">
               <CardContent className="p-4">
@@ -497,12 +667,12 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                       </div>
                       <p className="text-sm text-gray-600">{flight.aircraft}</p>
                       <div className="mt-2 flex flex-col gap-2 text-sm text-[#2A2A2A]">
-                        <div className="flex items-center gap-2 font-semibold">
-                          <CountryFlag iso2={flight.departureCountryIso2} className="h-4 w-6" fallbackText={flight.departure.slice(0, 2)} />
-                          <span className="truncate">{departureDisplay.primary}</span>
-                          <Plane className="h-3.5 w-3.5 text-[#E31E24]" />
-                          <span className="truncate">{arrivalDisplay.primary}</span>
-                          <CountryFlag iso2={flight.arrivalCountryIso2} className="h-4 w-6" fallbackText={flight.arrival.slice(0, 2)} />
+                        <div className="flex flex-wrap items-center gap-2 font-semibold">
+                          <CountryFlag iso2={flight.departureCountryIso2} className="h-4 w-6 shrink-0" fallbackText={flight.departure.slice(0, 2)} />
+                          <span title={departureDisplay.primary}>{departureDisplay.primary}</span>
+                          <Plane className="h-3.5 w-3.5 shrink-0 text-[#E31E24]" />
+                          <span title={arrivalDisplay.primary}>{arrivalDisplay.primary}</span>
+                          <CountryFlag iso2={flight.arrivalCountryIso2} className="h-4 w-6 shrink-0" fallbackText={flight.arrival.slice(0, 2)} />
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                           <span>{departureDisplay.secondary}</span>
@@ -558,13 +728,21 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                     </div>
                   </div>
 
-                  {onOpenPirep && flight.id > 0 ? (
-                    <div className="flex justify-end lg:min-w-[140px]">
+                  <div className="flex flex-wrap justify-end gap-2 lg:min-w-[280px]">
+                    <Button size="sm" variant={isSaved ? "default" : "outline"} className={isSaved ? "bg-amber-500 text-white hover:bg-amber-600" : ""} onClick={() => void toggleSavedFlight(flight.id)} disabled={isSavingPreferences}>
+                      <Star className={`mr-2 h-4 w-4 ${isSaved ? "fill-current" : ""}`} />
+                      {isSaved ? "Saved" : "Save"}
+                    </Button>
+                    <Button size="sm" variant={isCompared ? "default" : "outline"} className={isCompared ? "bg-sky-600 text-white hover:bg-sky-700" : ""} onClick={() => void toggleCompareFlight(flight.id)} disabled={isSavingPreferences}>
+                      <Scale className="mr-2 h-4 w-4" />
+                      {isCompared ? "Compared" : "Compare"}
+                    </Button>
+                    {onOpenPirep && flight.id > 0 ? (
                       <Button size="sm" variant="outline" onClick={() => onOpenPirep(flight.id)}>
                         {t("dashboard.recent.viewDetails")}
                       </Button>
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </div>
               </CardContent>
             </Card>

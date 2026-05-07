@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useAdminNav } from "./admin-nav-context";
 import { ArrowLeft, Award, Building2, Clock3, Edit, Loader2, Plane, Route, Send, ShieldCheck, Trash2, UserRound, Wifi, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
@@ -497,9 +498,11 @@ const BreakdownCard = ({
 };
 
 export function AdminPilotProfile() {
+  const { navigateTo } = useAdminNav();
   const navigate = useNavigate();
   const params = useParams();
-  const pilotId = Number(params.id || 0) || 0;
+  const [searchParams] = useSearchParams();
+  const pilotId = Number(params.id || searchParams.get("id") || 0) || 0;
   const [payload, setPayload] = useState<AdminPilotProfilePayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -783,7 +786,7 @@ export function AdminPilotProfile() {
   if (error || !payload) {
     return (
       <div className="space-y-4">
-        <Button variant="outline" onClick={() => navigate("/admin/pilots")}> 
+        <Button variant="outline" onClick={() => navigateTo("pilots")}> 
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to pilots
         </Button>
@@ -796,7 +799,7 @@ export function AdminPilotProfile() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <Button variant="outline" onClick={() => navigate("/admin/pilots")} className="mb-3">
+          <Button variant="outline" onClick={() => navigateTo("pilots")} className="mb-3">
             <ArrowLeft className="mr-2 h-4 w-4" />
             Back to pilots
           </Button>

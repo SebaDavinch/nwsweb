@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowLeft, Cloud, ExternalLink, Loader2, Plane, RefreshCcw, Send, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ClipboardList, Cloud, ExternalLink, Loader2, Plane, RefreshCcw, Send, Trash2 } from "lucide-react";
 import { Navigate, useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { useAuth } from "../../context/auth-context";
@@ -21,6 +21,7 @@ import {
   AlertDialogTrigger,
 } from "../ui/alert-dialog";
 import { FlightMap, type Route as FlightMapRoute } from "./flight-map";
+import { PassengerManifest } from "./passenger-manifest";
 
 interface Booking {
   id: number;
@@ -221,6 +222,7 @@ export function PilotBookingView() {
   const [scenarios, setScenarios] = useState<DashboardResource[]>([]);
   const [metarFrom, setMetarFrom] = useState<MetarResponse["metar"] | null>(null);
   const [metarTo, setMetarTo] = useState<MetarResponse["metar"] | null>(null);
+  const [isRefreshingMetar, setIsRefreshingMetar] = useState(false);
   const [cascadeCancellationCount, setCascadeCancellationCount] = useState(1);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isOpeningSimbrief, setIsOpeningSimbrief] = useState(false);
@@ -572,6 +574,53 @@ export function PilotBookingView() {
     }
   };
 
+  const handleCancelAndRebook = async () => {
+    if (!booking) return;
+    const routeId = booking.routeId;
+    setIsCancelling(true);
+    try {
+      const response = await fetch(`/api/pilot/bookings/${booking.id}`, { method: "DELETE", credentials: "include" });
+      const payload = (await response.json().catch(() => null)) as { error?: string; cancelledCount?: number } | null;
+      if (!response.ok) throw new Error(payload?.error || t("bookings.toast.cancelError"));
+      navigate(routeId ? `/dashboard?tab=bookings&rebook=${routeId}` : "/dashboard?tab=bookings", { replace: true });
+    } catch (error) {
+      toast.error(String(error || t("bookings.toast.cancelError")));
+    } finally {
+      setIsCancelling(false);
+    }
+  };
+
+  const refreshMetar = async () => {
+    if (!booking) return;
+    setIsRefreshingMetar(true);
+    try {
+      const [fromRes, toRes] = await Promise.all([
+        fetch(`/api/weather/metar/${encodeURIComponent(booking.departureCode)}`, { credentials: "include" }),
+        fetch(`/api/weather/metar/${encodeURIComponent(booking.arrivalCode)}`, { credentials: "include" }),
+      ]);
+      const fromPayload = fromRes.ok ? ((await fromRes.json().catch(() => null)) as MetarResponse | null) : null;
+      const toPayload = toRes.ok ? ((await toRes.json().catch(() => null)) as MetarResponse | null) : null;
+      setMetarFrom(fromPayload?.metar || null);
+      setMetarTo(toPayload?.metar || null);
+    } catch { /* ignore */ } finally {
+      setIsRefreshingMetar(false);
+    }
+  };
+
+  const formatTimeOnly = (value?: string | null) => {
+    if (!value) return "—";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return value;
+    return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  };
+
+  const computeSta = (dep?: string | null, durationMin?: number) => {
+    if (!dep || !durationMin) return null;
+    const d = new Date(dep);
+    if (isNaN(d.getTime())) return null;
+    return new Date(d.getTime() + durationMin * 60000);
+  };
+
   if (isAuthLoading) {
     return <div className="min-h-[50vh] flex items-center justify-center">Loading...</div>;
   }
@@ -584,99 +633,331 @@ export function PilotBookingView() {
     return <Navigate to="/dashboard?tab=bookings" replace />;
   }
 
+  const durationMin = booking ? parseDurationMinutes(route?.duration || "") : 0;
+  const staDate = booking ? computeSta(booking.departureTime, durationMin) : null;
+
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button variant="outline" onClick={() => navigate("/dashboard?tab=bookings")}> 
+    <div className="min-h-screen bg-gray-50">
+      {/* Top bar */}
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
+        <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard?tab=bookings")}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           К бронированиям
         </Button>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => window.location.reload()}>
-            <RefreshCcw className="mr-2 h-4 w-4" />
+          <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
+            <RefreshCcw className="mr-2 h-3.5 w-3.5" />
             {t("bookings.refresh")}
           </Button>
-          <Button className="bg-[#E31E24] text-white hover:bg-[#c21920]" onClick={handleOpenDispatch} disabled={isDispatching || !booking?.routeId}>
-            {isDispatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+          <Button size="sm" className="bg-[#E31E24] text-white hover:bg-[#c21920]" onClick={handleOpenDispatch} disabled={isDispatching || !booking?.routeId}>
+            {isDispatching ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-2 h-3.5 w-3.5" />}
             Phoenix / VATSIM
           </Button>
         </div>
       </div>
 
       {isLoading ? (
-        <Card className="border-none shadow-sm">
-          <CardContent className="flex items-center gap-3 p-6 text-sm text-gray-500">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            {t("bookings.loadingDetails")}
-          </CardContent>
-        </Card>
+        <div className="flex items-center justify-center py-24 text-sm text-gray-500">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          {t("bookings.loadingDetails")}
+        </div>
       ) : !booking ? (
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-6 text-sm text-gray-500">{t("bookings.noDetails")}</CardContent>
-        </Card>
+        <div className="flex items-center justify-center py-24 text-sm text-gray-500">{t("bookings.noDetails")}</div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-          <div className="space-y-4">
-            <Card className="border-none shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-lg text-[#1d1d1f]">
-                  <Plane className="h-5 w-5 text-[#E31E24]" />
-                  {booking.flightNumber} · {booking.departureCode} to {booking.arrivalCode}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-3 text-sm text-gray-700 sm:grid-cols-2">
-                <div><span className="text-gray-500">{t("bookings.field.status")}: </span><span className="font-medium">{booking.statusLabel}</span></div>
-                <div><span className="text-gray-500">{t("bookings.field.aircraft")}: </span><span className="font-medium">{booking.aircraft}</span></div>
-                <div><span className="text-gray-500">{t("bookings.field.departureTime")}: </span><span className="font-medium">{formatDateTime(booking.departureTime)}</span></div>
-                <div><span className="text-gray-500">{t("bookings.field.validTo")}: </span><span className="font-medium">{formatDateTime(booking.validTo)}</span></div>
-                <div><span className="text-gray-500">{t("bookings.field.altitude")}: </span><span className="font-medium">{booking.altitude || "-"}</span></div>
-                <div><span className="text-gray-500">{t("bookings.field.network")}: </span><span className="font-medium">{booking.network || "Offline"}</span></div>
-                <div className="sm:col-span-2"><span className="text-gray-500">{t("bookings.field.userRoute")}: </span><span className="font-medium">{booking.userRoute || route?.routeText || "-"}</span></div>
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Карта маршрута</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[420px] overflow-hidden rounded-xl bg-slate-100">
-                  <FlightMap route={mapRoute} />
-                </div>
-              </CardContent>
-            </Card>
-
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              <Card className="border-none shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base"><Cloud className="h-4 w-4 text-blue-600" />METAR {booking.departureCode}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800">{metarFrom?.raw || "METAR unavailable"}</div>
-                  <div className="text-xs text-slate-500">Observed: {formatDateTime(metarFrom?.observedAt || null)}</div>
-                </CardContent>
-              </Card>
-
-              <Card className="border-none shadow-sm">
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-base"><Cloud className="h-4 w-4 text-blue-600" />METAR {booking.arrivalCode}</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-2 text-sm">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800">{metarTo?.raw || "METAR unavailable"}</div>
-                  <div className="text-xs text-slate-500">Observed: {formatDateTime(metarTo?.observedAt || null)}</div>
-                </CardContent>
-              </Card>
-            </div>
+        <>
+          {/* Map — full width */}
+          <div className="h-[360px] w-full bg-slate-900">
+            <FlightMap route={mapRoute} />
           </div>
 
-          <div className="space-y-4">
-            <Card className="border-none shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Операции</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  <Label>{t("bookings.field.network")}</Label>
+          {/* Validity alert */}
+          {booking.validTo && (
+            <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-6 py-2.5 text-sm text-amber-800">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              Рейс необходимо начать до {formatDateTime(booking.validTo)} UTC
+            </div>
+          )}
+
+          {/* Main grid */}
+          <div className="mx-auto max-w-[1400px] px-6 py-6">
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1fr_340px]">
+
+              {/* ── Left column ───────────────────────────────────────────── */}
+              <div className="space-y-4 min-w-0">
+
+                {/* Flight Info card */}
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                  {/* Header row */}
+                  <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-6 py-4">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-0.5">Callsign · Номер рейса</div>
+                      <div className="text-xl font-bold text-gray-900 font-mono tracking-wide">
+                        {booking.callsign} <span className="text-gray-300">|</span> {booking.flightNumber}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-0.5">Статус</div>
+                      <Badge variant="outline" className="border-gray-200 text-gray-600">{booking.statusLabel}</Badge>
+                    </div>
+                  </div>
+
+                  {/* Route display */}
+                  <div className="px-6 py-5">
+                    <div className="flex items-center gap-4">
+                      {/* Departure */}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-1">Вылет</div>
+                        <div className="text-4xl font-bold font-mono text-gray-900 leading-none">{booking.departureCode}</div>
+                        <div className="mt-1.5 text-sm text-gray-500 truncate">{booking.departureName}</div>
+                      </div>
+
+                      {/* Route line */}
+                      <div className="flex flex-col items-center gap-1.5 flex-none">
+                        <div className="flex items-center gap-1">
+                          <div className="h-px w-12 bg-gray-200 sm:w-20" />
+                          <Plane className="h-5 w-5 text-[#E31E24]" />
+                          <div className="h-px w-12 bg-gray-200 sm:w-20" />
+                        </div>
+                        {route?.distance && (
+                          <div className="text-xs font-medium text-gray-400">{route.distance}</div>
+                        )}
+                        {route?.duration && (
+                          <div className="text-xs text-gray-400">{route.duration}</div>
+                        )}
+                      </div>
+
+                      {/* Arrival */}
+                      <div className="flex-1 min-w-0 text-right">
+                        <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-1">Прилёт</div>
+                        <div className="text-4xl font-bold font-mono text-gray-900 leading-none">{booking.arrivalCode}</div>
+                        <div className="mt-1.5 text-sm text-gray-500 truncate">{booking.arrivalName}</div>
+                      </div>
+                    </div>
+
+                    {/* Stats grid */}
+                    <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {[
+                        { label: "STD", value: formatTimeOnly(booking.departureTime) },
+                        { label: "Длительность", value: route?.duration || "—" },
+                        { label: "Расстояние", value: route?.distance || "—" },
+                        { label: "STA", value: staDate ? formatTimeOnly(staDate.toISOString()) : "—" },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="rounded-xl bg-gray-50 px-4 py-3">
+                          <div className="text-[11px] uppercase tracking-widest text-gray-400">{label}</div>
+                          <div className="mt-1 text-base font-bold text-gray-800 font-mono">{value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* METAR row */}
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[11px] uppercase tracking-widest text-gray-400">METAR</span>
+                        <button
+                          type="button"
+                          onClick={() => void refreshMetar()}
+                          disabled={isRefreshingMetar}
+                          className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors disabled:opacity-40"
+                        >
+                          <RefreshCcw className={`h-3 w-3 ${isRefreshingMetar ? "animate-spin" : ""}`} />
+                          {isRefreshingMetar ? "Обновление..." : "Обновить"}
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {[
+                          { code: booking.departureCode, metar: metarFrom },
+                          { code: booking.arrivalCode, metar: metarTo },
+                        ].map(({ code, metar }) => (
+                          <div key={code} className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                            <div className="mb-1.5 flex items-center gap-2">
+                              <Cloud className="h-3.5 w-3.5 text-blue-500" />
+                              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">METAR {code}</span>
+                            </div>
+                            <div className="font-mono text-xs text-gray-700 break-all leading-relaxed">
+                              {metar?.raw || <span className="text-gray-400 not-italic">Нет данных</span>}
+                            </div>
+                            {metar?.observedAt && (
+                              <div className="mt-1 text-[10px] text-gray-400">{formatDateTime(metar.observedAt)}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Aircraft / flight details card */}
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-6 py-5">
+                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-4">Информация о рейсе</div>
+                  <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-5">
+                    <div>
+                      <div className="text-[11px] uppercase text-gray-400">Воздушное судно</div>
+                      <div className="mt-0.5 font-bold text-gray-900 font-mono">{booking.registration || "—"}</div>
+                      <div className="text-xs text-gray-500">{booking.aircraft}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase text-gray-400">Эшелон</div>
+                      <div className="mt-0.5 font-bold text-gray-900">{booking.altitude || "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase text-gray-400">Пассажиры</div>
+                      <div className="mt-0.5 font-bold text-gray-900">{booking.passengers ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase text-gray-400">Груз</div>
+                      <div className="mt-0.5 font-bold text-gray-900">{booking.cargo ? `${booking.cargo} kg` : "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-[11px] uppercase text-gray-400">Сеть</div>
+                      <div className="mt-0.5 font-bold text-gray-900">{booking.network || "Offline"}</div>
+                    </div>
+                  </div>
+                  {(booking.userRoute || route?.routeText) && (
+                    <div className="mt-4">
+                      <div className="text-[11px] uppercase text-gray-400 mb-1.5">Маршрут</div>
+                      <div className="rounded-xl bg-gray-50 px-4 py-3 font-mono text-xs text-gray-700 break-all leading-relaxed">
+                        {booking.userRoute || route?.routeText}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Passenger manifest */}
+                <PassengerManifest
+                  bookingId={booking.id}
+                  departureCode={booking.departureCode}
+                  arrivalCode={booking.arrivalCode}
+                  passengers={booking.passengers}
+                  flightNumber={booking.flightNumber}
+                />
+              </div>
+
+              {/* ── Right sidebar ─────────────────────────────────────────── */}
+              <div className="space-y-4">
+
+                {/* Booking actions */}
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
+                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">Действия с бронированием</div>
+                  <div className="space-y-2">
+                    {/* Phoenix dispatch — opens vAMSYS dispatch which pre-files to VATSIM */}
+                    <Button
+                      className="w-full justify-start bg-[#E31E24] text-white hover:bg-[#c21920]"
+                      onClick={handleOpenDispatch}
+                      disabled={isDispatching || !booking.routeId}
+                    >
+                      {isDispatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                      Подать на VATSIM / Phoenix
+                    </Button>
+                    {/* VATSIM Prefile — direct flight plan filing on my.vatsim.net */}
+                    <Button variant="outline" className="w-full justify-start"
+                      onClick={() => {
+                        const cs = encodeURIComponent(booking.callsign || booking.flightNumber);
+                        const dep = encodeURIComponent(booking.departureCode);
+                        const arr = encodeURIComponent(booking.arrivalCode);
+                        const alt = encodeURIComponent(booking.altitude || "");
+                        const rt = encodeURIComponent(booking.userRoute || route?.routeText || "");
+                        window.open(
+                          `https://my.vatsim.net/pilots/pre-file?callsign=${cs}&departure=${dep}&arrival=${arr}&altitude=${alt}&route=${rt}`,
+                          "_blank", "noopener,noreferrer"
+                        );
+                      }}>
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      VATSIM Prefile
+                    </Button>
+                    {/* VATSIM map — live tracking */}
+                    <Button variant="outline" className="w-full justify-start"
+                      onClick={() => window.open(`https://map.vatsim.net/?search=${encodeURIComponent(booking.callsign || booking.flightNumber)}`, "_blank", "noopener,noreferrer")}>
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Карта VATSIM
+                    </Button>
+                    {/* FR24 — live flight by callsign */}
+                    <Button variant="outline" className="w-full justify-start"
+                      onClick={() => window.open(`https://www.flightradar24.com/${encodeURIComponent(booking.callsign || booking.flightNumber)}`, "_blank", "noopener,noreferrer")}>
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Flightradar24 (рейс)
+                    </Button>
+                    {/* FR24 by registration — aircraft history */}
+                    {booking.registration && (
+                      <Button variant="outline" className="w-full justify-start text-gray-500"
+                        onClick={() => window.open(`https://www.flightradar24.com/data/aircraft/${encodeURIComponent(String(booking.registration || "").trim())}`, "_blank", "noopener,noreferrer")}>
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        FR24 по регистрации ({booking.registration})
+                      </Button>
+                    )}
+                    <Button variant="outline" className="w-full justify-start"
+                      onClick={() => navigate(`/dashboard?tab=manual-pirep&bookingId=${booking.id}`)}>
+                      <ClipboardList className="mr-2 h-4 w-4" />
+                      Подать ручной PIREP
+                    </Button>
+                    <Button variant="outline" className="w-full justify-start border-amber-200 text-amber-700 hover:bg-amber-50"
+                      onClick={handleReportOutdatedRoute} disabled={isReportingRoute || !booking.routeId}>
+                      {isReportingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
+                      {t("bookings.reportInactive")}
+                    </Button>
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="destructive" className="w-full justify-start" disabled={isCancelling}>
+                          {isCancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
+                          Отменить бронирование
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogHeader>
+                          <AlertDialogTitle>Отменить текущее бронирование?</AlertDialogTitle>
+                          <AlertDialogDescription>Это действие необратимо.</AlertDialogDescription>
+                        </AlertDialogHeader>
+                        {cascadeCancellationCount > 1 && (
+                          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                            <div className="flex items-center gap-2 font-medium">
+                              <AlertTriangle className="h-4 w-4" />
+                              Будет отменена цепочка бронирований
+                            </div>
+                            <div className="mt-1 text-xs text-amber-700">
+                              Вместе с текущим отменится ещё {cascadeCancellationCount - 1} по маршруту.
+                            </div>
+                          </div>
+                        )}
+                        <AlertDialogFooter>
+                          <AlertDialogCancel disabled={isCancelling}>Назад</AlertDialogCancel>
+                          <AlertDialogAction className="bg-[#E31E24] text-white hover:bg-[#c21920]" disabled={isCancelling}
+                            onClick={(e) => { e.preventDefault(); void handleCancelBooking(); }}>
+                            Подтвердить отмену
+                          </AlertDialogAction>
+                        </AlertDialogFooter>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                    {/* Cancel & Rebook */}
+                    {booking.routeId && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="outline" className="w-full justify-start border-orange-200 text-orange-700 hover:bg-orange-50" disabled={isCancelling}>
+                            {isCancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                            Отмена + переброня
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Отменить и забронировать снова?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Текущее бронирование будет отменено, и вы попадёте сразу к форме нового бронирования на этот же маршрут.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel disabled={isCancelling}>Назад</AlertDialogCancel>
+                            <AlertDialogAction className="bg-orange-600 text-white hover:bg-orange-700" disabled={isCancelling}
+                              onClick={(e) => { e.preventDefault(); void handleCancelAndRebook(); }}>
+                              Подтвердить
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </div>
+                </div>
+
+                {/* Network select */}
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
+                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">Сеть</div>
                   <Select value={networkValue || "Offline"} onValueChange={handleNetworkUpdate} disabled={isUpdatingNetwork}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select network" />
@@ -689,164 +970,58 @@ export function PilotBookingView() {
                   </Select>
                 </div>
 
-                <Button
-                                    variant="outline"
-                                    className="w-full justify-start border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-                                    onClick={handleReportOutdatedRoute}
-                                    disabled={isReportingRoute || !booking.routeId}
-                                  >
-                                    {isReportingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <AlertTriangle className="mr-2 h-4 w-4" />}
-                                    {t("bookings.reportInactive")}
-                                  </Button>
-
-                                  <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={() => window.open(`https://map.vatsim.net/?search=${encodeURIComponent(booking.callsign || booking.flightNumber)}`, "_blank", "noopener,noreferrer")}
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Отправка / просмотр в VATSIM
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  disabled={!booking.registration}
-                  onClick={() =>
-                    window.open(
-                      `https://www.flightradar24.com/data/aircraft/${encodeURIComponent(String(booking.registration || "").trim())}`,
-                      "_blank",
-                      "noopener,noreferrer"
-                    )
-                  }
-                >
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  FR24 по регистрации
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={openSimbrief}
-                  disabled={isOpeningSimbrief || isRefreshingSimbrief}
-                >
-                  {isOpeningSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ExternalLink className="mr-2 h-4 w-4" />}
-                  SimBrief OFP
-                </Button>
-
-                <Button
-                  variant="outline"
-                  className="w-full justify-start"
-                  onClick={refreshSimbrief}
-                  disabled={isRefreshingSimbrief || isOpeningSimbrief}
-                >
-                  {isRefreshingSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                  Обновить SimBrief OFP
-                </Button>
-
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="destructive" className="w-full justify-start" disabled={isCancelling}>
-                      {isCancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                      Отменить бронирование
+                {/* SimBrief */}
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
+                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">SimBrief</div>
+                  <div className="space-y-2">
+                    <Button variant="outline" className="w-full justify-start" onClick={openSimbrief} disabled={isOpeningSimbrief || isRefreshingSimbrief}>
+                      {isOpeningSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ExternalLink className="mr-2 h-4 w-4" />}
+                      Открыть OFP
                     </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Отменить текущее бронирование?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Это действие необратимо.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    {cascadeCancellationCount > 1 ? (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                        <div className="flex items-center gap-2 font-medium">
-                          <AlertTriangle className="h-4 w-4" />
-                          Будет отменена цепочка бронирований
-                        </div>
-                        <div className="mt-1 text-xs text-amber-700">
-                          Вместе с текущим бронированием отменится еще {cascadeCancellationCount - 1} последующих по маршруту.
-                        </div>
-                      </div>
-                    ) : null}
-                    <AlertDialogFooter>
-                      <AlertDialogCancel disabled={isCancelling}>Назад</AlertDialogCancel>
-                      <AlertDialogAction
-                        className="bg-[#E31E24] text-white hover:bg-[#c21920]"
-                        disabled={isCancelling}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          void handleCancelBooking();
-                        }}
-                      >
-                        Подтвердить отмену
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Ливреи</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                <Button
-                  className="w-full bg-[#E31E24] text-white hover:bg-[#c21920]"
-                  disabled={!liveries.length || !liveries[0]?.url}
-                  onClick={() => {
-                    const target = liveries[0]?.url;
-                    if (target) {
-                      window.open(target, "_blank", "noopener,noreferrer");
-                    }
-                  }}
-                >
-                  Скачать ливрею
-                </Button>
-                <div className="flex flex-wrap gap-2">
-                  {liveries.length > 0 ? (
-                    liveries.map((item, index) => (
-                      <Badge key={`${item.label}-${index}`} variant="outline" className="bg-slate-50 text-slate-700">
-                        {item.label}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-sm text-slate-500">Ливреи не найдены</span>
-                  )}
+                    <Button variant="outline" className="w-full justify-start" onClick={refreshSimbrief} disabled={isRefreshingSimbrief || isOpeningSimbrief}>
+                      {isRefreshingSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                      Обновить OFP
+                    </Button>
+                  </div>
                 </div>
-              </CardContent>
-            </Card>
 
-            <Card className="border-none shadow-sm">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Сценарии (опционально)</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2">
-                {scenarios.length > 0 ? (
-                  scenarios.map((item, index) => (
-                    <Button
-                      key={`${item.label}-${index}`}
-                      variant="outline"
-                      className="w-full justify-start"
-                      disabled={!item.url}
-                      onClick={() => {
-                        if (item.url) {
-                          window.open(item.url, "_blank", "noopener,noreferrer");
-                        }
-                      }}
-                    >
-                      <ExternalLink className="mr-2 h-4 w-4" />
-                      {item.label}
-                    </Button>
-                  ))
-                ) : (
-                  <span className="text-sm text-slate-500">Сценарии не найдены</span>
+                {/* Liveries */}
+                <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
+                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">Ливреи</div>
+                  <Button className="w-full bg-[#E31E24] text-white hover:bg-[#c21920] mb-2"
+                    disabled={!liveries.length || !liveries[0]?.url}
+                    onClick={() => { const u = liveries[0]?.url; if (u) window.open(u, "_blank", "noopener,noreferrer"); }}>
+                    Скачать ливрею
+                  </Button>
+                  <div className="flex flex-wrap gap-1.5">
+                    {liveries.length > 0
+                      ? liveries.map((item, i) => (
+                          <Badge key={`${item.label}-${i}`} variant="outline" className="bg-slate-50 text-slate-700 text-xs">{item.label}</Badge>
+                        ))
+                      : <span className="text-xs text-slate-400">Ливреи не найдены</span>}
+                  </div>
+                </div>
+
+                {/* Scenarios */}
+                {scenarios.length > 0 && (
+                  <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
+                    <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">Сценарии</div>
+                    <div className="space-y-2">
+                      {scenarios.map((item, i) => (
+                        <Button key={`${item.label}-${i}`} variant="outline" className="w-full justify-start" disabled={!item.url}
+                          onClick={() => { if (item.url) window.open(item.url, "_blank", "noopener,noreferrer"); }}>
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          {item.label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-        </div>
+
+              </div>{/* end right sidebar */}
+            </div>{/* end grid */}
+          </div>{/* end max-w container */}
+        </>
       )}
     </div>
   );

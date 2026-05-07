@@ -186,9 +186,9 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
                   <SelectValue placeholder={t("admin.news.table.status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Published">Published</SelectItem>
-                  <SelectItem value="Draft">Draft</SelectItem>
-                  <SelectItem value="Archived">Archived</SelectItem>
+                  <SelectItem value="Published">Опубликовано</SelectItem>
+                  <SelectItem value="Draft">Черновик</SelectItem>
+                  <SelectItem value="Archived">Архив</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -210,35 +210,35 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
             <div className="space-y-4 rounded-lg border border-orange-200 bg-orange-50 p-4">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="space-y-2">
-                  <Label>{t("admin.news.form.notamType") || "NOTAM Type"}</Label>
+                  <Label>{t("admin.news.form.notamType") || "Тип NOTAM"}</Label>
                   <Select value={notamType} onValueChange={(value) => setNotamType(value as NonNullable<NewsFormData["notamType"]>)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="info">{t("admin.news.form.notamType.info") || "Info"}</SelectItem>
-                      <SelectItem value="warning">{t("admin.news.form.notamType.warning") || "Warning"}</SelectItem>
-                      <SelectItem value="critical">{t("admin.news.form.notamType.critical") || "Critical"}</SelectItem>
+                      <SelectItem value="info">{t("admin.news.form.notamType.info") || "Информация"}</SelectItem>
+                      <SelectItem value="warning">{t("admin.news.form.notamType.warning") || "Предупреждение"}</SelectItem>
+                      <SelectItem value="critical">{t("admin.news.form.notamType.critical") || "Критично"}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>{t("admin.news.form.priority") || "Priority"}</Label>
+                  <Label>{t("admin.news.form.priority") || "Приоритет"}</Label>
                   <Select value={notamPriority} onValueChange={(value) => setNotamPriority(value as NonNullable<NewsFormData["notamPriority"]>)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="low">{t("admin.news.form.priority.low") || "Low"}</SelectItem>
-                      <SelectItem value="medium">{t("admin.news.form.priority.medium") || "Medium"}</SelectItem>
-                      <SelectItem value="high">{t("admin.news.form.priority.high") || "High"}</SelectItem>
+                      <SelectItem value="low">{t("admin.news.form.priority.low") || "Низкий"}</SelectItem>
+                      <SelectItem value="medium">{t("admin.news.form.priority.medium") || "Средний"}</SelectItem>
+                      <SelectItem value="high">{t("admin.news.form.priority.high") || "Высокий"}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
 
                 <div className="space-y-2">
-                  <Label>{t("admin.news.form.tag") || "Tag"}</Label>
+                  <Label>{t("admin.news.form.tag") || "Тег"}</Label>
                   <Input
                     placeholder="OPS"
                     value={notamTag}
@@ -248,7 +248,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
               </div>
 
               <div className="space-y-2">
-                <Label>{t("admin.news.form.referenceUrl") || "Reference URL"}</Label>
+                <Label>{t("admin.news.form.referenceUrl") || "Ссылка-источник"}</Label>
                 <Input
                   placeholder="https://..."
                   value={notamUrl}
@@ -262,7 +262,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
                   checked={mustRead}
                   onCheckedChange={(checked) => setMustRead(Boolean(checked))}
                 />
-                <Label htmlFor="must-read">{t("admin.news.form.mustRead") || "Must read"}</Label>
+                <Label htmlFor="must-read">{t("admin.news.form.mustRead") || "Обязательно к прочтению"}</Label>
               </div>
             </div>
           )}

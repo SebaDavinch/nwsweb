@@ -67,7 +67,7 @@ export function TicketBell() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="icon" className="relative h-10 w-10 rounded-full border-red-200 text-[#E31E24] hover:bg-red-50">
+        <Button variant="ghost" size="icon" className="relative h-10 w-10 rounded-full border border-white/10 bg-transparent text-[#E31E24] hover:bg-white/10 hover:text-white">
           <Bell className="h-4 w-4" />
           {unreadCount > 0 ? (
             <span className="absolute -right-1 -top-1 h-5 min-w-5 rounded-full bg-[#E31E24] px-1 text-[10px] font-bold text-white flex items-center justify-center">

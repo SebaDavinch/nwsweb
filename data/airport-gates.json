@@ -1,0 +1,48 @@
+{
+  "_comment": "Custom gate/stand data per airport. Overrides Overpass/OSM data when present.",
+  "_format": "Each key is ICAO code. 'gates' array: id (string), ref (stand number), name (display name), lat, lng, type (parking_position|gate|remote).",
+  "ULLI": {
+    "_source": "Pulkovo AIP AD 2 ULLI / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "UUEE": {
+    "_source": "Sheremetyevo AIP AD 2 UUEE / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "UUWW": {
+    "_source": "Vnukovo AIP AD 2 UUWW / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "UUDD": {
+    "_source": "Domodedovo AIP AD 2 UUDD / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "URSS": {
+    "_source": "Sochi AIP AD 2 URSS / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "USSS": {
+    "_source": "Koltsovo AIP AD 2 USSS / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "UNNT": {
+    "_source": "Tolmachevo AIP AD 2 UNNT / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "URRR": {
+    "_source": "Platov AIP AD 2 URRR / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "URKK": {
+    "_source": "Pashkovsky AIP AD 2 URKK / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "URMO": {
+    "_source": "Mineralnye Vody AIP AD 2 URMO / ground chart — TODO: fill from official chart",
+    "gates": []
+  },
+  "UWWW": {
+    "_source": "Kurumoch AIP AD 2 UWWW / ground chart — TODO: fill from official chart",
+    "gates": []
+  }
+}

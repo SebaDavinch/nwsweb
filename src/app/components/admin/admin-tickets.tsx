@@ -7,6 +7,7 @@ import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { useLanguage } from "../../context/language-context";
 
 interface TicketConfigItem {
   id: string;
@@ -65,6 +66,8 @@ const formatDateTime = (value: string) => {
 };
 
 export function AdminTickets() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingConfig, setIsSavingConfig] = useState(false);
   const [isUpdatingTicket, setIsUpdatingTicket] = useState(false);
@@ -225,31 +228,31 @@ export function AdminTickets() {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Tickets</h2>
-          <p className="text-sm text-gray-500">Monitor pilot tickets and manage categories, tags and assignees.</p>
+          <h2 className="text-2xl font-bold text-gray-800">{tr("Тикеты", "Tickets")}</h2>
+          <p className="text-sm text-gray-500">{tr("Отслеживайте тикеты пилотов и управляйте категориями, тегами и исполнителями.", "Track pilot tickets and manage categories, tags, and assignees.")}</p>
         </div>
         <Button variant="outline" onClick={() => loadData()} disabled={isLoading}>
           <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh
+          {tr("Обновить", "Refresh")}
         </Button>
       </div>
 
       <Card className="border-none shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Ticket configuration</CardTitle>
+          <CardTitle className="text-base">{tr("Настройки тикетов", "Ticket Settings")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
             <div>
-              <div className="font-medium text-gray-900">Ticket system enabled</div>
-              <div className="text-xs text-gray-500">Disable to block new ticket creation from the website.</div>
+              <div className="font-medium text-gray-900">{tr("Система тикетов включена", "Ticket system enabled")}</div>
+              <div className="text-xs text-gray-500">{tr("Отключите, чтобы запретить создание новых тикетов с сайта.", "Disable to prevent new tickets from being created on the site.")}</div>
             </div>
             <Switch checked={config.enabled} onCheckedChange={(checked) => setConfig((prev) => ({ ...prev, enabled: Boolean(checked) }))} />
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-              <div className="text-sm font-semibold text-gray-700">Categories</div>
+              <div className="text-sm font-semibold text-gray-700">{tr("Категории", "Categories")}</div>
               {config.categories.map((item, index) => (
                 <div key={item.id} className="flex items-center gap-2">
                   <Input
@@ -280,7 +283,7 @@ export function AdminTickets() {
                 <Input
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
-                  placeholder="New category..."
+                  placeholder={tr("Новая категория...", "New category...")}
                   onKeyDown={(e) => e.key === "Enter" && addNewCategory()}
                 />
                 <Button
@@ -295,7 +298,7 @@ export function AdminTickets() {
             </div>
 
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-              <div className="text-sm font-semibold text-gray-700">Tags</div>
+              <div className="text-sm font-semibold text-gray-700">{tr("Теги", "Tags")}</div>
               {config.tags.map((item, index) => (
                 <div key={item.id} className="flex items-center gap-2">
                   <Input
@@ -326,7 +329,7 @@ export function AdminTickets() {
                 <Input
                   value={newTagName}
                   onChange={(e) => setNewTagName(e.target.value)}
-                  placeholder="New tag..."
+                  placeholder={tr("Новый тег...", "New tag...")}
                   onKeyDown={(e) => e.key === "Enter" && addNewTag()}
                 />
                 <Button
@@ -341,9 +344,9 @@ export function AdminTickets() {
             </div>
 
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-              <div className="text-sm font-semibold text-gray-700">Assignees</div>
+              <div className="text-sm font-semibold text-gray-700">{tr("Исполнители", "Assignees")}</div>
               {config.assignees.length === 0 && !newAssigneeName ? (
-                <div className="text-sm text-gray-500">No assignees configured</div>
+                <div className="text-sm text-gray-500">{tr("Исполнители не настроены", "No assignees configured")}</div>
               ) : (
                 config.assignees.map((item, index) => (
                   <div key={item.id} className="flex items-center gap-2">
@@ -376,7 +379,7 @@ export function AdminTickets() {
                 <Input
                   value={newAssigneeName}
                   onChange={(e) => setNewAssigneeName(e.target.value)}
-                  placeholder="New assignee..."
+                  placeholder={tr("Новый исполнитель...", "New assignee...")}
                   onKeyDown={(e) => e.key === "Enter" && addNewAssignee()}
                 />
                 <Button
@@ -394,7 +397,7 @@ export function AdminTickets() {
           <div className="flex justify-end">
             <Button onClick={saveConfig} disabled={isSavingConfig} className="bg-[#E31E24] hover:bg-[#c91a1f]">
               {isSavingConfig ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-              Save configuration
+              {tr("Сохранить конфигурацию", "Save configuration")}
             </Button>
           </div>
         </CardContent>
@@ -403,13 +406,13 @@ export function AdminTickets() {
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         <Card className="xl:col-span-4 border-none shadow-sm">
           <CardHeader>
-            <CardTitle className="text-base">Ticket queue</CardTitle>
+            <CardTitle className="text-base">{tr("Очередь тикетов", "Ticket Queue")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 max-h-[640px] overflow-auto">
             {isLoading ? (
-              <div className="text-sm text-gray-500 flex items-center"><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...</div>
+              <div className="text-sm text-gray-500 flex items-center"><Loader2 className="h-4 w-4 animate-spin mr-2" /> {tr("Загрузка...", "Loading...")}</div>
             ) : tickets.length === 0 ? (
-              <div className="text-sm text-gray-500">No tickets found.</div>
+              <div className="text-sm text-gray-500">{tr("Тикеты не найдены.", "No tickets found.")}</div>
             ) : (
               tickets.map((ticket) => (
                 <button
@@ -438,7 +441,7 @@ export function AdminTickets() {
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <div>
                     <CardTitle className="text-lg">#{selectedTicket.number} {selectedTicket.subject}</CardTitle>
-                    <div className="text-sm text-gray-500 mt-1">{selectedTicket.owner?.name || "Pilot"} ({selectedTicket.owner?.username || "unknown"})</div>
+                    <div className="text-sm text-gray-500 mt-1">{selectedTicket.owner?.name || tr("Пилот", "Pilot")} ({selectedTicket.owner?.username || tr("неизвестно", "unknown")})</div>
                   </div>
                   <Badge variant="outline" className={statusBadgeClass[selectedTicket.status]}>{selectedTicket.status}</Badge>
                 </div>
@@ -447,31 +450,31 @@ export function AdminTickets() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <Select value={selectedTicket.status} onValueChange={(value) => updateTicket({ status: value as Ticket["status"] })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Status" />
+                      <SelectValue placeholder={tr("Статус", "Status")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="open">open</SelectItem>
-                      <SelectItem value="in_progress">in_progress</SelectItem>
-                      <SelectItem value="resolved">resolved</SelectItem>
-                      <SelectItem value="closed">closed</SelectItem>
+                      <SelectItem value="open">{tr("Открыт", "Open")}</SelectItem>
+                      <SelectItem value="in_progress">{tr("В работе", "In progress")}</SelectItem>
+                      <SelectItem value="resolved">{tr("Решён", "Resolved")}</SelectItem>
+                      <SelectItem value="closed">{tr("Закрыт", "Closed")}</SelectItem>
                     </SelectContent>
                   </Select>
 
                   <Select value={selectedTicket.priority} onValueChange={(value) => updateTicket({ priority: value as Ticket["priority"] })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Priority" />
+                      <SelectValue placeholder={tr("Приоритет", "Priority")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="low">low</SelectItem>
-                      <SelectItem value="normal">normal</SelectItem>
-                      <SelectItem value="high">high</SelectItem>
-                      <SelectItem value="critical">critical</SelectItem>
+                      <SelectItem value="low">{tr("Низкий", "Low")}</SelectItem>
+                      <SelectItem value="normal">{tr("Обычный", "Normal")}</SelectItem>
+                      <SelectItem value="high">{tr("Высокий", "High")}</SelectItem>
+                      <SelectItem value="critical">{tr("Критический", "Critical")}</SelectItem>
                     </SelectContent>
                   </Select>
 
                   <Select value={selectedTicket.categoryId} onValueChange={(value) => updateTicket({ categoryId: value })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Category" />
+                      <SelectValue placeholder={tr("Категория", "Category")} />
                     </SelectTrigger>
                     <SelectContent>
                       {config.categories.map((item) => (
@@ -482,10 +485,10 @@ export function AdminTickets() {
 
                   <Select value={selectedTicket.assigneeId || "none"} onValueChange={(value) => updateTicket({ assigneeId: value === "none" ? null : value })}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Assignee" />
+                      <SelectValue placeholder={tr("Исполнитель", "Assignee")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">Unassigned</SelectItem>
+                      <SelectItem value="none">{tr("Не назначен", "Unassigned")}</SelectItem>
                       {config.assignees.filter((item) => Boolean(item.enabled)).map((item) => (
                         <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
                       ))}
@@ -497,7 +500,7 @@ export function AdminTickets() {
                   <Input
                     value={tagDraft}
                     onChange={(e) => setTagDraft(e.target.value)}
-                    placeholder="Ticket tags (comma-separated)"
+                    placeholder={tr("Теги тикета (через запятую)", "Ticket tags (comma-separated)")}
                   />
                   <Button
                     variant="outline"
@@ -510,7 +513,7 @@ export function AdminTickets() {
                       updateTicket({ tags: nextTags });
                     }}
                   >
-                    Apply tags
+                    {tr("Применить теги", "Apply tags")}
                   </Button>
                 </div>
 
@@ -527,17 +530,17 @@ export function AdminTickets() {
                 </div>
 
                 <div className="space-y-2">
-                  <Textarea value={reply} onChange={(e) => setReply(e.target.value)} placeholder="Reply as staff" rows={4} />
+                  <Textarea value={reply} onChange={(e) => setReply(e.target.value)} placeholder={tr("Ответ от лица staff", "Reply as staff")} rows={4} />
                   <Button onClick={sendReply} disabled={isSendingReply || isUpdatingTicket} className="bg-[#E31E24] hover:bg-[#c91a1f]">
                     {isSendingReply ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <MessageSquare className="h-4 w-4 mr-2" />}
-                    Send reply
+                    {tr("Отправить ответ", "Send reply")}
                   </Button>
                 </div>
               </CardContent>
             </>
           ) : (
             <CardContent className="min-h-[500px] flex items-center justify-center text-gray-500">
-              Select a ticket to moderate.
+              {tr("Выберите тикет для модерации.", "Select a ticket to moderate.")}
             </CardContent>
           )}
         </Card>

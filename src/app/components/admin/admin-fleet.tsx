@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { LayoutGrid, List, Loader2, Palette, Pencil, Plane, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, History, LayoutGrid, List, Loader2, Palette, Pencil, Plane, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "../ui/switch";
 import { Textarea } from "../ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
+import { fetchAdminBootstrap, getCachedAdminBootstrap } from "./admin-bootstrap-cache";
+import { useLanguage } from "../../context/language-context";
 
 interface FleetAircraft {
   id: string;
@@ -84,6 +86,16 @@ interface HubItem {
   title?: string;
   name?: string;
   code?: string;
+}
+
+interface AdminAircraftFlight {
+  id: number;
+  flightNumber: string;
+  departure: string;
+  arrival: string;
+  landingRate: string;
+  status: string;
+  createdAt: string | null;
 }
 
 type FleetViewMode = "gallery" | "list";
@@ -176,14 +188,70 @@ const resolveFleetIcaoCode = (fleet?: Partial<FleetGroup> | null) => {
   return String(fleet?.code || "").trim().toUpperCase() || "UNKN";
 };
 
+const normalizeManagedFleets = (value: unknown): FleetGroup[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((fleet, fleetIndex) => {
+    const record = (fleet && typeof fleet === "object" ? fleet : {}) as Record<string, unknown>;
+    const aircraft = Array.isArray(record.aircraft) ? record.aircraft : [];
+    return {
+      id: String(record.id || `fleet-${fleetIndex + 1}`),
+      name: String(record.name || record.code || `Fleet ${fleetIndex + 1}`),
+      code: String(record.code || ""),
+      airlineCode: typeof record.airlineCode === "string" ? record.airlineCode : undefined,
+      color: typeof record.color === "string" ? record.color : undefined,
+      status: typeof record.status === "string" ? record.status : undefined,
+      baseHubId: typeof record.baseHubId === "string" ? record.baseHubId : undefined,
+      notes: typeof record.notes === "string" ? record.notes : undefined,
+      source: typeof record.source === "string" ? record.source : undefined,
+      aircraft: aircraft.map((item, aircraftIndex) => {
+        const aircraftRecord = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        return {
+          id: String(aircraftRecord.id || `aircraft-${fleetIndex + 1}-${aircraftIndex + 1}`),
+          model: String(aircraftRecord.model || "Aircraft"),
+          registration: String(aircraftRecord.registration || ""),
+          seats: Number(aircraftRecord.seats || 0) || 0,
+          range_nm: Number(aircraftRecord.range_nm || 0) || 0,
+          cruise_speed: Number(aircraftRecord.cruise_speed || 0) || 0,
+          serviceable: aircraftRecord.serviceable === false ? false : true,
+          status: typeof aircraftRecord.status === "string" ? aircraftRecord.status : undefined,
+          baseHubId: typeof aircraftRecord.baseHubId === "string" ? aircraftRecord.baseHubId : undefined,
+          notes: typeof aircraftRecord.notes === "string" ? aircraftRecord.notes : undefined,
+        };
+      }),
+    };
+  });
+};
+
+const normalizeLiveFleets = (value: unknown): LiveFleetGroup[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((fleet, fleetIndex) => {
+    const record = (fleet && typeof fleet === "object" ? fleet : {}) as Record<string, unknown>;
+    return {
+      id: String(record.id || `live-fleet-${fleetIndex + 1}`),
+      name: String(record.name || record.code || `Fleet ${fleetIndex + 1}`),
+      code: typeof record.code === "string" ? record.code : undefined,
+      liveries: Array.isArray(record.liveries) ? (record.liveries as FleetLivery[]) : [],
+    };
+  });
+};
+
 export function AdminFleet() {
-  const [fleets, setFleets] = useState<FleetGroup[]>([]);
-  const [liveFleets, setLiveFleets] = useState<LiveFleetGroup[]>([]);
-  const [hubs, setHubs] = useState<HubItem[]>([]);
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+  const initialBootstrap = getCachedAdminBootstrap();
+  const [fleets, setFleets] = useState<FleetGroup[]>(() => normalizeManagedFleets(initialBootstrap?.fleets));
+  const [liveFleets, setLiveFleets] = useState<LiveFleetGroup[]>(() => normalizeLiveFleets(initialBootstrap?.liveFleets));
+  const [hubs, setHubs] = useState<HubItem[]>(() => Array.isArray(initialBootstrap?.hubs) ? (initialBootstrap.hubs as HubItem[]) : []);
   const [viewMode, setViewMode] = useState<FleetViewMode>("gallery");
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!Array.isArray(initialBootstrap?.fleets));
   const [isSyncing, setIsSyncing] = useState(false);
-  const [isLoadingLiveFleet, setIsLoadingLiveFleet] = useState(true);
+  const [isLoadingLiveFleet, setIsLoadingLiveFleet] = useState(!Array.isArray(initialBootstrap?.liveFleets));
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
   const [aircraftDialogOpen, setAircraftDialogOpen] = useState(false);
   const [liveryDialogOpen, setLiveryDialogOpen] = useState(false);
@@ -198,82 +266,56 @@ export function AdminFleet() {
   const [processPireps, setProcessPireps] = useState(false);
   const [isLoadingLiveryDetail, setIsLoadingLiveryDetail] = useState(false);
   const [isSavingLivery, setIsSavingLivery] = useState(false);
+  const [selectedAircraftId, setSelectedAircraftId] = useState<string>("");
+  const [aircraftFlightsCache, setAircraftFlightsCache] = useState<Record<string, AdminAircraftFlight[]>>({});
+  const [loadingFlightsId, setLoadingFlightsId] = useState<string | null>(null);
+
+  const loadAircraftFlights = async (aircraftId: string, numericId: number) => {
+    if (aircraftFlightsCache[aircraftId] !== undefined) return;
+    if (numericId <= 0) { setAircraftFlightsCache((c) => ({ ...c, [aircraftId]: [] })); return; }
+    setLoadingFlightsId(aircraftId);
+    try {
+      const res = await fetch(`/api/admin/pireps?page[size]=5&sort=-id&filter[aircraft_id]=${numericId}`, { credentials: "include" });
+      const payload = await res.json().catch(() => null);
+      const items: AdminAircraftFlight[] = (Array.isArray(payload?.pireps) ? payload.pireps : []).map((p: Record<string, unknown>) => ({
+        id: Number(p.id || 0) || 0,
+        flightNumber: String(p.flight_number || "—"),
+        departure: String((p as Record<string, Record<string, unknown>>).departure_airport?.icao || p.departure_airport_id || "—"),
+        arrival: String((p as Record<string, Record<string, unknown>>).arrival_airport?.icao || p.arrival_airport_id || "—"),
+        landingRate: p.landing_rate != null ? `${p.landing_rate} fpm` : "—",
+        status: String(p.status || "—"),
+        createdAt: typeof p.created_at === "string" ? p.created_at : null,
+      }));
+      setAircraftFlightsCache((c) => ({ ...c, [aircraftId]: items }));
+    } catch {
+      setAircraftFlightsCache((c) => ({ ...c, [aircraftId]: [] }));
+    } finally {
+      setLoadingFlightsId(null);
+    }
+  };
+
+  const loadBootstrap = async (force = false) => {
+    setIsLoading(true);
+    setIsLoadingLiveFleet(true);
+    try {
+      const payload = await fetchAdminBootstrap({ force });
+      setFleets(normalizeManagedFleets(payload?.fleets));
+      setLiveFleets(normalizeLiveFleets(payload?.liveFleets));
+      setHubs(Array.isArray(payload?.hubs) ? (payload.hubs as HubItem[]) : []);
+    } catch (error) {
+      console.error("Failed to load fleet", error);
+      toast.error(force ? tr("Не удалось обновить каталог флота", "Failed to refresh fleet catalog") : tr("Не удалось загрузить каталог флота", "Failed to load fleet catalog"));
+      setFleets([]);
+      setLiveFleets([]);
+      setHubs([]);
+    } finally {
+      setIsLoading(false);
+      setIsLoadingLiveFleet(false);
+    }
+  };
 
   useEffect(() => {
-    let active = true;
-
-    const loadFleet = async () => {
-      setIsLoading(true);
-      try {
-        const response = await fetch("/api/admin/fleet/catalog", {
-          credentials: "include",
-        });
-        if (!response.ok) {
-          return;
-        }
-        const payload = await response.json();
-        const items = Array.isArray(payload?.fleets) ? payload.fleets : [];
-        if (active) {
-          setFleets(items);
-        }
-      } catch (error) {
-        console.error("Failed to load fleet", error);
-      } finally {
-        if (active) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    const loadHubs = async () => {
-      try {
-        const response = await fetch("/api/admin/content/hubs", {
-          credentials: "include",
-        });
-        if (!response.ok) {
-          return;
-        }
-        const payload = await response.json();
-        if (active) {
-          setHubs(Array.isArray(payload?.items) ? payload.items : []);
-        }
-      } catch (error) {
-        console.error("Failed to load hubs", error);
-      }
-    };
-
-    const loadLiveFleet = async () => {
-      setIsLoadingLiveFleet(true);
-      try {
-        const response = await fetch("/api/vamsys/dashboard/fleet", {
-          credentials: "include",
-        });
-        if (!response.ok) {
-          throw new Error("Failed to load live fleet");
-        }
-        const payload = (await response.json().catch(() => null)) as LiveFleetResponse | null;
-        if (active) {
-          setLiveFleets(Array.isArray(payload?.fleets) ? payload.fleets : []);
-        }
-      } catch (error) {
-        console.error("Failed to load live fleet", error);
-        if (active) {
-          setLiveFleets([]);
-        }
-      } finally {
-        if (active) {
-          setIsLoadingLiveFleet(false);
-        }
-      }
-    };
-
-    loadFleet().catch(() => undefined);
-    loadHubs().catch(() => undefined);
-    loadLiveFleet().catch(() => undefined);
-
-    return () => {
-      active = false;
-    };
+    void loadBootstrap();
   }, []);
 
   useEffect(() => {
@@ -298,25 +340,8 @@ export function AdminFleet() {
     }
   };
 
-  const reloadFleet = async () => {
-    const [catalogResponse, liveResponse] = await Promise.all([
-      fetch("/api/admin/fleet/catalog", {
-        credentials: "include",
-      }),
-      fetch("/api/vamsys/dashboard/fleet", {
-        credentials: "include",
-      }).catch(() => null),
-    ]);
-    if (!catalogResponse.ok) {
-      throw new Error("Failed to load fleet");
-    }
-    const payload = await catalogResponse.json();
-    setFleets(Array.isArray(payload?.fleets) ? payload.fleets : []);
-
-    if (liveResponse?.ok) {
-      const livePayload = (await liveResponse.json().catch(() => null)) as LiveFleetResponse | null;
-      setLiveFleets(Array.isArray(livePayload?.fleets) ? livePayload.fleets : []);
-    }
+  const reloadFleet = async (force = true) => {
+    await loadBootstrap(force);
   };
 
   const liveFleetById = useMemo(
@@ -366,7 +391,7 @@ export function AdminFleet() {
   const openLiveryDialog = (fleetId: string) => {
     const liveFleet = liveFleetById.get(String(fleetId));
     if (!liveFleet || !Array.isArray(liveFleet.liveries) || liveFleet.liveries.length === 0) {
-      toast.error("No live liveries available for this fleet");
+      toast.error(tr("Для этого флота нет доступных live-ливрей", "No live liveries available for this fleet"));
       return;
     }
 
@@ -421,7 +446,7 @@ export function AdminFleet() {
           return;
         }
         console.error("Failed to load live livery detail", error);
-        toast.error("Failed to load live livery details");
+        toast.error(tr("Не удалось загрузить детали live-ливреи", "Failed to load live livery details"));
         setSelectedLiveryDetail(selectedLiveLivery);
         setLiveryNote(selectedLiveLivery.internalNote || "");
       } finally {
@@ -482,9 +507,9 @@ export function AdminFleet() {
           liveries: (Array.isArray(fleet.liveries) ? fleet.liveries : []).map((item) => item.id === updated?.id ? { ...item, ...updated } : item),
         };
       }));
-      toast.success(`Livery ${nextStatus}`);
+      toast.success(tr(`Ливрея: ${nextStatus}`, `Livery ${nextStatus}`));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to update livery";
+      const message = error instanceof Error ? error.message : tr("Не удалось обновить ливрею", "Failed to update livery");
       console.error("Failed to update live livery", error);
       toast.error(message);
     } finally {
@@ -556,7 +581,7 @@ export function AdminFleet() {
         }),
       });
       if (!response.ok) {
-        throw new Error("Failed to save fleet group");
+        throw new Error(tr("Не удалось сохранить группу флота", "Failed to save fleet group"));
       }
       await reloadFleet();
       setGroupDialogOpen(false);
@@ -593,7 +618,7 @@ export function AdminFleet() {
         }),
       });
       if (!response.ok) {
-        throw new Error("Failed to save aircraft");
+        throw new Error(tr("Не удалось сохранить самолет", "Failed to save aircraft"));
       }
       await reloadFleet();
       setAircraftDialogOpen(false);
@@ -606,7 +631,7 @@ export function AdminFleet() {
   };
 
   const deleteGroup = async (groupId: string) => {
-    if (!window.confirm("Delete this fleet group and all aircraft inside it?")) {
+    if (!window.confirm(tr("Удалить эту группу флота и все самолеты внутри?", "Delete this fleet group and all aircraft inside it?"))) {
       return;
     }
 
@@ -616,7 +641,7 @@ export function AdminFleet() {
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Failed to delete fleet group");
+        throw new Error(tr("Не удалось удалить группу флота", "Failed to delete fleet group"));
       }
       await reloadFleet();
     } catch (error) {
@@ -625,7 +650,7 @@ export function AdminFleet() {
   };
 
   const deleteAircraft = async (aircraftId: string) => {
-    if (!window.confirm("Delete this aircraft from the fleet catalog?")) {
+    if (!window.confirm(tr("Удалить этот самолет из каталога флота?", "Delete this aircraft from the fleet catalog?"))) {
       return;
     }
 
@@ -635,7 +660,7 @@ export function AdminFleet() {
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Failed to delete aircraft");
+        throw new Error(tr("Не удалось удалить самолет", "Failed to delete aircraft"));
       }
       await reloadFleet();
     } catch (error) {
@@ -654,7 +679,7 @@ export function AdminFleet() {
         },
       });
       if (!response.ok) {
-        throw new Error("Failed to sync fleet");
+        throw new Error(tr("Не удалось синхронизировать флот", "Failed to sync fleet"));
       }
       await reloadFleet();
     } catch (error) {
@@ -682,8 +707,8 @@ export function AdminFleet() {
               {fleet.notes ? <p className="mt-2 text-sm text-gray-500">{fleet.notes}</p> : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-              <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{Array.isArray(fleet.aircraft) ? fleet.aircraft.length : 0} aircraft</Badge>
-              <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{liveLiveries.length} liveries</Badge>
+              <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{Array.isArray(fleet.aircraft) ? fleet.aircraft.length : 0} {tr("самолетов", "aircraft")}</Badge>
+              <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{liveLiveries.length} {tr("ливрей", "liveries")}</Badge>
               <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{fleet.status || "active"}</Badge>
             </div>
           </div>
@@ -691,19 +716,19 @@ export function AdminFleet() {
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" size="sm" onClick={() => openGroupDialog(fleet)}>
               <Pencil className="h-4 w-4" />
-              Edit group
+              {tr("Изменить группу", "Edit group")}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => openAircraftDialog(fleet.id)}>
               <Plus className="h-4 w-4" />
-              Add aircraft
+              {tr("Добавить самолет", "Add aircraft")}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => openLiveryDialog(fleet.id)} disabled={isLoadingLiveFleet || liveLiveries.length === 0}>
               <Palette className="h-4 w-4" />
-              Manage liveries
+              {tr("Управлять ливреями", "Manage liveries")}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => deleteGroup(fleet.id)}>
               <Trash2 className="h-4 w-4" />
-              Delete group
+              {tr("Удалить группу", "Delete group")}
             </Button>
           </div>
 
@@ -712,9 +737,9 @@ export function AdminFleet() {
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 text-sm font-medium text-gray-800">
                   <Palette className="h-4 w-4 text-[#E31E24]" />
-                  Live liveries
+                  {tr("Live-ливреи", "Live liveries")}
                 </div>
-                <div className="text-xs text-gray-500">{liveLiveries.length} entries from vAMSYS</div>
+                <div className="text-xs text-gray-500">{liveLiveries.length} {tr("записей из vAMSYS", "entries from vAMSYS")}</div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {liveLiveries.slice(0, 6).map((livery) => (
@@ -735,7 +760,7 @@ export function AdminFleet() {
                 ))}
                 {liveLiveries.length > 6 ? (
                   <Button type="button" variant="ghost" size="sm" onClick={() => openLiveryDialog(fleet.id)}>
-                    Show all {liveLiveries.length}
+                    {tr(`Показать все ${liveLiveries.length}`, `Show all ${liveLiveries.length}`)}
                   </Button>
                 ) : null}
               </div>
@@ -743,41 +768,120 @@ export function AdminFleet() {
           ) : null}
 
           <div className="space-y-2">
-            {(fleet.aircraft || []).length > 0 ? (fleet.aircraft || []).map((aircraft) => (
-              <div key={aircraft.id} className={viewMode === "gallery" ? "rounded border border-gray-100 px-3 py-3" : "rounded border border-gray-100 px-4 py-3"}>
-                <div className={viewMode === "gallery" ? "flex items-start justify-between gap-4" : "flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between"}>
-                  <div>
-                    <div className="flex items-center gap-2 text-sm text-gray-800">
-                      <Plane size={14} className="text-[#E31E24]" />
-                      <span className="font-medium">{aircraft.model || "Unknown"}</span>
+            {(fleet.aircraft || []).length > 0 ? (fleet.aircraft || []).map((aircraft) => {
+              const isSelected = selectedAircraftId === aircraft.id;
+              const flights = aircraftFlightsCache[aircraft.id];
+              return (
+                <div key={aircraft.id} className="rounded border border-gray-100 overflow-hidden">
+                  {/* Row header — clickable to expand */}
+                  <button
+                    type="button"
+                    className="w-full text-left px-3 py-3 hover:bg-gray-50 transition-colors"
+                    onClick={() => {
+                      const next = isSelected ? "" : aircraft.id;
+                      setSelectedAircraftId(next);
+                      if (next) void loadAircraftFlights(next, Number(next) || 0);
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {isSelected ? <ChevronDown size={14} className="shrink-0 text-gray-400" /> : <ChevronRight size={14} className="shrink-0 text-gray-400" />}
+                        <Plane size={14} className="shrink-0 text-[#E31E24]" />
+                        <span className="font-medium text-sm text-gray-900">{aircraft.model || "Unknown"}</span>
+                        <span className="text-xs text-gray-400 font-mono">{aircraft.registration || "—"}</span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                        <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700 text-xs">{aircraft.seats || 0} pax</Badge>
+                        <Badge variant="outline" className={aircraft.serviceable === false ? "border-amber-200 bg-amber-50 text-amber-700 text-xs" : "border-green-200 bg-green-50 text-green-700 text-xs"}>
+                          {aircraft.serviceable === false ? tr("обсл.", "maint.") : tr("исправен", "OK")}
+                        </Badge>
+                      </div>
                     </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {aircraft.registration || "—"} · {aircraft.seats || 0} seats · {aircraft.range_nm || 0} nm · {aircraft.cruise_speed || 0} kt
-                    </div>
-                    {aircraft.notes ? <div className="mt-1 text-xs text-gray-500">{aircraft.notes}</div> : null}
-                  </div>
-                  <div className={viewMode === "gallery" ? "flex flex-wrap items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:justify-end"}>
-                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{aircraft.status || "active"}</Badge>
-                    <Badge variant="outline" className={aircraft.serviceable === false ? "border-amber-200 bg-amber-50 text-amber-700" : "border-green-200 bg-green-50 text-green-700"}>
-                      {aircraft.serviceable === false ? "maintenance" : "serviceable"}
-                    </Badge>
-                  </div>
-                </div>
+                  </button>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => openAircraftDialog(fleet.id, aircraft)}>
-                    <Pencil className="h-4 w-4" />
-                    Edit
-                  </Button>
-                  <Button type="button" variant="outline" size="sm" onClick={() => deleteAircraft(aircraft.id)}>
-                    <Trash2 className="h-4 w-4" />
-                    Delete
-                  </Button>
+                  {/* Expanded detail */}
+                  {isSelected && (
+                    <div className="border-t border-gray-100 bg-gray-50 px-4 py-4 space-y-4">
+                      {/* Config & Equipment */}
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+                          <Settings2 className="h-3.5 w-3.5" />
+                          {tr("Конфигурация", "Config & Equipment")}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                          {[
+                            { label: tr("Места", "Seats"), value: aircraft.seats || 0 },
+                            { label: tr("Дальность", "Range"), value: aircraft.range_nm ? `${aircraft.range_nm} nm` : "—" },
+                            { label: tr("Скорость", "Speed"), value: aircraft.cruise_speed ? `${aircraft.cruise_speed} kt` : "—" },
+                            { label: tr("Статус", "Status"), value: aircraft.status || "active" },
+                            { label: tr("Флот", "Fleet"), value: fleet.name },
+                            { label: tr("Авиакомпания", "Airline"), value: resolveFleetAirlineCode(fleet) },
+                          ].map(({ label, value }) => (
+                            <div key={label} className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                              <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+                              <div className="mt-0.5 text-sm font-medium text-gray-900">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Latest flights */}
+                      <div>
+                        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">
+                          <History className="h-3.5 w-3.5" />
+                          {tr("Последние рейсы", "Latest Flights")}
+                        </div>
+                        {loadingFlightsId === aircraft.id ? (
+                          <div className="flex items-center gap-2 text-sm text-gray-400">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            {tr("Загрузка...", "Loading...")}
+                          </div>
+                        ) : !flights || flights.length === 0 ? (
+                          <div className="text-sm text-gray-400">{tr("Рейсов нет", "No flights found")}</div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="border-b border-gray-200">
+                                  <th className="pb-1 text-left font-medium text-gray-500">{tr("Рейс", "Flight")}</th>
+                                  <th className="pb-1 text-left font-medium text-gray-500">{tr("Маршрут", "Route")}</th>
+                                  <th className="pb-1 text-left font-medium text-gray-500">{tr("Посадка", "Landing")}</th>
+                                  <th className="pb-1 text-left font-medium text-gray-500">{tr("Статус", "Status")}</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-gray-100">
+                                {flights.map((f) => (
+                                  <tr key={f.id}>
+                                    <td className="py-1.5 pr-3 font-mono font-medium text-gray-800">{f.flightNumber}</td>
+                                    <td className="py-1.5 pr-3 font-mono text-gray-600">{f.departure} → {f.arrival}</td>
+                                    <td className="py-1.5 pr-3 text-gray-600">{f.landingRate}</td>
+                                    <td className="py-1.5"><Badge variant="outline" className="border-gray-200 bg-white text-gray-700 text-[10px]">{f.status}</Badge></td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        <Button type="button" variant="outline" size="sm" onClick={() => openAircraftDialog(fleet.id, aircraft)}>
+                          <Pencil className="h-4 w-4" />
+                          {tr("Изменить", "Edit")}
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => deleteAircraft(aircraft.id)}>
+                          <Trash2 className="h-4 w-4" />
+                          {tr("Удалить", "Delete")}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )) : (
+              );
+            }) : (
               <div className="rounded border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500">
-                No aircraft assigned to this group yet.
+                {tr("В этой группе пока нет назначенных самолетов.", "No aircraft assigned to this group yet.")}
               </div>
             )}
           </div>
@@ -790,8 +894,8 @@ export function AdminFleet() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Fleet Management</h2>
-          <p className="text-sm text-gray-500">Manage local fleet groups, aircraft, hubs and live sync from vAMSYS.</p>
+          <h2 className="text-2xl font-bold text-gray-800">{tr("Управление флотом", "Fleet Management")}</h2>
+          <p className="text-sm text-gray-500">{tr("Управляйте локальными группами флота, самолетами, хабами и live-синхронизацией из vAMSYS.", "Manage local fleet groups, aircraft, hubs and live sync from vAMSYS.")}</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3">
           <ToggleGroup
@@ -799,24 +903,24 @@ export function AdminFleet() {
             value={viewMode}
             onValueChange={handleViewModeChange}
             variant="outline"
-            aria-label="Fleet display mode"
+            aria-label={tr("Режим отображения флота", "Fleet display mode")}
           >
-            <ToggleGroupItem value="gallery" aria-label="Gallery view">
+            <ToggleGroupItem value="gallery" aria-label={tr("Плиточный вид", "Gallery view")}>
               <LayoutGrid className="h-4 w-4" />
-              Gallery
+              {tr("Плитка", "Gallery")}
             </ToggleGroupItem>
-            <ToggleGroupItem value="list" aria-label="List view">
+            <ToggleGroupItem value="list" aria-label={tr("Списочный вид", "List view")}>
               <List className="h-4 w-4" />
-              List
+              {tr("Список", "List")}
             </ToggleGroupItem>
           </ToggleGroup>
           <Button type="button" variant="outline" onClick={syncFleet} disabled={isSyncing}>
             {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Sync from vAMSYS
+            {tr("Синхронизировать из vAMSYS", "Sync from vAMSYS")}
           </Button>
           <Button type="button" onClick={() => openGroupDialog()}>
             <Plus className="h-4 w-4" />
-            New group
+            {tr("Новая группа", "New group")}
           </Button>
         </div>
       </div>
@@ -824,7 +928,7 @@ export function AdminFleet() {
       {isLoading ? (
         <div className="flex min-h-[240px] items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          Loading fleet catalog...
+          {tr("Загрузка каталога флота...", "Loading fleet catalog...")}
         </div>
       ) : (
         <div className="space-y-6">
@@ -834,11 +938,11 @@ export function AdminFleet() {
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">{section.label}</h3>
-                    <p className="text-sm text-gray-500">{section.description}</p>
+                    <p className="text-sm text-gray-500">{section.code === "NWS" ? tr("Основные операции Nordwind", "Core Nordwind operation") : section.code === "KAR" ? tr("Партнерские регулярные и чартерные операции", "Partner schedule and charter operation") : tr("Операции Southwind", "Southwind operation")}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{section.fleetCount} groups</Badge>
-                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{section.aircraftCount} aircraft</Badge>
+                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{section.fleetCount} {tr("групп", "groups")}</Badge>
+                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{section.aircraftCount} {tr("самолетов", "aircraft")}</Badge>
                   </div>
                 </div>
               </div>
@@ -848,7 +952,7 @@ export function AdminFleet() {
                   <div className="flex items-center justify-between px-1">
                     <div>
                       <div className="text-sm font-semibold uppercase tracking-wide text-gray-900">{typeGroup.icaoCode}</div>
-                      <div className="text-xs text-gray-500">{typeGroup.fleets.length} fleet group{typeGroup.fleets.length === 1 ? "" : "s"}</div>
+                      <div className="text-xs text-gray-500">{typeGroup.fleets.length} {tr(typeGroup.fleets.length === 1 ? "группа флота" : "группы флота", typeGroup.fleets.length === 1 ? "fleet group" : "fleet groups")}</div>
                     </div>
                   </div>
                   <div className={viewMode === "gallery" ? "grid grid-cols-1 gap-4 lg:grid-cols-2" : "space-y-4"}>
@@ -857,7 +961,7 @@ export function AdminFleet() {
                 </div>
               )) : (
                 <div className="rounded-lg border border-dashed border-gray-200 bg-white px-6 py-10 text-center text-sm text-gray-500 shadow-sm">
-                  No fleet groups assigned to {section.label} yet.
+                  {tr(`Для ${section.label} пока не назначены группы флота.`, `No fleet groups assigned to ${section.label} yet.`)}
                 </div>
               )}
             </section>
@@ -865,7 +969,7 @@ export function AdminFleet() {
 
           {fleets.length === 0 ? (
             <div className="rounded-lg bg-white px-6 py-12 text-center text-gray-500 shadow-sm">
-              No fleet groups found. Create one manually or sync the live fleet catalog.
+              {tr("Группы флота не найдены. Создайте группу вручную или синхронизируйте live-каталог.", "No fleet groups found. Create one manually or sync the live fleet catalog.")}
             </div>
           ) : null}
         </div>
@@ -874,19 +978,19 @@ export function AdminFleet() {
       <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{groupForm.id ? "Edit Fleet Group" : "Create Fleet Group"}</DialogTitle>
+            <DialogTitle>{groupForm.id ? tr("Изменить группу флота", "Edit Fleet Group") : tr("Создать группу флота", "Create Fleet Group")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2 md:grid-cols-2">
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Name</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Название", "Name")}</label>
               <Input value={groupForm.name} onChange={(event) => setGroupForm((current) => ({ ...current, name: event.target.value }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Code</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Код", "Code")}</label>
               <Input value={groupForm.code} onChange={(event) => setGroupForm((current) => ({ ...current, code: event.target.value.toUpperCase() }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Airline</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Авиакомпания", "Airline")}</label>
               <Select value={groupForm.airlineCode} onValueChange={(value) => setGroupForm((current) => ({ ...current, airlineCode: value }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select airline" />
@@ -901,30 +1005,30 @@ export function AdminFleet() {
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Color</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Цвет", "Color")}</label>
               <Input type="color" value={groupForm.color} onChange={(event) => setGroupForm((current) => ({ ...current, color: event.target.value }))} className="h-10" />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Status</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Статус", "Status")}</label>
               <Select value={groupForm.status} onValueChange={(value) => setGroupForm((current) => ({ ...current, status: value }))}>
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="seasonal">Seasonal</SelectItem>
-                  <SelectItem value="retired">Retired</SelectItem>
+                  <SelectItem value="active">{tr("Активен", "Active")}</SelectItem>
+                  <SelectItem value="seasonal">{tr("Сезонный", "Seasonal")}</SelectItem>
+                  <SelectItem value="retired">{tr("Списан", "Retired")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-700">Base Hub</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Базовый хаб", "Base Hub")}</label>
               <Select value={groupForm.baseHubId || "none"} onValueChange={(value) => setGroupForm((current) => ({ ...current, baseHubId: value === "none" ? "" : value }))}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select hub" />
+                  <SelectValue placeholder={tr("Выберите хаб", "Select hub")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No hub</SelectItem>
+                  <SelectItem value="none">{tr("Без хаба", "No hub")}</SelectItem>
                   {hubs.map((hub) => (
                     <SelectItem key={hub.id} value={hub.id}>
                       {hub.title || hub.name || hub.code || hub.id}
@@ -934,15 +1038,15 @@ export function AdminFleet() {
               </Select>
             </div>
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-700">Notes</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Заметки", "Notes")}</label>
               <Textarea value={groupForm.notes} onChange={(event) => setGroupForm((current) => ({ ...current, notes: event.target.value }))} rows={4} />
             </div>
           </div>
           <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => setGroupDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => setGroupDialogOpen(false)}>{tr("Отмена", "Cancel")}</Button>
             <Button type="button" onClick={saveGroup} disabled={isSavingGroup || !groupForm.name.trim()}>
               {isSavingGroup ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save group
+              {tr("Сохранить группу", "Save group")}
             </Button>
           </div>
         </DialogContent>
@@ -951,14 +1055,14 @@ export function AdminFleet() {
       <Dialog open={aircraftDialogOpen} onOpenChange={setAircraftDialogOpen}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{aircraftForm.id ? "Edit Aircraft" : "Add Aircraft"}</DialogTitle>
+            <DialogTitle>{aircraftForm.id ? tr("Изменить самолет", "Edit Aircraft") : tr("Добавить самолет", "Add Aircraft")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-700">Fleet Group</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Группа флота", "Fleet Group")}</label>
               <Select value={aircraftForm.groupId} onValueChange={(value) => setAircraftForm((current) => ({ ...current, groupId: value }))}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select fleet group" />
+                  <SelectValue placeholder={tr("Выберите группу флота", "Select fleet group")} />
                 </SelectTrigger>
                 <SelectContent>
                   {fleets.map((group) => (
@@ -970,46 +1074,46 @@ export function AdminFleet() {
               </Select>
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Model</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Модель", "Model")}</label>
               <Input value={aircraftForm.model} onChange={(event) => setAircraftForm((current) => ({ ...current, model: event.target.value }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Registration</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Регистрация", "Registration")}</label>
               <Input value={aircraftForm.registration} onChange={(event) => setAircraftForm((current) => ({ ...current, registration: event.target.value.toUpperCase() }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Seats</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Места", "Seats")}</label>
               <Input type="number" value={aircraftForm.seats} onChange={(event) => setAircraftForm((current) => ({ ...current, seats: event.target.value }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Range, nm</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Дальность, nm", "Range, nm")}</label>
               <Input type="number" value={aircraftForm.range_nm} onChange={(event) => setAircraftForm((current) => ({ ...current, range_nm: event.target.value }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Cruise Speed, kt</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Крейсерская скорость, kt", "Cruise Speed, kt")}</label>
               <Input type="number" value={aircraftForm.cruise_speed} onChange={(event) => setAircraftForm((current) => ({ ...current, cruise_speed: event.target.value }))} />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Status</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Статус", "Status")}</label>
               <Select value={aircraftForm.status} onValueChange={(value) => setAircraftForm((current) => ({ ...current, status: value }))}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={tr("Статус", "Status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="active">Active</SelectItem>
-                  <SelectItem value="maintenance">Maintenance</SelectItem>
-                  <SelectItem value="retired">Retired</SelectItem>
+                  <SelectItem value="active">{tr("Активен", "Active")}</SelectItem>
+                  <SelectItem value="maintenance">{tr("На обслуживании", "Maintenance")}</SelectItem>
+                  <SelectItem value="retired">{tr("Списан", "Retired")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-700">Base Hub</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Базовый хаб", "Base Hub")}</label>
               <Select value={aircraftForm.baseHubId || "none"} onValueChange={(value) => setAircraftForm((current) => ({ ...current, baseHubId: value === "none" ? "" : value }))}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select hub" />
+                  <SelectValue placeholder={tr("Выберите хаб", "Select hub")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No hub</SelectItem>
+                  <SelectItem value="none">{tr("Без хаба", "No hub")}</SelectItem>
                   {hubs.map((hub) => (
                     <SelectItem key={hub.id} value={hub.id}>
                       {hub.title || hub.name || hub.code || hub.id}
@@ -1020,21 +1124,21 @@ export function AdminFleet() {
             </div>
             <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 md:col-span-2">
               <div>
-                <div className="text-sm font-medium text-gray-700">Serviceable</div>
-                <div className="text-xs text-gray-500">Turn this off to mark the aircraft as unavailable for dispatch.</div>
+                <div className="text-sm font-medium text-gray-700">{tr("Исправен", "Serviceable")}</div>
+                <div className="text-xs text-gray-500">{tr("Отключите, чтобы пометить самолет недоступным для вылета.", "Turn this off to mark the aircraft as unavailable for dispatch.")}</div>
               </div>
               <Switch checked={aircraftForm.serviceable} onCheckedChange={(checked) => setAircraftForm((current) => ({ ...current, serviceable: checked }))} />
             </div>
             <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-gray-700">Notes</label>
+              <label className="text-sm font-medium text-gray-700">{tr("Заметки", "Notes")}</label>
               <Textarea value={aircraftForm.notes} onChange={(event) => setAircraftForm((current) => ({ ...current, notes: event.target.value }))} rows={4} />
             </div>
           </div>
           <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => setAircraftDialogOpen(false)}>Cancel</Button>
+            <Button type="button" variant="outline" onClick={() => setAircraftDialogOpen(false)}>{tr("Отмена", "Cancel")}</Button>
             <Button type="button" onClick={saveAircraft} disabled={isSavingAircraft || !aircraftForm.groupId || !aircraftForm.model.trim()}>
               {isSavingAircraft ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Save aircraft
+              {tr("Сохранить самолет", "Save aircraft")}
             </Button>
           </div>
         </DialogContent>
@@ -1043,7 +1147,7 @@ export function AdminFleet() {
       <Dialog open={liveryDialogOpen} onOpenChange={setLiveryDialogOpen}>
         <DialogContent className="sm:max-w-6xl">
           <DialogHeader>
-            <DialogTitle>Live Livery Management</DialogTitle>
+            <DialogTitle>{tr("Управление live-ливреями", "Live Livery Management")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className="max-h-[560px] space-y-2 overflow-y-auto rounded-lg border border-gray-200 bg-gray-50 p-3">
@@ -1081,32 +1185,32 @@ export function AdminFleet() {
                       <div>
                         <div className="text-lg font-semibold text-gray-900">{selectedLiveLivery.name}</div>
                         <div className="mt-1 text-sm text-gray-500">{selectedLiveLivery.aircraft || "-"}{selectedLiveLivery.aircraftType ? ` · ${selectedLiveLivery.aircraftType}` : ""}</div>
-                        <div className="mt-1 text-xs text-gray-500">Addon: {selectedLiveLivery.addon || "-"}{selectedLiveLivery.liveryCode ? ` · Code: ${selectedLiveLivery.liveryCode}` : ""}</div>
+                        <div className="mt-1 text-xs text-gray-500">{tr("Аддон", "Addon")}: {selectedLiveLivery.addon || "-"}{selectedLiveLivery.liveryCode ? ` · ${tr("Код", "Code")}: ${selectedLiveLivery.liveryCode}` : ""}</div>
                       </div>
                       <Badge variant="outline" className={liveryStatusClassName((selectedLiveryDetail || selectedLiveLivery).status)}>{(selectedLiveryDetail || selectedLiveLivery).status || "pending"}</Badge>
                     </div>
 
                     <div className="mt-4 grid gap-3 md:grid-cols-3">
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><div className="text-xs uppercase tracking-wide text-gray-500">PIREP usage</div><div className="mt-1 font-semibold text-gray-900">{(selectedLiveryDetail || selectedLiveLivery).pirepsCount || 0}</div></div>
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><div className="text-xs uppercase tracking-wide text-gray-500">Created</div><div className="mt-1 font-semibold text-gray-900">{formatDateTime((selectedLiveryDetail || selectedLiveLivery).createdAt)}</div></div>
-                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><div className="text-xs uppercase tracking-wide text-gray-500">Updated</div><div className="mt-1 font-semibold text-gray-900">{formatDateTime((selectedLiveryDetail || selectedLiveLivery).updatedAt)}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><div className="text-xs uppercase tracking-wide text-gray-500">{tr("Использование PIREP", "PIREP usage")}</div><div className="mt-1 font-semibold text-gray-900">{(selectedLiveryDetail || selectedLiveLivery).pirepsCount || 0}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><div className="text-xs uppercase tracking-wide text-gray-500">{tr("Создано", "Created")}</div><div className="mt-1 font-semibold text-gray-900">{formatDateTime((selectedLiveryDetail || selectedLiveLivery).createdAt)}</div></div>
+                      <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"><div className="text-xs uppercase tracking-wide text-gray-500">{tr("Обновлено", "Updated")}</div><div className="mt-1 font-semibold text-gray-900">{formatDateTime((selectedLiveryDetail || selectedLiveLivery).updatedAt)}</div></div>
                     </div>
                   </div>
 
                   {isLoadingLiveryDetail ? (
                     <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-500">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Loading livery details...
+                      {tr("Загрузка деталей ливреи...", "Loading livery details...")}
                     </div>
                   ) : null}
 
                   {Array.isArray(selectedLiveryDetail?.pirepUsage) && selectedLiveryDetail.pirepUsage.length > 0 ? (
                     <div className="rounded-lg border border-gray-200 bg-white p-4">
-                      <div className="text-sm font-medium text-gray-900">Recent PIREP usage</div>
+                      <div className="text-sm font-medium text-gray-900">{tr("Недавнее использование PIREP", "Recent PIREP usage")}</div>
                       <div className="mt-3 space-y-2">
                         {selectedLiveryDetail.pirepUsage.map((entry, index) => (
                           <div key={`${entry.pirepId || index}-${entry.bookingId || 0}`} className="flex items-center justify-between gap-3 text-sm text-gray-600">
-                            <span>PIREP #{entry.pirepId || "-"} · Booking #{entry.bookingId || "-"}</span>
+                            <span>PIREP #{entry.pirepId || "-"} · {tr("Бронь", "Booking")} #{entry.bookingId || "-"}</span>
                             <span>{formatDateTime(entry.createdAt)}</span>
                           </div>
                         ))}
@@ -1115,28 +1219,28 @@ export function AdminFleet() {
                   ) : null}
 
                   <div className="rounded-lg border border-red-100 bg-red-50 p-4 space-y-4">
-                    <div className="text-sm font-medium text-red-900">Moderation</div>
-                    <Textarea value={liveryNote} onChange={(event) => setLiveryNote(event.target.value)} placeholder="Internal note for this livery" rows={5} className="bg-white" />
+                    <div className="text-sm font-medium text-red-900">{tr("Модерация", "Moderation")}</div>
+                    <Textarea value={liveryNote} onChange={(event) => setLiveryNote(event.target.value)} placeholder={tr("Внутренняя заметка по этой ливрее", "Internal note for this livery")} rows={5} className="bg-white" />
                     <div className="flex items-center justify-between rounded-lg border border-red-100 bg-white px-4 py-3">
                       <div>
-                        <div className="text-sm font-medium text-gray-700">Process affected PIREPs</div>
-                        <div className="text-xs text-gray-500">Apply the status change to linked PIREPs when supported by vAMSYS.</div>
+                        <div className="text-sm font-medium text-gray-700">{tr("Обработать связанные PIREP", "Process affected PIREPs")}</div>
+                        <div className="text-xs text-gray-500">{tr("Применить смену статуса к связанным PIREP, если поддерживается vAMSYS.", "Apply the status change to linked PIREPs when supported by vAMSYS.")}</div>
                       </div>
                       <Switch checked={processPireps} onCheckedChange={setProcessPireps} />
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button type="button" disabled={isSavingLivery} onClick={() => updateLiveryStatus("approved")}>
                         {isSavingLivery ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                        Approve
+                        {tr("Одобрить", "Approve")}
                       </Button>
-                      <Button type="button" variant="outline" disabled={isSavingLivery} onClick={() => updateLiveryStatus("ignored")}>Ignore</Button>
-                      <Button type="button" variant="outline" disabled={isSavingLivery} onClick={() => updateLiveryStatus("rejected")}>Reject</Button>
+                      <Button type="button" variant="outline" disabled={isSavingLivery} onClick={() => updateLiveryStatus("ignored")}>{tr("Игнорировать", "Ignore")}</Button>
+                      <Button type="button" variant="outline" disabled={isSavingLivery} onClick={() => updateLiveryStatus("rejected")}>{tr("Отклонить", "Reject")}</Button>
                     </div>
                   </div>
                 </>
               ) : (
                 <div className="rounded-lg border border-dashed border-gray-200 px-4 py-12 text-center text-sm text-gray-500">
-                  Select a livery to inspect and moderate it.
+                  {tr("Выберите ливрею для проверки и модерации.", "Select a livery to inspect and moderate it.")}
                 </div>
               )}
             </div>

@@ -112,12 +112,22 @@ if (!AUTH_STORE_FILE) {
 // Pilots roster persistence file (stored alongside the auth store)
 const PILOTS_ROSTER_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilots-roster.json");
 const FLEET_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "fleet-snapshot.json");
+const DASHBOARD_CATALOG_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "dashboard-catalog-snapshot.json");
 const ADMIN_CONTENT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-content.json");
 const ADMIN_AUDIT_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-audit-log.json");
 const AUTH_ACTIVITY_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "auth-activity-log.json");
 const TELEMETRY_HISTORY_FILE = path.join(path.dirname(AUTH_STORE_FILE), "telemetry-history-cache.json");
+const SOCIAL_GALLERY_FILE = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery.json");
+const SOCIAL_GALLERY_PICKS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-picks.json");
+const EVENT_COINS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "event-coins.json");
+const PILOT_BALANCE_ADJUSTMENTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-balance-adjustments.json");
+const SOCIAL_GALLERY_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-assets");
+const BANNER_GENERATOR_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "banner-generator-assets");
 const ADMIN_AUDIT_MAX_ENTRIES = Math.max(Number(process.env.ADMIN_AUDIT_MAX_ENTRIES || 5000) || 5000, 500);
 const AUTH_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.AUTH_ACTIVITY_MAX_ENTRIES || 5000) || 5000, 500);
+const SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES || 4000) || 4000, 200);
+const SOCIAL_GALLERY_MAX_UPLOAD_BYTES = Math.max(Number(process.env.SOCIAL_GALLERY_MAX_UPLOAD_BYTES || 8 * 1024 * 1024) || 8 * 1024 * 1024, 512000);
+const BANNER_GENERATOR_MAX_UPLOAD_BYTES = Math.max(Number(process.env.BANNER_GENERATOR_MAX_UPLOAD_BYTES || 10 * 1024 * 1024) || 10 * 1024 * 1024, 512000);
 const DISCORD_STATE_COOKIE = "nws_discord_oauth_state";
 const DISCORD_SESSION_COOKIE = "nws_discord_session";
 const DISCORD_STATE_TTL_MS = 10 * 60 * 1000;
@@ -149,6 +159,10 @@ let summaryCache = {
   expiresAt: 0,
 };
 
+let adminOverviewCache = { data: null, expiresAt: 0 };
+let adminOverviewInflight = null;
+const ADMIN_OVERVIEW_TTL_MS = 90 * 1000; // 90 seconds fresh, then SWR
+
 let fleetCache = {
   data: null,
   expiresAt: 0,
@@ -175,6 +189,26 @@ let fleetLiveryDetailsCache = {
   expiresAt: 0,
 };
 
+let dashboardFleetCatalogCache = {
+  data: null,
+  expiresAt: 0,
+};
+
+let dashboardAirportsCatalogCache = {
+  data: null,
+  expiresAt: 0,
+};
+
+let dashboardBootstrapCache = {
+  data: null,
+  expiresAt: 0,
+};
+
+let adminBootstrapCache = {
+  data: null,
+  expiresAt: 0,
+};
+
 let routesCache = {
   data: null,
   expiresAt: 0,
@@ -187,6 +221,7 @@ let flightMapCache = {
 
 const FLIGHT_MAP_CACHE_MS = Math.max(Number(process.env.FLIGHT_MAP_CACHE_MS || 100) || 100, 80);
 const FLIGHT_MAP_IDLE_CACHE_MS = Math.max(Number(process.env.FLIGHT_MAP_IDLE_CACHE_MS || 30000) || 30000, 5000);
+const DASHBOARD_CATALOG_CACHE_MS = Math.max(Number(process.env.DASHBOARD_CATALOG_CACHE_MS || 10 * 60 * 1000) || 10 * 60 * 1000, 60 * 1000);
 const ACTIVE_FLIGHT_GRACE_MS = Math.max(Number(process.env.ACTIVE_FLIGHT_GRACE_MS || 15000) || 15000, 2000);
 const TELEMETRY_HISTORY_TTL_MS = Math.max(Number(process.env.TELEMETRY_HISTORY_TTL_MS || 6 * 60 * 60 * 1000) || 6 * 60 * 60 * 1000, 60 * 1000);
 const TELEMETRY_HISTORY_MAX_POINTS = Math.max(Number(process.env.TELEMETRY_HISTORY_MAX_POINTS || 1800) || 1800, 200);
@@ -248,15 +283,29 @@ let pilotsRosterCache = {
   expiresAt: 0,
 };
 
+let dashboardLeaderboardCache = new Map();
+
 const pilotNameCache = new Map();
 
 const UNIFIED_CATALOG_DELTA_SYNC_MS = Math.max(
-  Number(process.env.UNIFIED_CATALOG_DELTA_SYNC_MS || 2 * 60 * 1000) || 2 * 60 * 1000,
+  Number(process.env.UNIFIED_CATALOG_DELTA_SYNC_MS || 30 * 60 * 1000) || 30 * 60 * 1000,
   30 * 1000
 );
 const UNIFIED_CATALOG_FULL_SYNC_MS = Math.max(
-  Number(process.env.UNIFIED_CATALOG_FULL_SYNC_MS || 6 * 60 * 60 * 1000) || 6 * 60 * 60 * 1000,
+  Number(process.env.UNIFIED_CATALOG_FULL_SYNC_MS || 24 * 60 * 60 * 1000) || 24 * 60 * 60 * 1000,
   10 * 60 * 1000
+);
+const DASHBOARD_CATALOG_NIGHTLY_SYNC_HOUR = Math.min(
+  Math.max(Number(process.env.DASHBOARD_CATALOG_NIGHTLY_SYNC_HOUR || 3) || 3, 0),
+  23
+);
+const DASHBOARD_CATALOG_NIGHTLY_SYNC_MINUTE = Math.min(
+  Math.max(Number(process.env.DASHBOARD_CATALOG_NIGHTLY_SYNC_MINUTE || 15) || 15, 0),
+  59
+);
+const DASHBOARD_CATALOG_NIGHTLY_CHECK_MS = Math.max(
+  Number(process.env.DASHBOARD_CATALOG_NIGHTLY_CHECK_MS || 15 * 60 * 1000) || 15 * 60 * 1000,
+  60 * 1000
 );
 const UNIFIED_CATALOG_MAX_DELTA_PAGES = Math.max(
   Number(process.env.UNIFIED_CATALOG_MAX_DELTA_PAGES || 8) || 8,
@@ -274,6 +323,12 @@ const unifiedCatalogCache = {
   hubsById: new Map(),
   routesById: new Map(),
   fleetsById: new Map(),
+};
+
+const dashboardCatalogRefreshState = {
+  timer: null,
+  refreshPromise: null,
+  lastRunKey: "",
 };
 
 const discordOauthStateCache = new Map();
@@ -596,6 +651,55 @@ const persistFleetSnapshot = (payload) => {
   }
 };
 
+const readDashboardCatalogSnapshotFromDisk = () => {
+  try {
+    if (!fs.existsSync(DASHBOARD_CATALOG_SNAPSHOT_FILE)) {
+      return null;
+    }
+    const raw = fs.readFileSync(DASHBOARD_CATALOG_SNAPSHOT_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return {
+      generatedAt: String(parsed?.generatedAt || "").trim() || null,
+      fleets: Array.isArray(parsed?.fleets) ? parsed.fleets : [],
+      airports: Array.isArray(parsed?.airports) ? parsed.airports : [],
+      routes: Array.isArray(parsed?.routes) ? parsed.routes : [],
+    };
+  } catch (err) {
+    logger.warn("[dashboard] snapshot_read_failed", String(err));
+    return null;
+  }
+};
+
+const persistDashboardCatalogSnapshot = (payload) => {
+  try {
+    if (!payload || !Array.isArray(payload?.fleets) || !Array.isArray(payload?.airports)) {
+      return;
+    }
+    ensureAuthStoreDir();
+    const tempPath = `${DASHBOARD_CATALOG_SNAPSHOT_FILE}.tmp`;
+    fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+    fs.renameSync(tempPath, DASHBOARD_CATALOG_SNAPSHOT_FILE);
+    logger.info("[dashboard] snapshot_persist_success", {
+      DASHBOARD_CATALOG_SNAPSHOT_FILE,
+      fleets: payload.fleets.length,
+      airports: payload.airports.length,
+      routes: Array.isArray(payload?.routes) ? payload.routes.length : 0,
+    });
+  } catch (err) {
+    logger.warn("[dashboard] snapshot_persist_failed", String(err));
+  }
+};
+
+const invalidateDashboardCatalogCaches = () => {
+  dashboardFleetCatalogCache = { data: null, expiresAt: 0 };
+  dashboardAirportsCatalogCache = { data: null, expiresAt: 0 };
+  dashboardBootstrapCache = { data: null, expiresAt: 0 };
+  airportsLookupCache = { map: null, expiresAt: 0 };
+  fleetLiveriesCache = { byFleetId: new Map(), expiresAt: 0 };
+  fleetLiveryDetailsCache = { byKey: new Map(), expiresAt: 0 };
+  aircraftDetailsCache = { byKey: new Map(), expiresAt: 0 };
+};
+
 const normalizeAdminText = (value) => String(value || "").trim();
 
 const normalizeAdminMultilineText = (value) => String(value ?? "").replace(/\r\n/g, "\n").trim();
@@ -655,7 +759,7 @@ const getDefaultAcarsConfig = () => ({
   hoppieLogonCode: "",
   selcal: "",
   stationName: "Nordwind Virtual Operations",
-  stationCallsign: "NWSOPS",
+  stationCallsign: "VNWS",
   callsignPrefix: "NWS",
   dispatchTarget: "NWSDISP",
   positionIntervalSeconds: 15,
@@ -834,6 +938,662 @@ const buildDefaultAdminContent = () => {
 let adminContentCache = null;
 let adminAuditLogCache = null;
 let authActivityLogCache = null;
+let socialGalleryCache = null;
+let socialGalleryPicksCache = null;
+
+const buildDefaultSocialGalleryStore = () => {
+  const now = new Date().toISOString();
+  return {
+    categories: [
+      {
+        id: "landings",
+        title: "Landings",
+        description: "Touchdowns, flare moments and runway exits.",
+        color: "#E31E24",
+        createdAt: now,
+        createdByPilotId: null,
+        createdByUsername: null,
+        createdByName: "Nordwind Virtual",
+        isSystem: true,
+      },
+      {
+        id: "sunsets",
+        title: "Sunsets",
+        description: "Golden hour shots from cruise and approach.",
+        color: "#F59E0B",
+        createdAt: now,
+        createdByPilotId: null,
+        createdByUsername: null,
+        createdByName: "Nordwind Virtual",
+        isSystem: true,
+      },
+      {
+        id: "cabin",
+        title: "Cabin Views",
+        description: "Cabin, wing and passenger window moments.",
+        color: "#2563EB",
+        createdAt: now,
+        createdByPilotId: null,
+        createdByUsername: null,
+        createdByName: "Nordwind Virtual",
+        isSystem: true,
+      },
+    ],
+    albums: [],
+    media: [],
+    activity: [],
+  };
+};
+
+const buildDefaultSocialGalleryPicksStore = () => ({
+  generatedAt: null,
+  picks: [],
+  stats: {
+    totalPicks: 0,
+  },
+});
+
+const ensureSocialGalleryAssetsDir = () => {
+  ensureAuthStoreDir();
+  if (!fs.existsSync(SOCIAL_GALLERY_ASSETS_DIR)) {
+    fs.mkdirSync(SOCIAL_GALLERY_ASSETS_DIR, { recursive: true });
+  }
+};
+
+const ensureBannerGeneratorAssetsDir = () => {
+  ensureAuthStoreDir();
+  if (!fs.existsSync(BANNER_GENERATOR_ASSETS_DIR)) {
+    fs.mkdirSync(BANNER_GENERATOR_ASSETS_DIR, { recursive: true });
+  }
+};
+
+// Event coins store: { [activityId]: { rewardMode: "fixed"|"multiplier", rewardValue: number, awardLimit?: number, registrationRequired?: boolean, name: string } }
+const normalizeEventCoinRewardMode = (value) =>
+  String(value || "fixed").trim().toLowerCase() === "multiplier" ? "multiplier" : "fixed";
+
+const normalizeEventCoinConfig = (value) => {
+  const entry = value && typeof value === "object" ? value : {};
+  const legacyRewardValue = Number(entry?.rewardValue ?? entry?.coinBonus ?? 0);
+  const rewardValue = Number.isFinite(legacyRewardValue) ? Math.max(0, legacyRewardValue) : 0;
+  const awardLimit = Math.max(1, Number(entry?.awardLimit ?? 1) || 1);
+
+  return {
+    rewardMode: normalizeEventCoinRewardMode(entry?.rewardMode),
+    rewardValue,
+    awardLimit,
+    registrationRequired: entry?.registrationRequired !== false && entry?.registration_required !== false,
+    name: String(entry?.name || "").trim() || null,
+  };
+};
+
+const readEventCoinsStore = () => {
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(EVENT_COINS_FILE)) return {};
+    const raw = fs.readFileSync(EVENT_COINS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).map(([activityId, config]) => [activityId, normalizeEventCoinConfig(config)])
+    );
+  } catch {
+    return {};
+  }
+};
+
+const writeEventCoinsStore = (data) => {
+  try {
+    ensureAuthStoreDir();
+    fs.writeFileSync(EVENT_COINS_FILE, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  } catch (e) {
+    logger.error("[event-coins] write_failed", { err: String(e) });
+  }
+};
+
+const normalizePilotBalanceAdjustmentEntry = (value) => {
+  const entry = value && typeof value === "object" ? value : {};
+  const amount = roundPilotCoinValue(Number(entry?.amount ?? entry?.offset ?? 0) || 0);
+  return {
+    amount,
+    reason: String(entry?.reason || "").trim() || null,
+    updatedAt: String(entry?.updatedAt || entry?.updated_at || "").trim() || null,
+    updatedBy: String(entry?.updatedBy || entry?.updated_by || "").trim() || null,
+  };
+};
+
+const readPilotBalanceAdjustmentsStore = () => {
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(PILOT_BALANCE_ADJUSTMENTS_FILE)) {
+      return {};
+    }
+
+    const raw = fs.readFileSync(PILOT_BALANCE_ADJUSTMENTS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([pilotId, config]) => [String(Number(pilotId || 0) || 0), normalizePilotBalanceAdjustmentEntry(config)])
+        .filter(([pilotId]) => Number(pilotId) > 0)
+    );
+  } catch {
+    return {};
+  }
+};
+
+const writePilotBalanceAdjustmentsStore = (data) => {
+  try {
+    ensureAuthStoreDir();
+    fs.writeFileSync(PILOT_BALANCE_ADJUSTMENTS_FILE, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  } catch (e) {
+    logger.error("[pilot-balance-adjustments] write_failed", { err: String(e) });
+  }
+};
+
+const setPilotBalanceAdjustment = (pilotId, value) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return null;
+  }
+
+  const store = readPilotBalanceAdjustmentsStore();
+  const nextEntry = normalizePilotBalanceAdjustmentEntry(value);
+  if (nextEntry.amount === 0) {
+    delete store[String(normalizedPilotId)];
+    writePilotBalanceAdjustmentsStore(store);
+    return null;
+  }
+
+  store[String(normalizedPilotId)] = nextEntry;
+  writePilotBalanceAdjustmentsStore(store);
+  return nextEntry;
+};
+
+const readSocialGalleryStore = () => {
+  if (socialGalleryCache) {
+    return socialGalleryCache;
+  }
+
+  const base = buildDefaultSocialGalleryStore();
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(SOCIAL_GALLERY_FILE)) {
+      fs.writeFileSync(SOCIAL_GALLERY_FILE, `${JSON.stringify(base, null, 2)}\n`, "utf8");
+      socialGalleryCache = base;
+      return socialGalleryCache;
+    }
+
+    const raw = fs.readFileSync(SOCIAL_GALLERY_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    socialGalleryCache = {
+      ...base,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      categories: Array.isArray(parsed?.categories) ? parsed.categories : base.categories,
+      albums: Array.isArray(parsed?.albums) ? parsed.albums : base.albums,
+      media: Array.isArray(parsed?.media) ? parsed.media : base.media,
+      activity: Array.isArray(parsed?.activity) ? parsed.activity : base.activity,
+    };
+  } catch (error) {
+    logger.warn("[social-gallery] read_failed", String(error));
+    socialGalleryCache = base;
+  }
+
+  return socialGalleryCache;
+};
+
+const persistSocialGalleryStore = (content) => {
+  try {
+    ensureAuthStoreDir();
+    const nextContent = content && typeof content === "object" ? content : buildDefaultSocialGalleryStore();
+    const tempPath = `${SOCIAL_GALLERY_FILE}.tmp`;
+    fs.writeFileSync(tempPath, `${JSON.stringify(nextContent, null, 2)}\n`, "utf8");
+    fs.renameSync(tempPath, SOCIAL_GALLERY_FILE);
+    socialGalleryCache = nextContent;
+  } catch (error) {
+    logger.warn("[social-gallery] persist_failed", String(error));
+  }
+};
+
+const withSocialGalleryUpdate = (updater) => {
+  const current = readSocialGalleryStore();
+  const next = updater({
+    ...current,
+    categories: Array.isArray(current?.categories) ? [...current.categories] : [],
+    albums: Array.isArray(current?.albums) ? [...current.albums] : [],
+    media: Array.isArray(current?.media) ? [...current.media] : [],
+    activity: Array.isArray(current?.activity) ? [...current.activity] : [],
+  });
+  const resolved = next && typeof next === "object" ? next : current;
+  persistSocialGalleryStore(resolved);
+  return resolved;
+};
+
+const readSocialGalleryPicksStore = () => {
+  const base = buildDefaultSocialGalleryPicksStore();
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(SOCIAL_GALLERY_PICKS_FILE)) {
+      socialGalleryPicksCache = base;
+      return socialGalleryPicksCache;
+    }
+
+    const raw = fs.readFileSync(SOCIAL_GALLERY_PICKS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    socialGalleryPicksCache = {
+      ...base,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      picks: Array.isArray(parsed?.picks) ? parsed.picks : base.picks,
+      stats: parsed?.stats && typeof parsed.stats === "object" ? { ...base.stats, ...parsed.stats } : base.stats,
+    };
+  } catch (error) {
+    logger.warn("[social-gallery-picks] read_failed", String(error));
+    socialGalleryPicksCache = base;
+  }
+
+  return socialGalleryPicksCache;
+};
+
+const resolveSocialGalleryImageExtension = (mimeType = "") => {
+  const normalized = String(mimeType || "").trim().toLowerCase();
+  if (normalized === "image/png") {
+    return "png";
+  }
+  if (normalized === "image/webp") {
+    return "webp";
+  }
+  if (normalized === "image/gif") {
+    return "gif";
+  }
+  return "jpg";
+};
+
+const extractBase64Payload = (value = "") => {
+  const normalized = String(value || "").trim();
+  const match = normalized.match(/^data:(.+?);base64,(.+)$/i);
+  if (match) {
+    return {
+      mimeType: String(match[1] || "").trim().toLowerCase(),
+      base64: String(match[2] || "").trim(),
+    };
+  }
+  return {
+    mimeType: "",
+    base64: normalized,
+  };
+};
+
+const storeSocialGalleryAsset = ({ imageDataUrl = "", mimeType = "", fileName = "screenshot" } = {}) => {
+  const payload = extractBase64Payload(imageDataUrl);
+  const resolvedMimeType = String(payload.mimeType || mimeType || "image/jpeg").trim().toLowerCase();
+  const allowedMimeTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]);
+  if (!allowedMimeTypes.has(resolvedMimeType)) {
+    throw new Error("Only JPG, PNG, WEBP and GIF screenshots are supported");
+  }
+
+  const assetBuffer = Buffer.from(String(payload.base64 || ""), "base64");
+  if (!assetBuffer.length) {
+    throw new Error("Screenshot payload is empty");
+  }
+  if (assetBuffer.length > SOCIAL_GALLERY_MAX_UPLOAD_BYTES) {
+    throw new Error(`Screenshot exceeds ${Math.round(SOCIAL_GALLERY_MAX_UPLOAD_BYTES / 1024 / 1024)} MB limit`);
+  }
+
+  ensureSocialGalleryAssetsDir();
+  const extension = resolveSocialGalleryImageExtension(resolvedMimeType);
+  const hashedBase = createHash("sha1")
+    .update(assetBuffer)
+    .update(String(fileName || "screenshot"))
+    .digest("hex")
+    .slice(0, 16);
+  const assetFileName = `${Date.now()}-${hashedBase}.${extension}`;
+  const assetPath = path.join(SOCIAL_GALLERY_ASSETS_DIR, assetFileName);
+  fs.writeFileSync(assetPath, assetBuffer);
+
+  return {
+    assetFileName,
+    assetUrl: `/api/public/social-gallery/assets/${assetFileName}`,
+    mimeType: resolvedMimeType,
+    size: assetBuffer.length,
+  };
+};
+
+const storeBannerGeneratorAsset = ({ imageDataUrl = "", mimeType = "", fileName = "banner" } = {}) => {
+  const payload = extractBase64Payload(imageDataUrl);
+  const resolvedMimeType = String(payload.mimeType || mimeType || "image/png").trim().toLowerCase();
+  const allowedMimeTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
+  if (!allowedMimeTypes.has(resolvedMimeType)) {
+    throw new Error("Only JPG, PNG and WEBP banner assets are supported");
+  }
+
+  const assetBuffer = Buffer.from(String(payload.base64 || ""), "base64");
+  if (!assetBuffer.length) {
+    throw new Error("Banner payload is empty");
+  }
+  if (assetBuffer.length > BANNER_GENERATOR_MAX_UPLOAD_BYTES) {
+    throw new Error(`Banner exceeds ${Math.round(BANNER_GENERATOR_MAX_UPLOAD_BYTES / 1024 / 1024)} MB limit`);
+  }
+
+  ensureBannerGeneratorAssetsDir();
+  const extension = resolveSocialGalleryImageExtension(resolvedMimeType);
+  const safeBaseName = slugifyAdminValue(fileName, "banner");
+  const hashedBase = createHash("sha1")
+    .update(assetBuffer)
+    .update(String(fileName || "banner"))
+    .digest("hex")
+    .slice(0, 16);
+  const assetFileName = `${Date.now()}-${safeBaseName}-${hashedBase}.${extension}`;
+  const assetPath = path.join(BANNER_GENERATOR_ASSETS_DIR, assetFileName);
+  fs.writeFileSync(assetPath, assetBuffer);
+
+  return {
+    assetFileName,
+    assetUrl: `/api/public/banner-generator/assets/${assetFileName}`,
+    mimeType: resolvedMimeType,
+    size: assetBuffer.length,
+  };
+};
+
+const computeSocialGalleryReputation = ({ uploads = 0, likesReceived = 0, likesGiven = 0, albums = 0, categories = 0, featured = 0 } = {}) =>
+  uploads * 18 + likesReceived * 14 + likesGiven * 2 + albums * 10 + categories * 8 + featured * 45;
+
+const resolveSocialGalleryStatus = (reputation = 0) => {
+  const normalizedReputation = Math.max(0, Number(reputation || 0) || 0);
+  const tier = Math.max(1, Math.floor(Math.sqrt(normalizedReputation / 80)) + 1);
+  const currentStatusFloor = Math.pow(tier - 1, 2) * 80;
+  const nextStatusReputation = Math.pow(tier, 2) * 80;
+  const statusLabels = [
+    "Observer",
+    "Spotter",
+    "Contributor",
+    "Crew Favorite",
+    "Showcase Pilot",
+    "Community Icon",
+    "Legend",
+  ];
+  const statusLabel = statusLabels[Math.min(statusLabels.length - 1, tier - 1)] || statusLabels[statusLabels.length - 1];
+  return {
+    tier,
+    label: statusLabel,
+    reputation: normalizedReputation,
+    currentStatusFloor,
+    nextStatusReputation,
+    progressPercent: nextStatusReputation > currentStatusFloor
+      ? Math.round(((normalizedReputation - currentStatusFloor) / (nextStatusReputation - currentStatusFloor)) * 100)
+      : 100,
+  };
+};
+
+const buildSocialGalleryActorKey = ({ pilotId = null, username = "", email = "" } = {}) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId > 0) {
+    return `pilot:${normalizedPilotId}`;
+  }
+  if (normalizeAdminText(username)) {
+    return `username:${normalizeAdminText(username).toLowerCase()}`;
+  }
+  if (normalizeAdminText(email)) {
+    return `email:${normalizeAdminText(email).toLowerCase()}`;
+  }
+  return "guest";
+};
+
+const socialGalleryEntryMatchesActor = (entry = {}, actor = {}) => {
+  const entryPilotId = Number(entry?.ownerPilotId || entry?.createdByPilotId || 0) || 0;
+  const actorPilotId = Number(actor?.pilotId || 0) || 0;
+  if (entryPilotId > 0 && actorPilotId > 0) {
+    return entryPilotId === actorPilotId;
+  }
+  const entryUsername = normalizeAdminText(entry?.ownerUsername || entry?.createdByUsername || "").toLowerCase();
+  const actorUsername = normalizeAdminText(actor?.username || "").toLowerCase();
+  if (entryUsername && actorUsername) {
+    return entryUsername === actorUsername;
+  }
+  const entryEmail = normalizeAdminText(entry?.ownerEmail || entry?.createdByEmail || "").toLowerCase();
+  const actorEmail = normalizeAdminText(actor?.email || "").toLowerCase();
+  return Boolean(entryEmail && actorEmail && entryEmail === actorEmail);
+};
+
+const resolveSocialGalleryLikeCount = (media = {}) => Array.isArray(media?.likes) ? media.likes.length : 0;
+
+const appendSocialGalleryActivity = (store, activity) => {
+  if (!store || typeof store !== "object") {
+    return store;
+  }
+  const nextActivity = {
+    id: `activity-${randomUUID()}`,
+    createdAt: new Date().toISOString(),
+    ...activity,
+  };
+  store.activity = [nextActivity, ...(Array.isArray(store.activity) ? store.activity : [])].slice(0, SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES);
+  return store;
+};
+
+const serializeSocialGalleryCategory = (category = {}) => ({
+  id: String(category?.id || "").trim(),
+  title: normalizeAdminText(category?.title || "Category") || "Category",
+  description: normalizeAdminText(category?.description || "") || "",
+  color: normalizeAdminText(category?.color || "#E31E24") || "#E31E24",
+  createdAt: String(category?.createdAt || "").trim() || null,
+  createdByPilotId: Number(category?.createdByPilotId || 0) || null,
+  createdByUsername: normalizeAdminText(category?.createdByUsername || "") || null,
+  createdByName: normalizeAdminText(category?.createdByName || "Nordwind Virtual") || "Nordwind Virtual",
+  isSystem: Boolean(category?.isSystem),
+});
+
+const serializeSocialGalleryAlbum = (album = {}, store = {}, viewerActor = null) => {
+  const mediaItems = (Array.isArray(store?.media) ? store.media : []).filter((item) => String(item?.albumId || "") === String(album?.id || ""));
+  const cover = mediaItems.find((item) => String(item?.id || "") === String(album?.coverMediaId || "")) || mediaItems[0] || null;
+  return {
+    id: String(album?.id || "").trim(),
+    title: normalizeAdminText(album?.title || "Album") || "Album",
+    description: normalizeAdminText(album?.description || "") || "",
+    visibility: String(album?.visibility || "public").trim().toLowerCase() === "private" ? "private" : "public",
+    createdAt: String(album?.createdAt || "").trim() || null,
+    updatedAt: String(album?.updatedAt || album?.createdAt || "").trim() || null,
+    ownerPilotId: Number(album?.ownerPilotId || 0) || null,
+    ownerUsername: normalizeAdminText(album?.ownerUsername || "") || null,
+    ownerName: normalizeAdminText(album?.ownerName || "Pilot") || "Pilot",
+    categoryIds: Array.isArray(album?.categoryIds) ? album.categoryIds.map((item) => String(item || "").trim()).filter(Boolean) : [],
+    mediaCount: mediaItems.length,
+    coverUrl: cover?.assetUrl || null,
+    isOwner: viewerActor ? socialGalleryEntryMatchesActor(album, viewerActor) : false,
+  };
+};
+
+const serializeSocialGalleryMedia = (media = {}, store = {}, viewerActor = null) => {
+  const categories = Array.isArray(store?.categories) ? store.categories : [];
+  const album = (Array.isArray(store?.albums) ? store.albums : []).find((item) => String(item?.id || "") === String(media?.albumId || "")) || null;
+  const viewerKey = viewerActor ? buildSocialGalleryActorKey(viewerActor) : "";
+  const likes = Array.isArray(media?.likes) ? media.likes : [];
+  const likeCount = likes.length;
+  return {
+    id: String(media?.id || "").trim(),
+    title: normalizeAdminText(media?.title || "Untitled screenshot") || "Untitled screenshot",
+    description: normalizeAdminText(media?.description || "") || "",
+    assetUrl: normalizeAdminText(media?.assetUrl || "") || "",
+    fileName: normalizeAdminText(media?.fileName || "") || null,
+    mimeType: normalizeAdminText(media?.mimeType || "image/jpeg") || "image/jpeg",
+    visibility: String(media?.visibility || "public").trim().toLowerCase() === "private" ? "private" : "public",
+    createdAt: String(media?.createdAt || "").trim() || null,
+    ownerPilotId: Number(media?.ownerPilotId || 0) || null,
+    ownerUsername: normalizeAdminText(media?.ownerUsername || "") || null,
+    ownerName: normalizeAdminText(media?.ownerName || "Pilot") || "Pilot",
+    ownerRank: normalizeAdminText(media?.ownerRank || "") || null,
+    albumId: normalizeAdminText(media?.albumId || "") || null,
+    albumTitle: album ? normalizeAdminText(album?.title || "Album") : null,
+    categoryIds: Array.isArray(media?.categoryIds) ? media.categoryIds.map((item) => String(item || "").trim()).filter(Boolean) : [],
+    categories: categories
+      .filter((category) => Array.isArray(media?.categoryIds) && media.categoryIds.includes(category.id))
+      .map((category) => serializeSocialGalleryCategory(category)),
+    tags: Array.isArray(media?.tags) ? media.tags.map((item) => normalizeAdminText(item)).filter(Boolean) : [],
+    likeCount,
+    likedByViewer: viewerKey ? likes.some((item) => buildSocialGalleryActorKey(item) === viewerKey) : false,
+    likesPreview: likes.slice(0, 6).map((item) => ({
+      pilotId: Number(item?.pilotId || 0) || null,
+      username: normalizeAdminText(item?.username || "") || null,
+      name: normalizeAdminText(item?.name || item?.username || "Pilot") || "Pilot",
+      createdAt: String(item?.createdAt || "").trim() || null,
+    })),
+    isOwner: viewerActor ? socialGalleryEntryMatchesActor(media, viewerActor) : false,
+    isFeatured: Boolean(media?.isFeatured),
+    ownerCallsign: normalizeAdminText(media?.ownerCallsign || media?.ownerUsername || "") || null,
+    reportCount: Array.isArray(media?.reports) ? media.reports.length : 0,
+  };
+};
+
+const buildSocialGalleryFeed = (store = {}, viewerActor = null, limit = 24) => {
+  const activityEntries = Array.isArray(store?.activity) ? store.activity : [];
+  const mediaById = new Map((Array.isArray(store?.media) ? store.media : []).map((item) => [String(item?.id || ""), item]));
+  const albumById = new Map((Array.isArray(store?.albums) ? store.albums : []).map((item) => [String(item?.id || ""), item]));
+  const categoryById = new Map((Array.isArray(store?.categories) ? store.categories : []).map((item) => [String(item?.id || ""), item]));
+
+  return activityEntries
+    .filter((item) => {
+      if (String(item?.visibility || "public") === "private") {
+        return viewerActor ? socialGalleryEntryMatchesActor(item, viewerActor) : false;
+      }
+      return true;
+    })
+    .slice(0, Math.max(1, Math.min(100, Number(limit || 24))))
+    .map((item) => {
+      const media = mediaById.get(String(item?.mediaId || "")) || null;
+      const album = albumById.get(String(item?.albumId || media?.albumId || "")) || null;
+      const category = categoryById.get(String(item?.categoryId || "")) || null;
+      return {
+        id: String(item?.id || randomUUID()),
+        type: normalizeAdminText(item?.type || "activity") || "activity",
+        createdAt: String(item?.createdAt || "").trim() || null,
+        actor: {
+          pilotId: Number(item?.actorPilotId || 0) || null,
+          username: normalizeAdminText(item?.actorUsername || "") || null,
+          name: normalizeAdminText(item?.actorName || item?.actorUsername || "Pilot") || "Pilot",
+        },
+        title: normalizeAdminText(item?.title || "Activity") || "Activity",
+        summary: normalizeAdminText(item?.summary || "") || "",
+        media: media ? serializeSocialGalleryMedia(media, store, viewerActor) : null,
+        album: album ? serializeSocialGalleryAlbum(album, store, viewerActor) : null,
+        category: category ? serializeSocialGalleryCategory(category) : null,
+      };
+    });
+};
+
+const buildSocialGalleryPilotRanking = (store = {}, picksStore = buildDefaultSocialGalleryPicksStore()) => {
+  const mediaItems = Array.isArray(store?.media) ? store.media : [];
+  const albums = Array.isArray(store?.albums) ? store.albums : [];
+  const categories = Array.isArray(store?.categories) ? store.categories : [];
+  const featuredByActor = new Map();
+  (Array.isArray(picksStore?.picks) ? picksStore.picks : []).forEach((pick) => {
+    const actorKey = buildSocialGalleryActorKey({ pilotId: pick?.ownerPilotId, username: pick?.ownerUsername });
+    if (actorKey !== "guest") {
+      featuredByActor.set(actorKey, (featuredByActor.get(actorKey) || 0) + 1);
+    }
+  });
+
+  const ranking = new Map();
+  const ensureActor = (source = {}) => {
+    const actorKey = buildSocialGalleryActorKey({ pilotId: source?.ownerPilotId ?? source?.createdByPilotId, username: source?.ownerUsername ?? source?.createdByUsername, email: source?.ownerEmail ?? source?.createdByEmail });
+    if (actorKey === "guest") {
+      return null;
+    }
+    if (!ranking.has(actorKey)) {
+      ranking.set(actorKey, {
+        key: actorKey,
+        pilotId: Number(source?.ownerPilotId || source?.createdByPilotId || 0) || null,
+        username: normalizeAdminText(source?.ownerUsername || source?.createdByUsername || "") || null,
+        name: normalizeAdminText(source?.ownerName || source?.createdByName || source?.ownerUsername || source?.createdByUsername || "Pilot") || "Pilot",
+        rank: normalizeAdminText(source?.ownerRank || "") || null,
+        uploads: 0,
+        likesReceived: 0,
+        likesGiven: 0,
+        albums: 0,
+        categories: 0,
+        featured: 0,
+      });
+    }
+    return ranking.get(actorKey);
+  };
+
+  mediaItems.forEach((item) => {
+    const actor = ensureActor(item);
+    if (!actor) {
+      return;
+    }
+    actor.uploads += 1;
+    actor.likesReceived += resolveSocialGalleryLikeCount(item);
+    const likes = Array.isArray(item?.likes) ? item.likes : [];
+    likes.forEach((like) => {
+      const likerKey = buildSocialGalleryActorKey(like);
+      if (likerKey === "guest") {
+        return;
+      }
+      if (!ranking.has(likerKey)) {
+        ranking.set(likerKey, {
+          key: likerKey,
+          pilotId: Number(like?.pilotId || 0) || null,
+          username: normalizeAdminText(like?.username || "") || null,
+          name: normalizeAdminText(like?.name || like?.username || "Pilot") || "Pilot",
+          rank: null,
+          uploads: 0,
+          likesReceived: 0,
+          likesGiven: 0,
+          albums: 0,
+          categories: 0,
+          featured: 0,
+        });
+      }
+      ranking.get(likerKey).likesGiven += 1;
+    });
+  });
+
+  albums.forEach((item) => {
+    const actor = ensureActor(item);
+    if (actor) {
+      actor.albums += 1;
+    }
+  });
+
+  categories.forEach((item) => {
+    if (item?.isSystem) {
+      return;
+    }
+    const actor = ensureActor(item);
+    if (actor) {
+      actor.categories += 1;
+    }
+  });
+
+  Array.from(ranking.values()).forEach((entry) => {
+    entry.featured = featuredByActor.get(entry.key) || 0;
+    entry.reputation = resolveSocialGalleryStatus(
+      computeSocialGalleryReputation({
+        uploads: entry.uploads,
+        likesReceived: entry.likesReceived,
+        likesGiven: entry.likesGiven,
+        albums: entry.albums,
+        categories: entry.categories,
+        featured: entry.featured,
+      })
+    );
+  });
+
+  return Array.from(ranking.values()).sort((left, right) => {
+    const reputationDiff = Number(right?.reputation?.reputation || 0) - Number(left?.reputation?.reputation || 0);
+    if (reputationDiff !== 0) {
+      return reputationDiff;
+    }
+    const likesDiff = Number(right?.likesReceived || 0) - Number(left?.likesReceived || 0);
+    if (likesDiff !== 0) {
+      return likesDiff;
+    }
+    return String(left?.name || "").localeCompare(String(right?.name || ""));
+  });
+};
 
 const readAdminContentStore = () => {
   if (adminContentCache) {
@@ -1682,10 +2442,12 @@ const normalizeManagedAdminItem = (collection, payload = {}, existing = null) =>
       id,
       pilotId: Number(payload.pilotId || existing?.pilotId || 0) || null,
       username: normalizeAdminText(payload.username || existing?.username),
+      handle: normalizeAdminText(payload.handle || existing?.handle || payload.username || existing?.username).replace(/^@+/, "") || null,
       name: normalizeAdminText(payload.name || existing?.name || "Staff member"),
       role: normalizeAdminText(payload.role || existing?.role || "Staff"),
       rank: normalizeAdminText(payload.rank || existing?.rank),
       division: normalizeAdminText(payload.division || existing?.division),
+      color: normalizeAdminText(payload.color || existing?.color) || null,
       email: normalizeAdminText(payload.email || existing?.email),
       discord: normalizeAdminText(payload.discord || existing?.discord),
       status: normalizeAdminText(payload.status || existing?.status || "active") || "active",
@@ -1855,6 +2617,46 @@ const inferStaffDivision = (labels = []) => {
   return "General";
 };
 
+const resolveStaffAccentColor = (division = "", fallback = "#E31E24") => {
+  const normalized = normalizeAdminText(division).toLowerCase();
+  if (normalized.includes("operation")) {
+    return "#2563EB";
+  }
+  if (normalized.includes("train")) {
+    return "#7C3AED";
+  }
+  if (normalized.includes("community")) {
+    return "#DB2777";
+  }
+  if (normalized.includes("hr")) {
+    return "#D97706";
+  }
+  if (normalized.includes("management")) {
+    return "#059669";
+  }
+  return fallback;
+};
+
+const serializePublicStaffEntry = (item = {}) => {
+  const division = normalizeAdminText(item?.division || "General") || "General";
+  const handle = normalizeAdminText(item?.handle || item?.username || item?.discord || "").replace(/^@+/, "") || null;
+  return {
+    id: String(item?.id || "").trim() || slugifyAdminValue(item?.name || item?.role || "staff", "staff"),
+    pilotId: Number(item?.pilotId || 0) || null,
+    username: normalizeAdminText(item?.username || "") || null,
+    handle,
+    name: normalizeAdminText(item?.name || item?.username || "Staff member") || "Staff member",
+    role: normalizeAdminText(item?.role || "Staff") || "Staff",
+    rank: normalizeAdminText(item?.rank || "") || null,
+    division,
+    color: normalizeAdminText(item?.color || resolveStaffAccentColor(division)) || resolveStaffAccentColor(division),
+    discord: normalizeAdminText(item?.discord || "") || null,
+    status: normalizeAdminText(item?.status || "active") || "active",
+    bio: normalizeAdminText(item?.bio || "") || "",
+    order: normalizeAdminNumber(item?.order, 0),
+  };
+};
+
 const inferStaffStatusFromRoster = (pilot = {}) => {
   const status = normalizeAdminText(pilot?.status).toLowerCase();
   if (status === "banned" || status === "inactive" || status === "archived") {
@@ -1927,10 +2729,17 @@ const syncAdminStaffCollection = async () => {
       }
 
       const roleLabels = extractPilotRoleLabels(pilot);
+      const honoraryRank = normalizeAdminText(
+        pilot?.honorary_rank?.name ||
+        pilot?.honorary_rank?.title ||
+        pilot?.honorary_rank_name ||
+        pilot?.honoraryRankName
+      );
       const rankId = Number(pilot?.rank_id || rosterPilot?.rankId || 0) || 0;
-      const rank =
+      const regularRank =
         normalizeAdminText(pilot?.rank?.name || pilot?.rank_name || rosterPilot?.rank) ||
         (rankId > 0 ? ranksMap.get(rankId) || `Rank #${rankId}` : "");
+      const rank = honoraryRank || regularRank;
       const discordLabel =
         normalizeAdminText(existing?.discord) ||
         normalizeAdminText(readDiscordUsernameFromPilot(pilot)) ||
@@ -2663,6 +3472,12 @@ const resolveTicketActor = async (req) => {
   const name =
     normalizeAdminText(pilot?.name || discordUser?.globalName || discordUser?.username || username || "Pilot") ||
     "Pilot";
+  const canManageTickets = Boolean(
+    (vamsysSession && isVamsysAdmin(vamsysSession.user || {})) ||
+      pilot?.isStaff ||
+      vamsysSession?.user?.isStaff ||
+      discordUser?.isStaff
+  );
 
   return {
     pilotId,
@@ -2670,7 +3485,7 @@ const resolveTicketActor = async (req) => {
     username,
     name,
     provider: vamsysSession ? "vamsys" : "discord",
-    isAdmin: Boolean(vamsysSession && isVamsysAdmin(vamsysSession.user || {})),
+    isAdmin: canManageTickets,
     discordSession: Boolean(discordSession),
   };
 };
@@ -3346,7 +4161,7 @@ const resolveAcarsHoppieStationCallsign = (settings = {}, explicitCallsign = "")
   if (candidate) {
     return candidate;
   }
-  return "NWSOPS";
+  return "VNWS";
 };
 
 const resolveAcarsHoppieTargetCallsign = (settings = {}, explicitCallsign = "") => {
@@ -3397,7 +4212,7 @@ const assertAcarsHoppieConfigured = () => {
   if (settings.provider !== "custom-hoppie") {
     throw new Error("ACARS provider is not set to custom-hoppie");
   }
-  const logon = normalizeAdminText(settings.hoppieLogonCode).toUpperCase();
+  const logon = String(settings.hoppieLogonCode || "").trim();
   if (!logon) {
     throw new Error("Hoppie logon code is missing");
   }
@@ -3907,7 +4722,7 @@ const sendAcarsVacDispatchMessage = async (payload = {}) => {
 const normalizeAcarsConfigPayload = (payload = {}, current = null) => {
   const existing = current && typeof current === "object" ? current : getAcarsConfigStore();
   const nextStationName = normalizeAdminText(payload.stationName ?? existing.stationName ?? "Nordwind Virtual Operations");
-  const nextStationCallsign = normalizeAdminText(payload.stationCallsign ?? existing.stationCallsign ?? "NWSOPS").toUpperCase();
+  const nextStationCallsign = normalizeAdminText(payload.stationCallsign ?? existing.stationCallsign ?? "VNWS").toUpperCase();
   const nextCallsignPrefix = normalizeAdminText(payload.callsignPrefix ?? existing.callsignPrefix ?? "NWS").toUpperCase();
   const nextDispatchTarget = normalizeAdminText(payload.dispatchTarget ?? existing.dispatchTarget ?? "NWSDISP").toUpperCase();
   return {
@@ -3917,10 +4732,10 @@ const normalizeAcarsConfigPayload = (payload = {}, current = null) => {
     rolloutStage: normalizeAdminText(payload.rolloutStage ?? existing.rolloutStage ?? "planning") || "planning",
     clientName: normalizeAdminText(payload.clientName ?? existing.clientName ?? "Nordwind ACARS") || "Nordwind ACARS",
     clientVersion: normalizeAdminText(payload.clientVersion ?? existing.clientVersion ?? "0.1") || "0.1",
-    hoppieLogonCode: normalizeAdminText(payload.hoppieLogonCode ?? existing.hoppieLogonCode).toUpperCase(),
+    hoppieLogonCode: String(payload.hoppieLogonCode ?? existing.hoppieLogonCode ?? "").trim(),
     selcal: normalizeAdminText(payload.selcal ?? existing.selcal).toUpperCase(),
     stationName: nextStationName || "Nordwind Virtual Operations",
-    stationCallsign: nextStationCallsign || "NWSOPS",
+    stationCallsign: nextStationCallsign || "VNWS",
     callsignPrefix: nextCallsignPrefix || "NWS",
     dispatchTarget: nextDispatchTarget || "NWSDISP",
     positionIntervalSeconds: Math.max(5, normalizeAdminNumber(payload.positionIntervalSeconds ?? existing.positionIntervalSeconds, 15)),
@@ -3955,12 +4770,12 @@ const getAcarsAdminSummary = () => {
   const settings = getAcarsConfigStore();
   const cachedFlights = Array.isArray(flightMapCache?.data?.flights) ? flightMapCache.data.flights : [];
   const activeFlights = cachedFlights.length > 0 ? cachedFlights.length : activeFlightHoldCache.size;
-  const normalizedLogon = String(settings.hoppieLogonCode || "").trim().toUpperCase();
+  const normalizedLogon = String(settings.hoppieLogonCode || "").trim();
   const normalizedSelcal = String(settings.selcal || "").trim().toUpperCase();
   const normalizedStationCallsign = String(settings.stationCallsign || "").trim().toUpperCase();
   const normalizedCallsignPrefix = String(settings.callsignPrefix || "").trim().toUpperCase();
   const normalizedDispatchTarget = String(settings.dispatchTarget || "").trim().toUpperCase();
-  const logonLooksValid = /^[A-Z0-9]{4,12}$/.test(normalizedLogon);
+  const logonLooksValid = /^[A-Za-z0-9]{8,32}$/.test(normalizedLogon);
   const selcalLooksValid = /^[A-Z]{2}-?[A-Z]{2}$/.test(normalizedSelcal);
   const stationLooksValid = /^[A-Z0-9]{3,10}$/.test(normalizedStationCallsign);
   const callsignPrefixLooksValid = /^[A-Z0-9]{2,4}$/.test(normalizedCallsignPrefix);
@@ -4586,36 +5401,122 @@ const buildAdminAirportPayload = (payload = {}, { isCreate = false } = {}) => {
   return nextPayload;
 };
 
-const loadAdminHubsCatalog = async () => {
-  const [hubs, airportsLookup] = await Promise.all([
-    fetchAllPages("/hubs?page[size]=100&sort=order"),
-    loadAirportsLookup(),
-  ]);
+let adminHubsInflight = null;
+let adminHubsCacheEntry = { data: null, expiresAt: 0 };
 
-  return (Array.isArray(hubs) ? hubs : []).map((hub) => {
-    const airportIds = Array.isArray(hub?.airport_ids) ? hub.airport_ids.map((item) => Number(item || 0)).filter((item) => item > 0) : [];
-    const airportLabels = airportIds.map((airportId) => {
-      const airport = airportsLookup.get(airportId) || null;
-      return airport ? `${airport.code} - ${airport.name}` : String(airportId);
+const loadAdminHubsCatalog = async () => {
+  const now = Date.now();
+  if (adminHubsCacheEntry.data && now < adminHubsCacheEntry.expiresAt) {
+    return adminHubsCacheEntry.data;
+  }
+  if (adminHubsInflight) return adminHubsInflight;
+
+  adminHubsInflight = (async () => {
+    const [hubs, airportsLookup] = await Promise.all([
+      fetchAllPages("/hubs?page[size]=100&sort=order"),
+      loadAirportsLookup(),
+    ]);
+
+    const result = (Array.isArray(hubs) ? hubs : []).map((hub) => {
+      const airportIds = Array.isArray(hub?.airport_ids) ? hub.airport_ids.map((item) => Number(item || 0)).filter((item) => item > 0) : [];
+      const airportLabels = airportIds.map((airportId) => {
+        const airport = airportsLookup.get(airportId) || null;
+        return airport ? `${airport.code} - ${airport.name}` : String(airportId);
+      });
+
+      const primaryAirport = airportIds.length > 0 ? (airportsLookup.get(airportIds[0]) || null) : null;
+
+      return {
+        id: Number(hub?.id || 0) || 0,
+        name: String(hub?.name || "Hub").trim() || "Hub",
+        order: Number(hub?.order || 0) || 0,
+        default: Boolean(hub?.default),
+        pilotsCount: Number(hub?.pilots_count || 0) || 0,
+        airportIds,
+        airportLabels,
+        airportsText: airportLabels.join(", "),
+        city: primaryAirport?.city || null,
+        countryName: primaryAirport?.countryName || null,
+        countryIso2: primaryAirport?.countryIso2 || null,
+        updatedAt: String(hub?.updated_at || hub?.created_at || "").trim() || null,
+      };
     });
 
-    const primaryAirport = airportIds.length > 0 ? (airportsLookup.get(airportIds[0]) || null) : null;
+    adminHubsCacheEntry = { data: result, expiresAt: Date.now() + 5 * 60 * 1000 };
+    return result;
+  })().finally(() => { adminHubsInflight = null; });
 
-    return {
-      id: Number(hub?.id || 0) || 0,
-      name: String(hub?.name || "Hub").trim() || "Hub",
-      order: Number(hub?.order || 0) || 0,
-      default: Boolean(hub?.default),
-      pilotsCount: Number(hub?.pilots_count || 0) || 0,
-      airportIds,
-      airportLabels,
-      airportsText: airportLabels.join(", "),
-      city: primaryAirport?.city || null,
-      countryName: primaryAirport?.countryName || null,
-      countryIso2: primaryAirport?.countryIso2 || null,
-      updatedAt: String(hub?.updated_at || hub?.created_at || "").trim() || null,
-    };
-  });
+  return adminHubsInflight;
+};
+
+let adminBootstrapInflight = null;
+
+const withTimeout = (promise, ms) =>
+  Promise.race([promise, new Promise((resolve) => setTimeout(() => resolve(null), ms))]);
+
+const fetchAdminBootstrapPayload = async () => {
+  const now = Date.now();
+  // Routes catalog blocks on ensureUnifiedCatalogReady — cap at 6s so other data
+  // (pilots, fleet, bookings) never wait on a cold catalog init.
+  const routesPromise = withTimeout(loadAdminRoutesCatalog(), 6000)
+    .then((v) => v ?? [])
+    .catch(() => []);
+
+  const [routes, hubs, airports, managedFleetPayload, liveFleetPayload, bookings, pilotsPayload, pirepsPayload] = await Promise.all([
+    routesPromise,
+    loadAdminHubsCatalog().catch(() => []),
+    loadAdminAirportsCatalog().catch(() => []),
+    getManagedFleetCatalog().catch(() => ({ fleets: [] })),
+    loadDashboardFleetCatalog().catch(() => ({ fleets: [] })),
+    loadAdminBookingsCatalog({ limit: 150 }).catch(() => []),
+    loadPilotsRoster().catch(() => ({ pilots: [] })),
+    loadAdminPirepsCatalogPage({ pageSize: 25 }).catch(() => ({ pireps: [], meta: null })),
+  ]);
+
+  const payload = {
+    generatedAt: new Date(now).toISOString(),
+    routes: Array.isArray(routes) ? routes : [],
+    hubs: Array.isArray(hubs) ? hubs : [],
+    airports: Array.isArray(airports) ? airports : [],
+    fleets: Array.isArray(managedFleetPayload?.fleets) ? managedFleetPayload.fleets : [],
+    liveFleets: Array.isArray(liveFleetPayload?.fleets) ? liveFleetPayload.fleets : [],
+    bookings: Array.isArray(bookings) ? bookings : [],
+    pilots: Array.isArray(pilotsPayload?.pilots) ? pilotsPayload.pilots : [],
+    pireps: {
+      pireps: Array.isArray(pirepsPayload?.pireps) ? pirepsPayload.pireps : [],
+      meta: pirepsPayload?.meta || null,
+    },
+  };
+
+  adminBootstrapCache = {
+    data: payload,
+    expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
+  };
+
+  return payload;
+};
+
+const loadAdminBootstrapCatalog = async ({ force = false } = {}) => {
+  const now = Date.now();
+  const isExpired = !adminBootstrapCache.data || now >= adminBootstrapCache.expiresAt;
+
+  if (!force && !isExpired) {
+    return adminBootstrapCache.data;
+  }
+
+  // Stale-while-revalidate: return stale data immediately, refresh in background
+  if (!force && adminBootstrapCache.data && isExpired && !adminBootstrapInflight) {
+    adminBootstrapInflight = fetchAdminBootstrapPayload().finally(() => { adminBootstrapInflight = null; });
+    return adminBootstrapCache.data;
+  }
+
+  // Deduplicate concurrent in-flight requests
+  if (adminBootstrapInflight) {
+    return adminBootstrapInflight;
+  }
+
+  adminBootstrapInflight = fetchAdminBootstrapPayload().finally(() => { adminBootstrapInflight = null; });
+  return adminBootstrapInflight;
 };
 
 const buildAdminHubPayload = async (payload = {}) => {
@@ -5237,6 +6138,63 @@ const loadAdminBookingsCatalog = async ({ limit = 100 } = {}) => {
   });
 };
 
+const loadAdminPirepsCatalogPage = async ({
+  pageSize = 25,
+  cursor = "",
+  sort = "-id",
+  filters = {},
+} = {}) => {
+  const normalizedPageSize = Math.max(1, Math.min(100, Number(pageSize) || 25));
+  const normalizedCursor = String(cursor || "").trim();
+  const normalizedSort = String(sort || "-id").trim() || "-id";
+  const params = new URLSearchParams();
+  params.set("page[size]", String(normalizedPageSize));
+  params.set("sort", normalizedSort);
+
+  if (normalizedCursor) {
+    params.set("page[cursor]", normalizedCursor);
+  }
+
+  [
+    "id", "pilot_id", "booking_id", "route_id", "callsign", "flight_number",
+    "status", "type", "need_reply", "network", "departure_airport_id", "arrival_airport_id",
+    "aircraft_id",
+  ].forEach((key) => {
+    const value = String(filters?.[key] || "").trim();
+    if (value) {
+      params.set(`filter[${key}]`, value);
+    }
+  });
+
+  const filterAircraftId = Number(filters?.aircraft_id || 0) || 0;
+  if (filterAircraftId > 0) {
+    params.set("page[size]", String(Math.max(normalizedPageSize, 50)));
+  }
+
+  const token = await getAccessToken();
+  const response = await fetch(`${API_BASE}/pireps?${params.toString()}`, {
+    headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const error = new Error(`vAMSYS error: ${response.status}`);
+    error.statusCode = response.status;
+    error.detail = text.slice(0, 500);
+    throw error;
+  }
+
+  const data = await response.json();
+  let pireps = Array.isArray(data?.data) ? data.data : [];
+  if (filterAircraftId > 0) {
+    pireps = pireps.filter((p) => Number(p?.aircraft_id || p?.attributes?.aircraft_id || 0) === filterAircraftId).slice(0, normalizedPageSize);
+  }
+  return {
+    pireps,
+    meta: data?.meta || null,
+  };
+};
+
 const markTelemetryDiskDirty = () => {
   telemetryDiskPersistState.dirty = true;
 };
@@ -5623,10 +6581,68 @@ const cloneNotificationSettings = (value = DEFAULT_NOTIFICATION_SETTINGS) => ({
   },
 });
 
+const MAX_PILOT_FLIGHT_LOG_SAVED_IDS = 48;
+const MAX_PILOT_FLIGHT_LOG_COMPARE_IDS = 3;
+
+const normalizePilotFlightLogIds = (value = [], maxItems = MAX_PILOT_FLIGHT_LOG_SAVED_IDS) =>
+  Array.from(
+    new Set(
+      (Array.isArray(value) ? value : [])
+        .map((item) => Number(item || 0) || 0)
+        .filter((item) => item > 0)
+    )
+  ).slice(0, Math.max(1, Number(maxItems || 0) || 1));
+
+const MAX_PILOT_AVATAR_DATA_URL_LENGTH = 450000;
+
+const normalizePilotAvatarMode = (value = "") => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "custom" || normalized === "discord" ? normalized : "default";
+};
+
+const normalizePilotAvatarDataUrl = (value = "") => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.length > MAX_PILOT_AVATAR_DATA_URL_LENGTH) {
+    return null;
+  }
+  if (!/^data:image\/(png|jpe?g|webp|gif);base64,/i.test(normalized)) {
+    return null;
+  }
+  return normalized;
+};
+
+const clonePilotProfilePreferences = (value = {}) => ({
+  avatarMode: normalizePilotAvatarMode(value?.avatarMode),
+  customAvatar: normalizePilotAvatarDataUrl(value?.customAvatar),
+  discordAvatar: String(value?.discordAvatar || "").trim().slice(0, 2048) || null,
+});
+
+const resolvePilotAvatarFromPreferences = (user = {}, preferences = {}) => {
+  const profilePreferences = clonePilotProfilePreferences(preferences?.profile);
+  if (profilePreferences.avatarMode === "custom" && profilePreferences.customAvatar) {
+    return profilePreferences.customAvatar;
+  }
+  if (profilePreferences.avatarMode === "discord" && profilePreferences.discordAvatar) {
+    return profilePreferences.discordAvatar;
+  }
+  const fallbackAvatar = String(user?.avatar || "").trim();
+  return fallbackAvatar || null;
+};
+
+const cloneFlightLogPreferences = (value = {}) => ({
+  savedPirepIds: normalizePilotFlightLogIds(value?.savedPirepIds, MAX_PILOT_FLIGHT_LOG_SAVED_IDS),
+  comparePirepIds: normalizePilotFlightLogIds(value?.comparePirepIds, MAX_PILOT_FLIGHT_LOG_COMPARE_IDS),
+});
+
 const getPilotPreferences = (pilot = {}) => {
   const existing = resolvePilotScopedCacheValue(pilotPreferencesCache, pilot);
   return {
     notifications: cloneNotificationSettings(existing?.notifications),
+    flightLog: cloneFlightLogPreferences(existing?.flightLog),
+    profile: clonePilotProfilePreferences(existing?.profile),
     updatedAt: String(existing?.updatedAt || "").trim() || null,
   };
 };
@@ -5648,6 +6664,30 @@ const setPilotPreferences = (pilot = {}, partial = {}) => {
           ? partial.notifications.notificationTypes
           : {}),
       },
+    }),
+    flightLog: cloneFlightLogPreferences({
+      savedPirepIds:
+        partial?.flightLog && Object.prototype.hasOwnProperty.call(partial.flightLog, "savedPirepIds")
+          ? partial.flightLog.savedPirepIds
+          : current.flightLog.savedPirepIds,
+      comparePirepIds:
+        partial?.flightLog && Object.prototype.hasOwnProperty.call(partial.flightLog, "comparePirepIds")
+          ? partial.flightLog.comparePirepIds
+          : current.flightLog.comparePirepIds,
+    }),
+    profile: clonePilotProfilePreferences({
+      avatarMode:
+        partial?.profile && Object.prototype.hasOwnProperty.call(partial.profile, "avatarMode")
+          ? partial.profile.avatarMode
+          : current.profile.avatarMode,
+      customAvatar:
+        partial?.profile && Object.prototype.hasOwnProperty.call(partial.profile, "customAvatar")
+          ? partial.profile.customAvatar
+          : current.profile.customAvatar,
+      discordAvatar:
+        partial?.profile && Object.prototype.hasOwnProperty.call(partial.profile, "discordAvatar")
+          ? partial.profile.discordAvatar
+          : current.profile.discordAvatar,
     }),
     updatedAt: new Date().toISOString(),
   };
@@ -6007,6 +7047,51 @@ const hasStaffLikeHonoraryRankName = (value) => {
   }
 
   return /(^|[\s_-])STAFF($|[\s_-])/.test(normalized);
+};
+
+const resolveHonoraryRankLabel = (value = {}) => {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+
+  return String(
+    value?.honoraryRank ||
+      value?.honorary_rank_name ||
+      value?.honoraryRankName ||
+      value?.honorary_rank_label ||
+      value?.honoraryRankLabel ||
+      value?.honorary_rank?.name ||
+      value?.honorary_rank?.title ||
+      value?.honorary_rank?.label ||
+      value?.honorary_rank?.code ||
+      value?.rank?.honorary_rank?.name ||
+      value?.rank?.honorary_rank?.title ||
+      value?.rank?.honorary_rank?.label ||
+      value?.rank?.honorary_rank?.code ||
+      ""
+  ).trim();
+};
+
+const resolvePirepLandingRate = (pirep = {}) => {
+  if (!pirep || typeof pirep !== "object") {
+    return null;
+  }
+
+  const resolved = [
+    pirep?.landingRate,
+    pirep?.landing_rate,
+    pirep?.landingrate,
+    pirep?.landingVSpeed,
+    pirep?.landing_vspeed,
+    pirep?.landingVs,
+    pirep?.landing_vs,
+    pirep?.touchdownRate,
+    pirep?.touchdown_rate,
+  ]
+    .map((value) => Number(value))
+    .find((value) => Number.isFinite(value));
+
+  return Number.isFinite(resolved) ? Number(resolved) : null;
 };
 
 const hasConfiguredVamsysAdminAccess = (user = {}) => {
@@ -7038,6 +8123,19 @@ const clearTelegramConnectionByIdentity = ({ chatId, telegramId } = {}) => {
       },
     });
   });
+};
+
+const findPilotIdByTelegramIdentity = ({ chatId, telegramId } = {}) => {
+  const normalizedChatId = normalizeAdminText(chatId || "") || null;
+  const normalizedTelegramId = normalizeAdminText(telegramId || "") || null;
+  if (!normalizedChatId && !normalizedTelegramId) return null;
+  for (const [pilotId, link] of vamsysLinksCache.entries()) {
+    const telegram = sanitizeTelegramConnection(link?.metadata?.telegram);
+    if (!telegram) continue;
+    if (normalizedChatId && telegram.chatId === normalizedChatId) return Number(pilotId) || null;
+    if (normalizedTelegramId && telegram.telegramId === normalizedTelegramId) return Number(pilotId) || null;
+  }
+  return null;
 };
 
 const claimTelegramLinkCode = ({ code, chatId, telegramId, username, name } = {}) => {
@@ -8078,14 +9176,7 @@ const resolvePilotApiRankNames = async ({ pilotId, sessionUser = {} } = {}) => {
   let regularRankName =
     String(profileData?.rank?.name || profileData?.rank_name || profileData?.rankName || "").trim() ||
     String(sessionUser?.rank || "").trim();
-  let honoraryRankName =
-    String(
-      profileData?.honorary_rank?.name ||
-        profileData?.honorary_rank_name ||
-        profileData?.honoraryRankName ||
-        sessionUser?.honorary_rank?.name ||
-        ""
-    ).trim();
+  let honoraryRankName = resolveHonoraryRankLabel(profileData) || resolveHonoraryRankLabel(sessionUser);
 
   const isHonoraryDisplayRank = Boolean(rankData?.honorary_rank);
   if (isHonoraryDisplayRank && displayRankName && !honoraryRankName) {
@@ -8804,12 +9895,22 @@ app.get("/api/auth/discord/me", (req, res) => {
     return;
   }
 
+  const sessionUser = session.user || {};
+  const discordAvatarUrl = sessionUser.avatar && sessionUser.id
+    ? `https://cdn.discordapp.com/avatars/${sessionUser.id}/${sessionUser.avatar}.png?size=256`
+    : null;
+
   res.json({
     authenticated: true,
     provider: "discord",
     isAdmin: false,
-    role: "member",
-    user: session.user,
+    isStaff: Boolean(session?.user?.isStaff),
+    role: session?.user?.isStaff ? "staff" : "member",
+    user: {
+      ...sessionUser,
+      avatar: discordAvatarUrl || String(sessionUser.avatar || "").trim() || null,
+      avatarUrl: discordAvatarUrl,
+    },
   });
 });
 
@@ -9445,12 +10546,19 @@ app.get("/api/auth/vamsys/me", async (req, res) => {
     }
   }
 
+  const preferences = getPilotPreferences(session?.user || {});
+  const resolvedAvatar = resolvePilotAvatarFromPreferences(session?.user || {}, preferences);
+
   res.json({
     authenticated: true,
     provider: "vamsys",
     isAdmin: vamsysAdmin,
-    role: vamsysAdmin ? "admin" : "member",
-    user: session.user,
+    isStaff: Boolean(session?.user?.isStaff),
+    role: vamsysAdmin ? "admin" : session?.user?.isStaff ? "staff" : "member",
+    user: {
+      ...(session.user || {}),
+      avatar: resolvedAvatar,
+    },
   });
 });
 
@@ -10835,8 +11943,9 @@ app.get("/api/pilot/pireps", async (req, res) => {
     const pageSize = Math.max(1, Math.min(50, Number(req.query["page[size]"] || 10) || 10));
     const cursor = String(req.query["page[cursor]"] || "").trim();
     const sort = String(req.query.sort || "-created_at").trim() || "-created_at";
+    const filterAircraftId = Number(req.query["filter[aircraft_id]"] || 0) || 0;
     const params = new URLSearchParams();
-    params.set("page[size]", String(pageSize));
+    params.set("page[size]", filterAircraftId > 0 ? "50" : String(pageSize));
     params.set("sort", sort);
     if (cursor) {
       params.set("page[cursor]", cursor);
@@ -10851,8 +11960,13 @@ app.get("/api/pilot/pireps", async (req, res) => {
       loadPilotApiReferenceData(),
     ]);
 
+    let pireps = getPilotApiCollectionItems(payload).map((item) => enrichPilotApiPirep(item, references));
+    if (filterAircraftId > 0) {
+      pireps = pireps.filter((p) => p.aircraftId === filterAircraftId).slice(0, pageSize);
+    }
+
     res.json({
-      pireps: getPilotApiCollectionItems(payload).map((item) => enrichPilotApiPirep(item, references)),
+      pireps,
       meta: payload?.meta || null,
       links: payload?.links || null,
     });
@@ -11077,6 +12191,262 @@ app.post("/api/pilot/pireps/:id/comments", async (req, res) => {
   }
 });
 
+app.get("/api/pilot/analytics", async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+
+  try {
+    // Load PIREPs + reference data in parallel
+    const [pirepPages, fleetPayload, airportsMap] = await Promise.all([
+      (async () => {
+        const pages = [];
+        let cursor = null;
+        for (let page = 0; page < 30; page++) {
+          const params = new URLSearchParams({ "page[size]": "100", "sort": "-created_at" });
+          if (cursor) params.set("page[cursor]", cursor);
+          const payload = await pilotApiRequest({
+            pilotId,
+            sessionUser: session.user || {},
+            path: `/pireps?${params.toString()}`,
+          }).catch(() => null);
+          const items = getPilotApiCollectionItems(payload);
+          if (!items.length) break;
+          pages.push(...items);
+          const nextLink = payload?.links?.next;
+          cursor = nextLink ? (() => { try { return new URL(nextLink).searchParams.get("page[cursor]"); } catch { return null; } })() : null;
+          if (!cursor) break;
+        }
+        return pages;
+      })(),
+      loadFleetData().catch(() => ({ fleets: [] })),
+      loadAirportsLookup().catch(() => new Map()),
+    ]);
+
+    let src = pirepPages;
+    const accepted = src.filter((p) => isAcceptedPilotPirep(p));
+    if (accepted.length) src = accepted;
+
+    // Build aircraft_id → aircraft metadata from fleet data
+    const aircraftIndex = new Map();
+    (Array.isArray(fleetPayload?.fleets) ? fleetPayload.fleets : []).forEach((fleet) => {
+      (Array.isArray(fleet?.aircraft) ? fleet.aircraft : []).forEach((ac) => {
+        const id = Number(ac?.id || 0);
+        if (id > 0) {
+          aircraftIndex.set(id, {
+            label: normalizeAircraftDisplayName(ac?.model || ac?.name || fleet?.name || fleet?.code || "") || null,
+            icao: String(ac?.aircraftType || ac?.icao || ac?.type || "").trim().toUpperCase() || null,
+          });
+        }
+      });
+    });
+
+    // flight_time = minutes in pilot API
+    const toHours = (p) => {
+      const mins = Number(p?.flight_time || 0);
+      const secs = Number(p?.flight_length || 0);
+      if (secs > 0 && secs > mins * 10) return secs / 3600;
+      return mins / 60;
+    };
+
+    const aircraftLabel = (p) => {
+      const directIcao = String(
+        p?.aircraft?.aircraft_type ||
+        p?.aircraft?.aircraftType ||
+        p?.aircraft?.icao ||
+        p?.aircraft_type ||
+        p?.aircraftType ||
+        p?.aircraft_icao ||
+        ""
+      ).trim().toUpperCase();
+      if (directIcao && !["N/A", "NONE", "NULL", "UNKNOWN", "—"].includes(directIcao)) {
+        return directIcao;
+      }
+
+      const id = Number(p?.aircraft_id || p?.aircraftId || p?.aircraft?.id || 0);
+      const meta = id > 0 ? aircraftIndex.get(id) || null : null;
+      if (meta?.icao) {
+        return meta.icao;
+      }
+
+      return (
+        normalizeAircraftDisplayName(
+          p?.aircraft?.name ||
+          p?.aircraft?.type ||
+          p?.aircraft_name ||
+          p?.aircraft_type ||
+          p?.aircraftType ||
+          ""
+        ) ||
+        meta?.label ||
+        "Unknown"
+      );
+    };
+
+    // Monthly trend (last 24 months)
+    const monthlyMap = new Map();
+    src.forEach((p) => {
+      const dateStr = String(p?.arrival_time || p?.completed_at || p?.submitted_at || p?.created_at || "").trim();
+      if (!dateStr) return;
+      const d = new Date(dateStr);
+      if (!Number.isFinite(d.getTime())) return;
+      const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      const cur = monthlyMap.get(key) || { month: key, flights: 0, hours: 0 };
+      cur.flights += 1;
+      cur.hours += toHours(p);
+      monthlyMap.set(key, cur);
+    });
+    const monthly = Array.from(monthlyMap.values())
+      .sort((a, b) => a.month.localeCompare(b.month))
+      .slice(-24)
+      .map((m) => ({ ...m, hours: Math.round(m.hours * 10) / 10 }));
+
+    // Breakdown helper
+    const breakdown = (keyFn) => {
+      const grouped = new Map();
+      src.forEach((p) => {
+        const key = String(keyFn(p) || "Unknown").trim() || "Unknown";
+        const cur = grouped.get(key) || { key, count: 0, hours: 0 };
+        cur.count += 1;
+        cur.hours += toHours(p);
+        grouped.set(key, cur);
+      });
+      return Array.from(grouped.values())
+        .map((r) => ({ ...r, hours: Math.round(r.hours * 10) / 10 }))
+        .sort((a, b) => b.count - a.count);
+    };
+
+    const byAircraft = breakdown((p) => aircraftLabel(p) || "Unknown");
+
+    const byNetwork = breakdown((p) =>
+      String(p?.network || p?.network_name || "Offline").trim() || "Offline"
+    );
+
+    const byRouteType = breakdown((p) =>
+      String(p?.route_type || p?.type || p?.flight_type || "Scheduled").trim()
+    );
+
+    const byTimeOfDay = breakdown((p) => {
+      const dateStr = String(p?.departure_time || p?.arrival_time || p?.created_at || "").trim();
+      if (!dateStr) return "Unknown";
+      const hour = new Date(dateStr).getUTCHours();
+      if (!Number.isFinite(hour)) return "Unknown";
+      if (hour < 6) return "Ночь (00–06)";
+      if (hour < 12) return "Утро (06–12)";
+      if (hour < 18) return "День (12–18)";
+      return "Вечер (18–24)";
+    });
+
+    // Top airports — keyed by resolved ICAO, so nested airport payloads also count.
+    const depMap = new Map();
+    const arrMap = new Map();
+    src.forEach((p) => {
+      const departure = resolvePilotPirepAirportSummary(p, "departure", airportsMap);
+      const arrival = resolvePilotPirepAirportSummary(p, "arrival", airportsMap);
+
+      if (departure?.icao) {
+        const current = depMap.get(departure.icao) || { ...departure, count: 0 };
+        current.count += 1;
+        depMap.set(departure.icao, current);
+      }
+
+      if (arrival?.icao) {
+        const current = arrMap.get(arrival.icao) || { ...arrival, count: 0 };
+        current.count += 1;
+        arrMap.set(arrival.icao, current);
+      }
+    });
+    const topDep = Array.from(depMap.values())
+      .sort((a, b) => Number(b?.count || 0) - Number(a?.count || 0))
+      .slice(0, 10)
+      .map((item) => ({
+        icao: item.icao,
+        name: item.name,
+        countryIso2: item.countryIso2 ? item.countryIso2.toLowerCase() : null,
+        count: Number(item.count || 0),
+      }));
+    const topArr = Array.from(arrMap.values())
+      .sort((a, b) => Number(b?.count || 0) - Number(a?.count || 0))
+      .slice(0, 10)
+      .map((item) => ({
+        icao: item.icao,
+        name: item.name,
+        countryIso2: item.countryIso2 ? item.countryIso2.toLowerCase() : null,
+        count: Number(item.count || 0),
+      }));
+
+    // Landing rate distribution
+    const vsRates = src.map((p) => Number(p?.landing_rate || 0)).filter((v) => Number.isFinite(v) && v !== 0);
+    const avgVs = vsRates.length > 0 ? Math.round(vsRates.reduce((a, b) => a + b, 0) / vsRates.length) : null;
+    const vsCategories = [
+      { label: "Greaser (< -100)", count: 0 },
+      { label: "Smooth (-100 до -200)", count: 0 },
+      { label: "Normal (-200 до -350)", count: 0 },
+      { label: "Hard (-350 до -600)", count: 0 },
+      { label: "Crash (> -600)", count: 0 },
+    ];
+    vsRates.forEach((v) => {
+      if (v >= -100) vsCategories[0].count++;
+      else if (v >= -200) vsCategories[1].count++;
+      else if (v >= -350) vsCategories[2].count++;
+      else if (v >= -600) vsCategories[3].count++;
+      else vsCategories[4].count++;
+    });
+
+    // Totals
+    const totalFlights = src.length;
+    const totalHours = Math.round(src.reduce((s, p) => s + toHours(p), 0) * 10) / 10;
+    const totalDistance = Math.round(src.reduce((s, p) => s + Number(p?.distance || 0), 0));
+    const totalPoints = Math.round(src.reduce((s, p) => s + Number(p?.points || 0), 0));
+
+    // Event flights: score > points means bonus points were awarded
+    let eventCount = 0, nonEventCount = 0;
+    src.forEach((p) => {
+      const score = Number(p?.score ?? p?.points ?? 0);
+      const pts = Number(p?.points ?? 0);
+      if (score > pts && score > 0) eventCount++;
+      else nonEventCount++;
+    });
+
+    // Day/Night landings by arrival_time UTC hour (day = 06–21)
+    let dayCount = 0, nightCount = 0;
+    src.forEach((p) => {
+      const ts = String(p?.arrival_time || p?.departure_time || "").trim();
+      if (!ts) return;
+      const hour = new Date(ts).getUTCHours();
+      if (!Number.isFinite(hour)) return;
+      if (hour >= 6 && hour < 21) dayCount++;
+      else nightCount++;
+    });
+
+    // Callsign prefix breakdown
+    const byCallsignPrefix = breakdown((p) => {
+      const cs = String(p?.callsign || "").trim().toUpperCase();
+      const m = cs.match(/^([A-Z]+)/);
+      return m ? m[1] : null;
+    }).filter((r) => r.key !== "null" && r.key !== "Unknown");
+
+    res.json({
+      ok: true,
+      summary: { totalFlights, totalHours, totalDistance, totalPoints, avgVs },
+      monthly,
+      byAircraft,
+      byNetwork,
+      byRouteType,
+      byTimeOfDay,
+      byCallsignPrefix,
+      topDepartures: topDep,
+      topArrivals: topArr,
+      vsDistribution: vsCategories.map(({ label, count }) => ({ label, count })),
+      eventFlights: { event: eventCount, nonEvent: nonEventCount },
+      landingsByDayNight: { day: dayCount, night: nightCount },
+    });
+  } catch (error) {
+    respondWithPilotApiError(res, error, "Failed to load pilot analytics");
+  }
+});
+
 app.get("/api/pilot/statistics", async (req, res) => {
   const session = requirePilotApiSession(req, res);
   if (!session) {
@@ -11288,7 +12658,7 @@ app.get("/api/pilot/preferences", async (req, res) => {
   });
 });
 
-app.patch("/api/pilot/preferences", express.json(), async (req, res) => {
+app.patch("/api/pilot/preferences", express.json({ limit: "2mb" }), async (req, res) => {
   const context = await resolveCurrentPilotContext(req).catch(() => null);
   if (!context?.pilotId && !context?.pilot?.username) {
     res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
@@ -11299,6 +12669,15 @@ app.patch("/api/pilot/preferences", express.json(), async (req, res) => {
     notifications: {
       channels: req.body?.notifications?.channels,
       notificationTypes: req.body?.notifications?.notificationTypes,
+    },
+    flightLog: {
+      savedPirepIds: req.body?.flightLog?.savedPirepIds,
+      comparePirepIds: req.body?.flightLog?.comparePirepIds,
+    },
+    profile: {
+      avatarMode: req.body?.profile?.avatarMode,
+      customAvatar: req.body?.profile?.customAvatar,
+      discordAvatar: req.body?.profile?.discordAvatar,
     },
   });
 
@@ -12618,6 +13997,67 @@ const sendDiscordBotNotification = async ({
   });
 };
 
+const sendTelegramPayload = async ({ chatId, text }) => {
+  const normalizedChatId = String(chatId || "").trim();
+  if (!normalizedChatId) {
+    throw new Error("Telegram chat ID is required");
+  }
+  const normalizedToken = String(TELEGRAM_BOT_TOKEN || "").trim();
+  if (!normalizedToken) {
+    throw new Error("Telegram bot token is not configured");
+  }
+
+  const response = await fetch(`https://api.telegram.org/bot${normalizedToken}/sendMessage`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      chat_id: normalizedChatId,
+      text: String(text || "").slice(0, 4096),
+      disable_web_page_preview: true,
+    }),
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.ok) {
+    throw new Error(String(payload?.description || `Telegram API responded with ${response.status}`));
+  }
+
+  return payload.result || null;
+};
+
+const sendTelegramAdminNotification = async ({ text, force = false }) => {
+  const settings = getTelegramBotSettingsStore();
+  if (!force && settings?.enabled === false) {
+    return { sent: false, reason: "disabled", delivered: 0, total: 0 };
+  }
+
+  const adminChatIds = (Array.isArray(settings?.adminChatIds) ? settings.adminChatIds : [])
+    .map((item) => String(item || "").trim())
+    .filter(Boolean);
+
+  if (!adminChatIds.length) {
+    return { sent: false, reason: "admin_chats_not_configured", delivered: 0, total: 0 };
+  }
+
+  const results = await Promise.allSettled(
+    adminChatIds.map((chatId) => sendTelegramPayload({ chatId, text }))
+  );
+  const delivered = results.filter((item) => item.status === "fulfilled").length;
+
+  if (delivered <= 0) {
+    const rejected = results.find((item) => item.status === "rejected");
+    throw new Error(String(rejected?.reason?.message || rejected?.reason || "Failed to send Telegram notification"));
+  }
+
+  return {
+    sent: true,
+    delivered,
+    total: adminChatIds.length,
+  };
+};
+
 const publishNewsToDiscord = async ({ title, content, category, author }) => {
   return sendDiscordBotNotification({
     eventKey: "newsCreated",
@@ -13079,6 +14519,7 @@ const buildUnifiedFleetEntry = async (fleet = {}, aircraftColor = "#E31E24") => 
     id: fleetId || null,
     name: fleet.name || fleet.code || `Fleet ${fleetId || ""}`,
     code: fleet.code || "",
+    airlineCode: inferFleetAirlineCode(fleet),
     color: aircraftColor,
     aircraft: (Array.isArray(aircraft) ? aircraft : []).map((item) => ({
       id: item.id,
@@ -14015,6 +15456,11 @@ const loadSummaryStats = async () => {
   let flightTimeSeconds = general?.data?.flightTime?.seconds ?? null;
   let flightHours = typeof flightTimeSeconds === "number" ? Math.round(flightTimeSeconds / 3600) : null;
 
+  // Fallback pilot count from roster cache if general stats unavailable
+  if (pilots === null && pilotsRosterCache.data?.pilots?.length > 0) {
+    pilots = pilotsRosterCache.data.pilots.length;
+  }
+
   // Fallback: if general stats unavailable, aggregate from pireps list
   if (!general) {
     try {
@@ -14049,7 +15495,7 @@ const loadSummaryStats = async () => {
 
   summaryCache = {
     data: payload,
-    expiresAt: now + 10 * 60 * 1000,
+    expiresAt: now + 2 * 60 * 1000,
   };
 
   return payload;
@@ -14098,9 +15544,25 @@ const loadFleetData = async () => {
       id: fleet.id,
       name: fleet.name || fleet.code || `Fleet ${fleet.id}`,
       code: fleet.code || "",
+      airlineCode: inferFleetAirlineCode(fleet),
       color: colors[fleetData.length % colors.length],
       aircraft: aircraft.map((item) => ({
         id: item.id,
+        name: item.name || "",
+        type: item.type || item.model || item.aircraft_type || item.aircraftType || "",
+        aircraftType:
+          item.aircraft_type ||
+          item.aircraftType ||
+          item.icao ||
+          item.icao_type ||
+          item.type ||
+          null,
+        icao:
+          item.icao ||
+          item.icao_type ||
+          item.aircraft_type ||
+          item.aircraftType ||
+          null,
         model: item.name || fleet.name || "",
         registration: item.registration || "",
         seats: item.passengers ?? fleet.max_pax ?? 0,
@@ -14359,92 +15821,231 @@ const extractDashboardAircraftImageUrl = (details) =>
   normalizeDashboardUrl(details?.image);
 
 const loadDashboardFleetCatalog = async () => {
-  const [fleetPayload, hubs] = await Promise.all([
-    getManagedFleetCatalog().catch(() => ({ fleets: [] })),
-    loadAdminHubsCatalog().catch(() => []),
-  ]);
+  const now = Date.now();
+  if (dashboardFleetCatalogCache.data && now < dashboardFleetCatalogCache.expiresAt) {
+    return dashboardFleetCatalogCache.data;
+  }
 
-  const hubById = new Map((Array.isArray(hubs) ? hubs : []).map((hub) => [String(hub?.id || ""), hub]));
-  const fleets = await Promise.all(
-    (Array.isArray(fleetPayload?.fleets) ? fleetPayload.fleets : []).map(async (fleet) => {
-      const fleetId = Number(fleet?.id || 0) || 0;
-      const baseHub = hubById.get(String(fleet?.baseHubId || "")) || null;
-      const liveries = fleetId > 0 ? await loadFleetLiveriesByFleetId(fleetId).catch(() => []) : [];
-      const aircraft = await Promise.all(
-        (Array.isArray(fleet?.aircraft) ? fleet.aircraft : []).map(async (item) => {
-          const aircraftId = Number(item?.id || 0) || 0;
-          const details =
-            fleetId > 0 && aircraftId > 0
-              ? await loadAircraftDetailsByFleetAndId(fleetId, aircraftId).catch(() => null)
-              : null;
-          const resources = extractDashboardAircraftResources(details || {});
-          const aircraftBaseHub = hubById.get(String(item?.baseHubId || "")) || null;
+  const snapshot = readDashboardCatalogSnapshotFromDisk();
 
-          return {
-            ...item,
-            description:
-              normalizeDashboardText(details?.description) ||
-              normalizeDashboardText(details?.summary) ||
-              normalizeDashboardText(details?.info) ||
-              null,
-            notes: normalizeDashboardText(item?.notes) || normalizeDashboardText(details?.notes),
-            imageUrl: extractDashboardAircraftImageUrl(details || {}),
-            liveries: resources.liveries,
-            scenarios: resources.scenarios,
-            links: resources.links,
-            baseHub: aircraftBaseHub
-              ? {
-                  id: aircraftBaseHub.id,
-                  name: aircraftBaseHub.name,
-                  airportsText: aircraftBaseHub.airportsText,
-                }
-              : null,
-          };
-        })
-      );
+  try {
+    const [fleetPayload, hubs] = await Promise.all([
+      getManagedFleetCatalog().catch(() => ({ fleets: [] })),
+      loadAdminHubsCatalog().catch(() => []),
+    ]);
 
-      return {
-        ...fleet,
-        baseHub: baseHub
-          ? {
-              id: baseHub.id,
-              name: baseHub.name,
-              airportsText: baseHub.airportsText,
-            }
-          : null,
-        liveries,
-        aircraft,
+    const hubById = new Map((Array.isArray(hubs) ? hubs : []).map((hub) => [String(hub?.id || ""), hub]));
+    const fleets = await Promise.all(
+      (Array.isArray(fleetPayload?.fleets) ? fleetPayload.fleets : []).map(async (fleet) => {
+        const fleetId = Number(fleet?.id || 0) || 0;
+        const baseHub = hubById.get(String(fleet?.baseHubId || "")) || null;
+        const liveries = fleetId > 0 ? await loadFleetLiveriesByFleetId(fleetId).catch(() => []) : [];
+        const aircraft = await Promise.all(
+          (Array.isArray(fleet?.aircraft) ? fleet.aircraft : []).map(async (item) => {
+            const aircraftId = Number(item?.id || 0) || 0;
+            const details =
+              fleetId > 0 && aircraftId > 0
+                ? await loadAircraftDetailsByFleetAndId(fleetId, aircraftId).catch(() => null)
+                : null;
+            const resources = extractDashboardAircraftResources(details || {});
+            const aircraftBaseHub = hubById.get(String(item?.baseHubId || "")) || null;
+
+            return {
+              ...item,
+              description:
+                normalizeDashboardText(details?.description) ||
+                normalizeDashboardText(details?.summary) ||
+                normalizeDashboardText(details?.info) ||
+                null,
+              notes: normalizeDashboardText(item?.notes) || normalizeDashboardText(details?.notes),
+              imageUrl: extractDashboardAircraftImageUrl(details || {}),
+              liveries: resources.liveries,
+              scenarios: resources.scenarios,
+              links: resources.links,
+              baseHub: aircraftBaseHub
+                ? {
+                    id: aircraftBaseHub.id,
+                    name: aircraftBaseHub.name,
+                    airportsText: aircraftBaseHub.airportsText,
+                  }
+                : null,
+            };
+          })
+        );
+
+        return {
+          ...fleet,
+          baseHub: baseHub
+            ? {
+                id: baseHub.id,
+                name: baseHub.name,
+                airportsText: baseHub.airportsText,
+              }
+            : null,
+          liveries,
+          aircraft,
+        };
+      })
+    );
+
+    const payload = { fleets };
+    dashboardFleetCatalogCache = {
+      data: payload,
+      expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
+    };
+
+    return payload;
+  } catch (error) {
+    if (snapshot && Array.isArray(snapshot.fleets) && snapshot.fleets.length > 0) {
+      const payload = { fleets: snapshot.fleets };
+      dashboardFleetCatalogCache = {
+        data: payload,
+        expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
       };
-    })
-  );
-
-  return { fleets };
+      return payload;
+    }
+    throw error;
+  }
 };
 
 const loadDashboardAirportsCatalog = async () => {
-  const airportsMap = await loadAirportsLookup().catch(() => new Map());
+  const now = Date.now();
+  if (dashboardAirportsCatalogCache.data && now < dashboardAirportsCatalogCache.expiresAt) {
+    return dashboardAirportsCatalogCache.data;
+  }
 
-  return Array.from(airportsMap.values())
-    .map((airport) => ({
-      id: Number(airport?.id || 0) || 0,
-      code: String(airport?.code || airport?.icao || airport?.iata || "").trim() || "вЂ”",
-      icao: normalizeDashboardText(airport?.icao),
-      iata: normalizeDashboardText(airport?.iata),
-      city: normalizeDashboardText(airport?.city),
-      name: String(airport?.name || airport?.code || "Airport").trim() || "Airport",
-      category: normalizeDashboardText(airport?.category),
-      base: Boolean(airport?.base),
-      suitableAlternate: Boolean(airport?.suitableAlternate),
-      taxiInMinutes: Number(airport?.taxiInMinutes || 0) || 0,
-      taxiOutMinutes: Number(airport?.taxiOutMinutes || 0) || 0,
-      airportBriefingUrl: normalizeDashboardUrl(airport?.airportBriefingUrl),
-      preferredAlternates: Array.isArray(airport?.preferredAlternates) ? airport.preferredAlternates : [],
-      countryName: normalizeDashboardText(airport?.countryName),
-      countryIso2: normalizeDashboardText(airport?.countryIso2),
-      latitude: Number(airport?.latitude || 0) || null,
-      longitude: Number(airport?.longitude || 0) || null,
-    }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+  const snapshot = readDashboardCatalogSnapshotFromDisk();
+
+  try {
+    const airportsMap = await loadAirportsLookup().catch(() => new Map());
+
+    const payload = Array.from(airportsMap.values())
+      .map((airport) => ({
+        id: Number(airport?.id || 0) || 0,
+        code: String(airport?.code || airport?.icao || airport?.iata || "").trim() || "вЂ”",
+        icao: normalizeDashboardText(airport?.icao),
+        iata: normalizeDashboardText(airport?.iata),
+        city: normalizeDashboardText(airport?.city),
+        name: String(airport?.name || airport?.code || "Airport").trim() || "Airport",
+        category: normalizeDashboardText(airport?.category),
+        base: Boolean(airport?.base),
+        suitableAlternate: Boolean(airport?.suitableAlternate),
+        taxiInMinutes: Number(airport?.taxiInMinutes || 0) || 0,
+        taxiOutMinutes: Number(airport?.taxiOutMinutes || 0) || 0,
+        airportBriefingUrl: normalizeDashboardUrl(airport?.airportBriefingUrl),
+        preferredAlternates: Array.isArray(airport?.preferredAlternates) ? airport.preferredAlternates : [],
+        countryName: normalizeDashboardText(airport?.countryName),
+        countryIso2: normalizeDashboardText(airport?.countryIso2),
+        latitude: Number(airport?.latitude || 0) || null,
+        longitude: Number(airport?.longitude || 0) || null,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
+
+    dashboardAirportsCatalogCache = {
+      data: payload,
+      expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
+    };
+
+    return payload;
+  } catch (error) {
+    if (snapshot && Array.isArray(snapshot.airports) && snapshot.airports.length > 0) {
+      dashboardAirportsCatalogCache = {
+        data: snapshot.airports,
+        expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
+      };
+      return snapshot.airports;
+    }
+    throw error;
+  }
+};
+
+const loadDashboardBootstrapCatalog = async () => {
+  const now = Date.now();
+  if (dashboardBootstrapCache.data && now < dashboardBootstrapCache.expiresAt) {
+    return dashboardBootstrapCache.data;
+  }
+
+  const [fleetPayload, airports, routesPayload] = await Promise.all([
+    loadDashboardFleetCatalog(),
+    loadDashboardAirportsCatalog(),
+    loadRoutesData(),
+  ]);
+
+  const payload = {
+    generatedAt: new Date(now).toISOString(),
+    fleets: Array.isArray(fleetPayload?.fleets) ? fleetPayload.fleets : [],
+    airports: Array.isArray(airports) ? airports : [],
+    routes: Array.isArray(routesPayload?.routes) ? routesPayload.routes : [],
+  };
+
+  persistDashboardCatalogSnapshot(payload);
+
+  dashboardBootstrapCache = {
+    data: payload,
+    expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
+  };
+
+  return payload;
+};
+
+const buildLocalDateKey = (value = new Date()) => {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const refreshPersistedDashboardCatalog = async ({ forceFull = false } = {}) => {
+  if (dashboardCatalogRefreshState.refreshPromise) {
+    return dashboardCatalogRefreshState.refreshPromise;
+  }
+
+  dashboardCatalogRefreshState.refreshPromise = (async () => {
+    if (forceFull) {
+      await syncUnifiedCatalog({ forceFull: true }).catch((error) => {
+        logger.warn("[dashboard] force_full_sync_failed", { error: String(error) });
+      });
+    }
+
+    invalidateDashboardCatalogCaches();
+    try {
+      return await loadDashboardBootstrapCatalog();
+    } catch (error) {
+      logger.warn("[dashboard] snapshot_refresh_failed", { error: String(error) });
+      return readDashboardCatalogSnapshotFromDisk();
+    }
+  })().finally(() => {
+    dashboardCatalogRefreshState.refreshPromise = null;
+  });
+
+  return dashboardCatalogRefreshState.refreshPromise;
+};
+
+const startDashboardCatalogNightlyRefreshScheduler = () => {
+  if (dashboardCatalogRefreshState.timer) {
+    return;
+  }
+
+  const tick = () => {
+    const now = new Date();
+    const minutesOfDay = now.getHours() * 60 + now.getMinutes();
+    const targetMinutes = DASHBOARD_CATALOG_NIGHTLY_SYNC_HOUR * 60 + DASHBOARD_CATALOG_NIGHTLY_SYNC_MINUTE;
+    const dateKey = buildLocalDateKey(now);
+    if (minutesOfDay < targetMinutes || dashboardCatalogRefreshState.lastRunKey === dateKey) {
+      return;
+    }
+
+    dashboardCatalogRefreshState.lastRunKey = dateKey;
+    void refreshPersistedDashboardCatalog({ forceFull: true });
+  };
+
+  const snapshot = readDashboardCatalogSnapshotFromDisk();
+  if (!snapshot || (!snapshot.fleets.length && !snapshot.airports.length)) {
+    void refreshPersistedDashboardCatalog({ forceFull: true });
+  }
+
+  tick();
+  dashboardCatalogRefreshState.timer = setInterval(tick, DASHBOARD_CATALOG_NIGHTLY_CHECK_MS);
 };
 
 const buildDashboardFleetFallbackCatalog = async () => {
@@ -14915,9 +16516,55 @@ const loadRoutesData = async () => {
 
   await ensureUnifiedCatalogReady().catch(() => undefined);
   if (unifiedCatalogCache.routesById.size > 0) {
-    const payload = {
-      routes: Array.from(unifiedCatalogCache.routesById.values()),
+    const airportsById = unifiedCatalogCache.airportsById;
+    const detectCallsignAirlineCode = (callsign = "") => {
+      const cs = String(callsign || "").toUpperCase();
+      if (cs.includes("KAR")) return "KAR";
+      if (cs.includes("STW")) return "STW";
+      return "NWS";
     };
+    const mappedRoutes = Array.from(unifiedCatalogCache.routesById.values()).map((route) => {
+      const dep = airportsById.get(route.departure_id) || null;
+      const arr = airportsById.get(route.arrival_id) || null;
+      const fromCode = dep ? String(dep.code || dep.icao || dep.iata || "").trim() : "";
+      const fromName = dep ? String(dep.name || fromCode).trim() : "";
+      const toCode = arr ? String(arr.code || arr.icao || arr.iata || "").trim() : "";
+      const toName = arr ? String(arr.name || toCode).trim() : "";
+      const distance = route.flight_distance ? `${route.flight_distance} nm` : "—";
+      const duration = route.flight_length || "—";
+      const serviceDays = route.service_days || route.serviceDays || null;
+      let frequency = "daily";
+      if (Array.isArray(serviceDays) && serviceDays.length > 0) {
+        if (serviceDays.length <= 3) frequency = "weekly3";
+        else if (serviceDays.length <= 5) frequency = "weekly5";
+      }
+      return {
+        id: route.id,
+        type: route.type || "scheduled",
+        callsign: route.callsign || "",
+        flightNumber: route.flight_number || route.callsign || "",
+        routeText: String(route.route || route.route_text || route.routing || route.flight_plan || route.flightPlan || "").trim(),
+        airlineCode: detectCallsignAirlineCode(route.callsign),
+        fleetIds: Array.isArray(route.fleet_ids) ? route.fleet_ids : [],
+        departureId: route.departure_id || null,
+        arrivalId: route.arrival_id || null,
+        serviceDays: Array.isArray(route.service_days) ? route.service_days : [],
+        from: dep ? `${fromName} (${fromCode})`.trim() : "",
+        to: arr ? `${toName} (${toCode})`.trim() : "",
+        fromCode,
+        fromName,
+        fromLat: dep ? (Number(dep.latitude) || null) : null,
+        fromLon: dep ? (Number(dep.longitude) || null) : null,
+        toCode,
+        toName,
+        toLat: arr ? (Number(arr.latitude) || null) : null,
+        toLon: arr ? (Number(arr.longitude) || null) : null,
+        distance,
+        duration,
+        frequency,
+      };
+    });
+    const payload = { routes: mappedRoutes };
     routesCache = {
       data: payload,
       expiresAt: now + 5 * 60 * 1000,
@@ -16684,6 +18331,7 @@ const loadRecentFlights = async ({ pilotId, limit = 10 } = {}) => {
 
     const pilotName = await loadPilotName(pirep.pilot_id);
     const callsign = pirep.callsign || pirep.flight_number || "";
+    const landingRate = resolvePirepLandingRate(pirep);
     const vacRaw = `${callsign}`.toUpperCase();
     const vac = vacRaw.includes("KAR")
       ? "KAR"
@@ -16729,12 +18377,8 @@ const loadRecentFlights = async ({ pilotId, limit = 10 } = {}) => {
         : "—",
       aircraft: aircraftLabel,
       needReply: Boolean(pirep?.need_reply ?? pirep?.needReply ?? false),
-      landing: Number.isFinite(Number(pirep.landing_rate))
-        ? `${Number(pirep.landing_rate)} fpm`
-        : "—",
-      landingRate: Number.isFinite(Number(pirep.landing_rate))
-        ? Number(pirep.landing_rate)
-        : null,
+      landing: Number.isFinite(landingRate) ? `${landingRate} fpm` : "—",
+      landingRate,
       gForce: Number.isFinite(gForceValue) ? Number(gForceValue) : null,
       completedAt: createdAt,
       completedDate: createdAt
@@ -17214,6 +18858,1026 @@ const serializeVamsysNotam = (notam) => ({
   readCount: Number(notam?.read_count || 0) || 0,
 });
 
+const resolveSocialGalleryViewer = async (req) => {
+  const identity = resolveLoggedInPilotIdentity(req);
+  const pilotId = Number(identity?.pilotId || 0) || 0;
+  const username = normalizeAdminText(identity?.username || "");
+  const email = normalizeAdminText(identity?.email || "");
+  if (!pilotId && !username && !email) {
+    return null;
+  }
+
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  const pilot = context?.pilot || getVamsysSessionFromRequest(req)?.user || getDiscordSessionFromRequest(req)?.user || {};
+  const resolvedName = normalizeAdminText(
+    pilot?.name || `${pilot?.first_name || ""} ${pilot?.last_name || ""}` || username || "Pilot"
+  ) || username || "Pilot";
+
+  return {
+    pilotId: pilotId > 0 ? pilotId : Number(pilot?.id || 0) || null,
+    username: username || normalizeAdminText(pilot?.username || pilot?.callsign || "") || null,
+    email: email || normalizeAdminText(pilot?.email || "") || null,
+    name: resolvedName,
+    rank: normalizeAdminText(pilot?.rank || "") || null,
+    avatar: normalizeAdminText(pilot?.avatar || "") || null,
+  };
+};
+
+const buildSocialGalleryProfileSummary = (viewer = {}, store = {}, picksStore = buildDefaultSocialGalleryPicksStore()) => {
+  const actorKey = buildSocialGalleryActorKey(viewer);
+  const rankings = buildSocialGalleryPilotRanking(store, picksStore);
+  const matched = rankings.find((item) => item.key === actorKey) || null;
+  const uploads = matched?.uploads || 0;
+  const likesReceived = matched?.likesReceived || 0;
+  const likesGiven = matched?.likesGiven || 0;
+  const albums = matched?.albums || 0;
+  const categories = matched?.categories || 0;
+  const featured = matched?.featured || 0;
+  const reputation = matched?.reputation || resolveSocialGalleryStatus(
+    computeSocialGalleryReputation({ uploads, likesReceived, likesGiven, albums, categories, featured })
+  );
+  return {
+    pilotId: viewer?.pilotId || null,
+    username: viewer?.username || null,
+    name: viewer?.name || "Pilot",
+    rank: viewer?.rank || null,
+    avatar: viewer?.avatar || null,
+    metrics: {
+      uploads,
+      likesReceived,
+      likesGiven,
+      albums,
+      categories,
+      featured,
+    },
+    reputation,
+  };
+};
+
+app.get("/api/pilot/social-gallery", async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const store = readSocialGalleryStore();
+  const picksStore = readSocialGalleryPicksStore();
+  const rankings = buildSocialGalleryPilotRanking(store, picksStore);
+  const allCategories = (Array.isArray(store?.categories) ? store.categories : []).map((item) => serializeSocialGalleryCategory(item));
+  const myAlbums = (Array.isArray(store?.albums) ? store.albums : [])
+    .filter((item) => socialGalleryEntryMatchesActor(item, viewer))
+    .sort((left, right) => Date.parse(String(right?.updatedAt || right?.createdAt || "")) - Date.parse(String(left?.updatedAt || left?.createdAt || "")))
+    .map((item) => serializeSocialGalleryAlbum(item, store, viewer));
+  const myMedia = (Array.isArray(store?.media) ? store.media : [])
+    .filter((item) => socialGalleryEntryMatchesActor(item, viewer))
+    .sort((left, right) => Date.parse(String(right?.createdAt || "")) - Date.parse(String(left?.createdAt || "")))
+    .map((item) => serializeSocialGalleryMedia(item, store, viewer));
+  const communityMedia = (Array.isArray(store?.media) ? store.media : [])
+    .filter((item) => String(item?.visibility || "public") !== "private")
+    .sort((left, right) => Date.parse(String(right?.createdAt || "")) - Date.parse(String(left?.createdAt || "")))
+    .map((item) => serializeSocialGalleryMedia(item, store, viewer));
+  const topShots = [...communityMedia]
+    .sort((left, right) => {
+      const likeDiff = Number(right?.likeCount || 0) - Number(left?.likeCount || 0);
+      if (likeDiff !== 0) {
+        return likeDiff;
+      }
+      return Date.parse(String(right?.createdAt || "")) - Date.parse(String(left?.createdAt || ""));
+    })
+    .slice(0, 12);
+  const communityAlbums = (Array.isArray(store?.albums) ? store.albums : [])
+    .filter((item) => String(item?.visibility || "public") !== "private")
+    .sort((left, right) => Date.parse(String(right?.updatedAt || right?.createdAt || "")) - Date.parse(String(left?.updatedAt || left?.createdAt || "")))
+    .map((item) => serializeSocialGalleryAlbum(item, store, viewer))
+    .slice(0, 18);
+
+  res.json({
+    profile: buildSocialGalleryProfileSummary(viewer, store, picksStore),
+    categories: allCategories,
+    myAlbums,
+    myMedia,
+    communityMedia: communityMedia.slice(0, 24),
+    communityAlbums,
+    feed: buildSocialGalleryFeed(store, viewer, 32),
+    topShots,
+    topPilots: rankings.slice(0, 10),
+    featuredPicks: Array.isArray(picksStore?.picks) ? picksStore.picks : [],
+  });
+});
+
+app.post("/api/pilot/social-gallery/categories", express.json({ limit: "1mb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const title = normalizeAdminText(req.body?.title || "");
+  if (!title) {
+    res.status(400).json({ error: "Category title is required" });
+    return;
+  }
+
+  const category = serializeSocialGalleryCategory({
+    id: `${slugifyAdminValue(title, "category")}-${randomUUID().slice(0, 8)}`,
+    title,
+    description: normalizeAdminText(req.body?.description || "") || "",
+    color: normalizeAdminText(req.body?.color || "#E31E24") || "#E31E24",
+    createdAt: new Date().toISOString(),
+    createdByPilotId: viewer.pilotId,
+    createdByUsername: viewer.username,
+    createdByName: viewer.name,
+    createdByEmail: viewer.email,
+    isSystem: false,
+  });
+
+  withSocialGalleryUpdate((current) => {
+    current.categories = [category, ...(Array.isArray(current.categories) ? current.categories : [])];
+    appendSocialGalleryActivity(current, {
+      type: "category_created",
+      actorPilotId: viewer.pilotId,
+      actorUsername: viewer.username,
+      actorName: viewer.name,
+      categoryId: category.id,
+      visibility: "public",
+      title: "Created a new category",
+      summary: `${viewer.name} added ${category.title}`,
+    });
+    return current;
+  });
+
+  res.json({ ok: true, category });
+});
+
+app.post("/api/pilot/social-gallery/albums", express.json({ limit: "1mb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const title = normalizeAdminText(req.body?.title || "");
+  if (!title) {
+    res.status(400).json({ error: "Album title is required" });
+    return;
+  }
+
+  const store = readSocialGalleryStore();
+  const validCategoryIds = new Set((Array.isArray(store?.categories) ? store.categories : []).map((item) => String(item?.id || "")));
+  const album = {
+    id: `album-${randomUUID()}`,
+    title,
+    description: normalizeAdminText(req.body?.description || "") || "",
+    visibility: String(req.body?.visibility || "public").trim().toLowerCase() === "private" ? "private" : "public",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ownerPilotId: viewer.pilotId,
+    ownerUsername: viewer.username,
+    ownerName: viewer.name,
+    ownerEmail: viewer.email,
+    ownerRank: viewer.rank,
+    categoryIds: Array.isArray(req.body?.categoryIds)
+      ? req.body.categoryIds.map((item) => String(item || "").trim()).filter((item) => validCategoryIds.has(item))
+      : [],
+    coverMediaId: null,
+  };
+
+  withSocialGalleryUpdate((current) => {
+    current.albums = [album, ...(Array.isArray(current.albums) ? current.albums : [])];
+    appendSocialGalleryActivity(current, {
+      type: "album_created",
+      actorPilotId: viewer.pilotId,
+      actorUsername: viewer.username,
+      actorName: viewer.name,
+      albumId: album.id,
+      visibility: album.visibility,
+      title: "Created a new album",
+      summary: `${viewer.name} opened ${album.title}`,
+    });
+    return current;
+  });
+
+  res.json({ ok: true, album: serializeSocialGalleryAlbum(album, readSocialGalleryStore(), viewer) });
+});
+
+app.post("/api/pilot/social-gallery/media", express.json({ limit: "12mb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const store = readSocialGalleryStore();
+  const albumId = normalizeAdminText(req.body?.albumId || "") || null;
+  const album = albumId
+    ? (Array.isArray(store?.albums) ? store.albums : []).find((item) => String(item?.id || "") === albumId)
+    : null;
+  if (albumId && (!album || !socialGalleryEntryMatchesActor(album, viewer))) {
+    res.status(400).json({ error: "Album not found or not owned by current pilot" });
+    return;
+  }
+
+  try {
+    const asset = storeSocialGalleryAsset({
+      imageDataUrl: req.body?.imageDataUrl,
+      mimeType: req.body?.mimeType,
+      fileName: req.body?.fileName,
+    });
+    const validCategoryIds = new Set((Array.isArray(store?.categories) ? store.categories : []).map((item) => String(item?.id || "")));
+    const media = {
+      id: `shot-${randomUUID()}`,
+      title: normalizeAdminText(req.body?.title || req.body?.fileName || "Untitled screenshot") || "Untitled screenshot",
+      description: normalizeAdminText(req.body?.description || "") || "",
+      assetUrl: asset.assetUrl,
+      fileName: asset.assetFileName,
+      mimeType: asset.mimeType,
+      visibility: String(req.body?.visibility || album?.visibility || "public").trim().toLowerCase() === "private" ? "private" : "public",
+      createdAt: new Date().toISOString(),
+      ownerPilotId: viewer.pilotId,
+      ownerUsername: viewer.username,
+      ownerName: viewer.name,
+      ownerEmail: viewer.email,
+      ownerRank: viewer.rank,
+      ownerCallsign: viewer.username,
+      albumId: album?.id || null,
+      categoryIds: Array.isArray(req.body?.categoryIds)
+        ? req.body.categoryIds.map((item) => String(item || "").trim()).filter((item) => validCategoryIds.has(item))
+        : album?.categoryIds || [],
+      tags: String(req.body?.tags || "")
+        .split(",")
+        .map((item) => normalizeAdminText(item))
+        .filter(Boolean)
+        .slice(0, 12),
+      likes: [],
+      size: asset.size,
+    };
+
+    withSocialGalleryUpdate((current) => {
+      current.media = [media, ...(Array.isArray(current.media) ? current.media : [])];
+      if (album) {
+        current.albums = (Array.isArray(current.albums) ? current.albums : []).map((item) =>
+          String(item?.id || "") === String(album.id)
+            ? {
+                ...item,
+                updatedAt: new Date().toISOString(),
+                coverMediaId: item?.coverMediaId || media.id,
+              }
+            : item
+        );
+      }
+      appendSocialGalleryActivity(current, {
+        type: "media_uploaded",
+        actorPilotId: viewer.pilotId,
+        actorUsername: viewer.username,
+        actorName: viewer.name,
+        mediaId: media.id,
+        albumId: media.albumId,
+        visibility: media.visibility,
+        title: "Published a new screenshot",
+        summary: `${viewer.name} uploaded ${media.title}`,
+      });
+      return current;
+    });
+
+    res.json({ ok: true, media: serializeSocialGalleryMedia(media, readSocialGalleryStore(), viewer) });
+  } catch (error) {
+    res.status(400).json({ error: String(error?.message || "Failed to upload screenshot") });
+  }
+});
+
+app.post("/api/pilot/social-gallery/media/:id/like", express.json({ limit: "256kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  const mediaId = normalizeAdminText(req.params.id || "");
+  if (!mediaId) {
+    res.status(400).json({ error: "Media ID is required" });
+    return;
+  }
+
+  const store = readSocialGalleryStore();
+  const existingMedia = (Array.isArray(store?.media) ? store.media : []).find((item) => String(item?.id || "") === mediaId);
+  if (!existingMedia) {
+    res.status(404).json({ error: "Screenshot not found" });
+    return;
+  }
+  if (socialGalleryEntryMatchesActor(existingMedia, viewer)) {
+    res.status(400).json({ error: "You cannot like your own screenshot" });
+    return;
+  }
+  if (String(existingMedia?.visibility || "public") === "private") {
+    res.status(403).json({ error: "This screenshot is private" });
+    return;
+  }
+
+  const viewerKey = buildSocialGalleryActorKey(viewer);
+  let responseMedia = null;
+  let liked = false;
+  withSocialGalleryUpdate((current) => {
+    current.media = (Array.isArray(current.media) ? current.media : []).map((item) => {
+      if (String(item?.id || "") !== mediaId) {
+        return item;
+      }
+      const likes = Array.isArray(item?.likes) ? [...item.likes] : [];
+      const existingLikeIndex = likes.findIndex((entry) => buildSocialGalleryActorKey(entry) === viewerKey);
+      if (existingLikeIndex >= 0) {
+        likes.splice(existingLikeIndex, 1);
+        liked = false;
+      } else {
+        likes.unshift({
+          pilotId: viewer.pilotId,
+          username: viewer.username,
+          email: viewer.email,
+          name: viewer.name,
+          createdAt: new Date().toISOString(),
+        });
+        liked = true;
+      }
+      const nextItem = { ...item, likes };
+      responseMedia = serializeSocialGalleryMedia(nextItem, { ...current, media: current.media }, viewer);
+      return nextItem;
+    });
+    if (liked) {
+      appendSocialGalleryActivity(current, {
+        type: "media_liked",
+        actorPilotId: viewer.pilotId,
+        actorUsername: viewer.username,
+        actorName: viewer.name,
+        mediaId,
+        visibility: "public",
+        title: "Dropped a like",
+        summary: `${viewer.name} liked ${existingMedia.title || "a screenshot"}`,
+      });
+    }
+    return current;
+  });
+
+  res.json({ ok: true, liked, media: responseMedia || serializeSocialGalleryMedia(existingMedia, readSocialGalleryStore(), viewer) });
+});
+
+const isGalleryCaptain = (viewer) => {
+  const rank = String(viewer?.rank || "").toLowerCase();
+  return rank.includes("captain") || rank.includes("капитан") || rank.includes("commander") || rank.includes("командир");
+};
+
+// ── Gallery: feature/unfeature a screenshot (Captains only) ──────────────────
+app.put("/api/pilot/social-gallery/media/:id/feature", express.json({ limit: "256kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) { res.status(401).json({ error: "Authentication required" }); return; }
+  if (!isGalleryCaptain(viewer)) { res.status(403).json({ error: "Captain rank required to feature screenshots" }); return; }
+
+  const mediaId = normalizeAdminText(req.params.id || "");
+  if (!mediaId) { res.status(400).json({ error: "Media ID is required" }); return; }
+
+  const store = readSocialGalleryStore();
+  const existingMedia = (Array.isArray(store?.media) ? store.media : []).find((item) => String(item?.id || "") === mediaId);
+  if (!existingMedia) { res.status(404).json({ error: "Screenshot not found" }); return; }
+  if (String(existingMedia?.visibility || "public") === "private") { res.status(403).json({ error: "Cannot feature a private screenshot" }); return; }
+
+  let responseMedia = null;
+  let isFeatured = false;
+  withSocialGalleryUpdate((current) => {
+    current.media = (Array.isArray(current.media) ? current.media : []).map((item) => {
+      if (String(item?.id || "") !== mediaId) return item;
+      isFeatured = !Boolean(item?.isFeatured);
+      const nextItem = { ...item, isFeatured, featuredAt: isFeatured ? new Date().toISOString() : null, featuredByPilotId: isFeatured ? viewer.pilotId : null, featuredByName: isFeatured ? viewer.name : null };
+      responseMedia = serializeSocialGalleryMedia(nextItem, current, viewer);
+      return nextItem;
+    });
+    if (isFeatured) {
+      appendSocialGalleryActivity(current, { type: "media_featured", actorPilotId: viewer.pilotId, actorUsername: viewer.username, actorName: viewer.name, mediaId, visibility: "public", title: "Screenshot featured", summary: `${viewer.name} featured ${existingMedia.title || "a screenshot"}` });
+    }
+    return current;
+  });
+
+  res.json({ ok: true, isFeatured, media: responseMedia });
+});
+
+// ── Gallery: report a screenshot ─────────────────────────────────────────────
+const GALLERY_REPORTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "gallery-reports.json");
+
+const readGalleryReports = () => {
+  try {
+    const raw = fs.readFileSync(GALLERY_REPORTS_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed?.reports) ? parsed : { reports: [] };
+  } catch { return { reports: [] }; }
+};
+
+const appendGalleryReport = (report) => {
+  try {
+    const store = readGalleryReports();
+    store.reports = [{ id: `report-${randomUUID()}`, createdAt: new Date().toISOString(), resolved: false, ...report }, ...store.reports].slice(0, 500);
+    fs.writeFileSync(GALLERY_REPORTS_FILE, JSON.stringify(store, null, 2), "utf8");
+  } catch (e) { logger.warn("[gallery-reports] write_failed", String(e)); }
+};
+
+app.post("/api/pilot/social-gallery/media/:id/report", express.json({ limit: "256kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) { res.status(401).json({ error: "Authentication required" }); return; }
+
+  const mediaId = normalizeAdminText(req.params.id || "");
+  if (!mediaId) { res.status(400).json({ error: "Media ID is required" }); return; }
+
+  const store = readSocialGalleryStore();
+  const media = (Array.isArray(store?.media) ? store.media : []).find((item) => String(item?.id || "") === mediaId);
+  if (!media) { res.status(404).json({ error: "Screenshot not found" }); return; }
+
+  const reason = normalizeAdminText(req.body?.reason || "").slice(0, 500);
+  appendGalleryReport({ mediaId, mediaTitle: media?.title || "Unknown", ownerName: media?.ownerName || "Unknown", ownerPilotId: media?.ownerPilotId || null, reporterPilotId: viewer.pilotId, reporterName: viewer.name, reason });
+
+  res.json({ ok: true });
+});
+
+// ── Admin: list gallery reports ───────────────────────────────────────────────
+app.get("/api/admin/gallery/reports", requireAdmin, (req, res) => {
+  const store = readGalleryReports();
+  const unresolved = (store.reports || []).filter((r) => !r.resolved);
+  res.json({ reports: unresolved, total: unresolved.length });
+});
+
+app.put("/api/admin/gallery/reports/:id/resolve", requireAdmin, express.json({ limit: "256kb" }), (req, res) => {
+  try {
+    const store = readGalleryReports();
+    store.reports = store.reports.map((r) => String(r.id || "") === String(req.params.id || "") ? { ...r, resolved: true, resolvedAt: new Date().toISOString() } : r);
+    fs.writeFileSync(GALLERY_REPORTS_FILE, JSON.stringify(store, null, 2), "utf8");
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Admin: list all gallery media ────────────────────────────────────────────
+app.get("/api/admin/gallery/media", requireAdmin, (req, res) => {
+  const store = readSocialGalleryStore();
+  const reportsStore = readGalleryReports();
+  const reportsByMedia = {};
+  for (const r of (reportsStore.reports || [])) {
+    if (!r.resolved && r.mediaId) {
+      reportsByMedia[String(r.mediaId)] = (reportsByMedia[String(r.mediaId)] || 0) + 1;
+    }
+  }
+  const items = (Array.isArray(store?.media) ? store.media : [])
+    .sort((a, b) => Date.parse(String(b?.createdAt || "")) - Date.parse(String(a?.createdAt || "")))
+    .map((item) => ({
+      id: String(item?.id || ""),
+      ownerName: normalizeAdminText(item?.ownerName || "Pilot") || "Pilot",
+      ownerCallsign: normalizeAdminText(item?.ownerCallsign || item?.ownerUsername || "") || null,
+      title: normalizeAdminText(item?.title || "") || null,
+      assetUrl: normalizeAdminText(item?.assetUrl || "") || "",
+      likeCount: Array.isArray(item?.likes) ? item.likes.length : 0,
+      isFeatured: Boolean(item?.isFeatured),
+      reportCount: reportsByMedia[String(item?.id || "")] || 0,
+      createdAt: item?.createdAt || null,
+    }));
+  res.json({ items, total: items.length });
+});
+
+// ── Admin: delete gallery media ───────────────────────────────────────────────
+app.delete("/api/admin/gallery/media/:id", requireAdmin, (req, res) => {
+  try {
+    const store = readSocialGalleryStore();
+    const id = String(req.params.id || "");
+    const before = (Array.isArray(store?.media) ? store.media : []).length;
+    store.media = (Array.isArray(store?.media) ? store.media : []).filter((m) => String(m?.id || "") !== id);
+    if (store.media.length === before) return res.status(404).json({ error: "Not found" });
+    fs.writeFileSync(SOCIAL_GALLERY_FILE, JSON.stringify(store, null, 2), "utf8");
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: String(e) }); }
+});
+
+// ── Admin: list gallery reports (all, including resolved) ─────────────────────
+app.get("/api/admin/gallery/reports/all", requireAdmin, (req, res) => {
+  const store = readGalleryReports();
+  const galleryStore = readSocialGalleryStore();
+  const mediaMap = {};
+  for (const m of (Array.isArray(galleryStore?.media) ? galleryStore.media : [])) {
+    mediaMap[String(m?.id || "")] = m;
+  }
+  const reports = (store.reports || []).map((r) => {
+    const media = mediaMap[String(r.mediaId || "")] || null;
+    return {
+      ...r,
+      media: media ? {
+        id: String(media?.id || ""),
+        assetUrl: normalizeAdminText(media?.assetUrl || "") || "",
+        ownerName: normalizeAdminText(media?.ownerName || "Pilot") || "Pilot",
+        ownerCallsign: normalizeAdminText(media?.ownerCallsign || media?.ownerUsername || "") || null,
+      } : null,
+    };
+  });
+  res.json({ reports, total: reports.length });
+});
+
+// ── Public: featured gallery picks ───────────────────────────────────────────
+app.get("/api/public/gallery/featured", (_req, res) => {
+  const store = readSocialGalleryStore();
+  const picksStore = readSocialGalleryPicksStore();
+
+  // First try user-featured picks
+  const featuredMedia = (Array.isArray(store?.media) ? store.media : [])
+    .filter((item) => Boolean(item?.isFeatured) && String(item?.visibility || "public") !== "private")
+    .sort((a, b) => Date.parse(String(b?.featuredAt || b?.createdAt || "")) - Date.parse(String(a?.featuredAt || a?.createdAt || "")))
+    .slice(0, 9)
+    .map((item) => ({
+      id: String(item?.id || ""),
+      title: normalizeAdminText(item?.title || "Screenshot") || "Screenshot",
+      assetUrl: normalizeAdminText(item?.assetUrl || "") || "",
+      ownerName: normalizeAdminText(item?.ownerName || "Pilot") || "Pilot",
+      ownerCallsign: normalizeAdminText(item?.ownerCallsign || item?.ownerUsername || "") || null,
+      likeCount: Array.isArray(item?.likes) ? item.likes.length : 0,
+      source: "featured",
+    }));
+
+  // Fill with picks if needed
+  const picks = (Array.isArray(picksStore?.picks) ? picksStore.picks : []).slice(0, Math.max(0, 9 - featuredMedia.length)).map((item) => ({ ...item, source: "picks" }));
+  const combined = [...featuredMedia, ...picks].slice(0, 9);
+
+  res.json({ items: combined, total: combined.length });
+});
+
+// ── Pilot: coin balance ───────────────────────────────────────────────────────
+const loadPilotBalanceSnapshot = async ({ pilotId, sessionUser = {}, applyStoredAdjustment = true } = {}) => {
+  const normalizedPilotId = Number(pilotId || sessionUser?.id || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    throw createPilotApiError(400, "invalid_pilot_id", "Pilot ID is required");
+  }
+
+  const [pireps, registrations, galleryStore] = await Promise.all([
+    (async () => {
+      const items = [];
+      let cursor = null;
+      for (let page = 0; page < 30; page++) {
+        const params = new URLSearchParams({ "page[size]": "100", "sort": "-created_at" });
+        if (cursor) params.set("page[cursor]", cursor);
+        const payload = await pilotApiRequest({ pilotId: normalizedPilotId, sessionUser, path: `/pireps?${params.toString()}` }).catch(() => null);
+        const batch = getPilotApiCollectionItems(payload);
+        if (!batch.length) break;
+        items.push(...batch);
+        const nextLink = payload?.links?.next;
+        cursor = nextLink ? (() => { try { return new URL(nextLink).searchParams.get("page[cursor]"); } catch { return null; } })() : null;
+        if (!cursor) break;
+      }
+      return items;
+    })(),
+    fetchPilotApiCollectionPages({ pilotId: normalizedPilotId, sessionUser, path: "/activities/registrations?page[size]=100", maxPages: 3 }).catch(() => []),
+    Promise.resolve(readSocialGalleryStore()),
+  ]);
+
+  const acceptedPireps = pireps.filter((pirep) => isAcceptedPilotPirep(pirep));
+  const perPirepCoins = acceptedPireps.map((pirep) => {
+    const distanceNm = Math.max(0, Number(pirep?.distance || pirep?.flight_distance || 0) || 0);
+    const flightCoins = roundPilotCoinValue(distanceNm / 10);
+    const landingCoins = calculatePilotLandingCoinAward(pirep);
+    return {
+      id: Number(pirep?.id || 0) || 0,
+      dateKey: resolvePilotPirepDateKey(pirep),
+      distanceNm,
+      flightCoins,
+      landingCoins,
+    };
+  });
+
+  const totalNM = Math.round(perPirepCoins.reduce((sum, item) => sum + item.distanceNm, 0));
+  const flightCoins = roundPilotCoinValue(perPirepCoins.reduce((sum, item) => sum + item.flightCoins, 0));
+  const landingCoins = roundPilotCoinValue(perPirepCoins.reduce((sum, item) => sum + item.landingCoins, 0));
+  const activeFlightDays = new Set(perPirepCoins.map((item) => item.dateKey).filter(Boolean)).size;
+  const dailyBonusCoins = roundPilotCoinValue(activeFlightDays * 5);
+  const landingRewardedCount = perPirepCoins.filter((item) => item.landingCoins > 0).length;
+  const landingPenaltyCount = perPirepCoins.filter((item) => item.landingCoins < 0).length;
+
+  const allMedia = Array.isArray(galleryStore?.media) ? galleryStore.media : [];
+  const myMedia = allMedia.filter((item) => Number(item?.ownerPilotId || 0) === normalizedPilotId);
+  const likesByDay = new Map();
+  myMedia.forEach((item) => {
+    (Array.isArray(item?.likes) ? item.likes : []).forEach((like) => {
+      const day = String(like?.createdAt || "").slice(0, 10);
+      if (day) likesByDay.set(day, (likesByDay.get(day) || 0) + 1);
+    });
+  });
+  const likeCoins = roundPilotCoinValue(Array.from(likesByDay.values()).reduce((sum, cnt) => sum + Math.min(cnt, 5), 0));
+  const totalLikesReceived = myMedia.reduce((sum, item) => sum + (Array.isArray(item?.likes) ? item.likes.length : 0), 0);
+
+  const eventCoinsStore = readEventCoinsStore();
+  const registrationsByActivityId = new Map();
+  (Array.isArray(registrations) ? registrations : []).forEach((registration) => {
+    const activityId = Number(registration?.activity_id || registration?.activityId || 0);
+    if (activityId > 0) {
+      registrationsByActivityId.set(activityId, (registrationsByActivityId.get(activityId) || 0) + 1);
+    }
+  });
+
+  const eventActivityIds = Object.keys(eventCoinsStore)
+    .map((value) => Number(value || 0))
+    .filter((value) => value > 0);
+
+  const progressByActivityId = new Map(
+    await Promise.all(
+      eventActivityIds.map(async (activityId) => {
+        try {
+          const progressPayload = await pilotApiRequest({
+            pilotId: normalizedPilotId,
+            sessionUser,
+            path: `/activities/${encodeURIComponent(String(activityId))}/progress`,
+          });
+          return [activityId, normalizePilotActivityProgressSnapshot(progressPayload, activityId)];
+        } catch (error) {
+          const status = Number(error?.status || 0) || 0;
+          if (status === 404) {
+            return [activityId, null];
+          }
+          throw error;
+        }
+      })
+    )
+  );
+
+  let eventCoins = 0;
+  const eventTransactions = [];
+  Object.entries(eventCoinsStore).forEach(([activityIdStr, meta]) => {
+    const activityId = Number(activityIdStr);
+    const rewardValue = Math.max(0, Number(meta?.rewardValue || 0) || 0);
+    const rewardMode = normalizeEventCoinRewardMode(meta?.rewardMode);
+    const awardLimit = Math.max(1, Number(meta?.awardLimit || 1) || 1);
+    const registrationRequired = meta?.registrationRequired !== false;
+    const registrationCount = Number(registrationsByActivityId.get(activityId) || 0);
+    const progress = progressByActivityId.get(activityId) || null;
+    const earnedCount = resolvePilotActivityQualifiedCount(progress, registrationCount, awardLimit, registrationRequired);
+    if (rewardValue > 0 && earnedCount > 0) {
+      const averageFlightCoins = acceptedPireps.length > 0 ? flightCoins / acceptedPireps.length : 0;
+      const amount = rewardMode === "multiplier"
+        ? roundPilotCoinValue(averageFlightCoins * rewardValue * earnedCount)
+        : roundPilotCoinValue(rewardValue * earnedCount);
+
+      if (amount <= 0) {
+        return;
+      }
+
+      eventCoins += amount;
+      eventTransactions.push({
+        id: `event-${activityId}`,
+        label: String(meta?.name || `Ивент #${activityId}`),
+        amount,
+        icon: "event",
+        detail:
+          rewardMode === "multiplier"
+            ? `${earnedCount} × ср. PIREP ${roundPilotCoinValue(averageFlightCoins)} × ${rewardValue}${registrationRequired ? ", по регистрации" : ""}`
+            : `${earnedCount} × ${rewardValue} монет, лимит ${awardLimit}${registrationRequired ? ", по регистрации" : ""}`,
+      });
+    }
+  });
+
+  const grossBalance = roundPilotCoinValue(flightCoins + landingCoins + dailyBonusCoins + likeCoins + eventCoins);
+  const transactions = [];
+  if (flightCoins > 0) transactions.push({ id: "flights", label: "За принятые PIREP", amount: flightCoins, icon: "plane", detail: `${acceptedPireps.length} PIREP · ${totalNM.toLocaleString("ru-RU")} NM × 0.1` });
+  if (dailyBonusCoins > 0) transactions.push({ id: "daily-bonus", label: "Ежедневный бонус", amount: dailyBonusCoins, icon: "star", detail: `${activeFlightDays} дней × 5 монет` });
+  if (landingCoins !== 0) transactions.push({ id: "landings", label: "Посадки по VS и G", amount: landingCoins, icon: "star", detail: `${landingRewardedCount} бонусов, ${landingPenaltyCount} штрафов` });
+  if (likeCoins > 0) transactions.push({ id: "likes", label: "За лайки под фото", amount: likeCoins, icon: "heart", detail: `${totalLikesReceived} лайков, макс 5/сутки` });
+  transactions.push(...eventTransactions);
+
+  const adjustmentEntry = readPilotBalanceAdjustmentsStore()[String(normalizedPilotId)] || null;
+  const adjustmentAmount = applyStoredAdjustment && adjustmentEntry ? roundPilotCoinValue(adjustmentEntry.amount) : 0;
+  if (applyStoredAdjustment && adjustmentAmount !== 0) {
+    transactions.push({
+      id: "manual-adjustment",
+      label: "Корректировка баланса",
+      amount: adjustmentAmount,
+      icon: adjustmentAmount < 0 ? "minus" : "plus",
+      detail: adjustmentEntry?.reason || "Ручная корректировка итогового баланса",
+    });
+  }
+
+  return {
+    pilotId: normalizedPilotId,
+    grossBalance,
+    balance: roundPilotCoinValue(grossBalance + adjustmentAmount),
+    adjustmentAmount,
+    adjustment: adjustmentEntry,
+    breakdown: transactions,
+  };
+};
+
+app.get("/api/pilot/balance", async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+
+  try {
+    const snapshot = await loadPilotBalanceSnapshot({ pilotId, sessionUser: session.user || {}, applyStoredAdjustment: true });
+    res.json({ ok: true, balance: snapshot.balance, currency: "coins", breakdown: snapshot.breakdown });
+  } catch (error) {
+    respondWithPilotApiError(res, error, "Failed to load balance");
+  }
+});
+
+app.post("/api/pilot/balance/reset", express.json({ limit: "256kb" }), async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  const targetBalance = roundPilotCoinValue(Number(req.body?.targetBalance ?? 0) || 0);
+  const reason = String(req.body?.reason || "").trim() || "Сброс суммарного баланса";
+
+  try {
+    const snapshot = await loadPilotBalanceSnapshot({ pilotId, sessionUser: session.user || {}, applyStoredAdjustment: false });
+    const adjustment = setPilotBalanceAdjustment(pilotId, {
+      amount: roundPilotCoinValue(targetBalance - snapshot.grossBalance),
+      reason,
+      updatedAt: new Date().toISOString(),
+      updatedBy: String(session?.user?.username || session?.user?.name || session?.user?.email || `pilot-${pilotId}`),
+    });
+    const nextSnapshot = await loadPilotBalanceSnapshot({ pilotId, sessionUser: session.user || {}, applyStoredAdjustment: true });
+
+    res.json({
+      ok: true,
+      pilotId,
+      targetBalance,
+      balance: nextSnapshot.balance,
+      grossBalance: snapshot.grossBalance,
+      adjustment,
+      currency: "coins",
+      breakdown: nextSnapshot.breakdown,
+    });
+  } catch (error) {
+    respondWithPilotApiError(res, error, "Failed to reset balance");
+  }
+});
+
+// ── Pilot: passport (visited airports/countries) ──────────────────────────────
+const ICAO_COUNTRY_MAP = { "UA":  "Ukraine","UB":  "Azerbaijan","UC":  "Georgia","UD":  "Armenia","UE":  "Russia","UG":  "Georgia","UI":  "Russia","UK":  "Ukraine","UL":  "Russia","UM":  "Belarus","UN":  "Russia","UO":  "Russia","UR":  "Russia","US":  "Russia","UT":  "Central Asia","UU":  "Russia","UW":  "Russia","EB":  "Belgium","ED":  "Germany","EE":  "Estonia","EF":  "Finland","EG":  "United Kingdom","EH":  "Netherlands","EI":  "Ireland","EK":  "Denmark","EL":  "Luxembourg","EN":  "Norway","EP":  "Poland","ES":  "Sweden","ET":  "Germany","EV":  "Latvia","EW":  "Belarus","EY":  "Lithuania","LA":  "Albania","LB":  "Bulgaria","LC":  "Cyprus","LD":  "Croatia","LE":  "Spain","LF":  "France","LG":  "Greece","LH":  "Hungary","LI":  "Italy","LJ":  "Slovenia","LK":  "Czechia","LL":  "Israel","LM":  "Malta","LO":  "Austria","LP":  "Portugal","LQ":  "Bosnia","LR":  "Romania","LS":  "Switzerland","LT":  "Turkey","LU":  "Moldova","LW":  "North Macedonia","LY":  "Serbia","LZ":  "Slovakia","OA":  "Afghanistan","OB":  "Bahrain","OE":  "Saudi Arabia","OI":  "Iran","OJ":  "Jordan","OK":  "Kuwait","OL":  "Lebanon","OM":  "UAE","OO":  "Oman","OP":  "Pakistan","OR":  "Iraq","OS":  "Syria","OT":  "Qatar","OY":  "Yemen","GQ":  "Mauritania","GU":  "Guinea","HA":  "Ethiopia","HB":  "Burundi","HE":  "Egypt","HK":  "Kenya","HT":  "Tanzania","HU":  "Uganda","VD":  "Cambodia","VI":  "India","VN":  "Nepal","VQ":  "Bhutan","VR":  "Maldives","VT":  "Thailand","VV":  "Vietnam","WA":  "Indonesia","WI":  "Indonesia","WM":  "Malaysia","WR":  "Indonesia","ZB":  "China","ZG":  "China","ZH":  "China","ZJ":  "China","ZK":  "China","ZL":  "China","ZM":  "China","ZP":  "China","ZS":  "China","ZU":  "China","ZW":  "China","ZY":  "China" };
+
+const resolveIcaoCountry = (icao) => {
+  if (!icao || icao.length < 2) return null;
+  const prefix4 = icao.slice(0, 4).toUpperCase();
+  const prefix3 = icao.slice(0, 3).toUpperCase();
+  const prefix2 = icao.slice(0, 2).toUpperCase();
+  return ICAO_COUNTRY_MAP[prefix4] || ICAO_COUNTRY_MAP[prefix3] || ICAO_COUNTRY_MAP[prefix2] || null;
+};
+
+const normalizePilotCountryIso2 = (value) => {
+  const iso2 = String(value || "").trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(iso2) ? iso2 : null;
+};
+
+const roundPilotCoinValue = (value) => Math.round((Number(value) || 0) * 10) / 10;
+
+const resolvePilotPirepDateKey = (pirep) => {
+  const raw = String(
+    pirep?.arrival_time ||
+    pirep?.completed_at ||
+    pirep?.submitted_at ||
+    pirep?.created_at ||
+    ""
+  ).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = new Date(raw);
+  if (!Number.isFinite(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+};
+
+const resolvePilotPirepGForce = (pirep) => {
+  const gForceValue = [
+    pirep?.g_force,
+    pirep?.gForce,
+    pirep?.landing_g_force,
+    pirep?.landingGForce,
+    pirep?.landing_g,
+    pirep?.landingG,
+    pirep?.max_g_force,
+    pirep?.maxGForce,
+  ]
+    .map((value) => Number(value))
+    .find((value) => Number.isFinite(value));
+
+  return Number.isFinite(gForceValue) ? Number(gForceValue) : null;
+};
+
+const calculatePilotLandingCoinAward = (pirep) => {
+  const landingRate = Math.abs(Number(pirep?.landing_rate || 0));
+  if (!Number.isFinite(landingRate) || landingRate <= 0) {
+    return 0;
+  }
+
+  const gForce = resolvePilotPirepGForce(pirep);
+  const verySmoothG = Number.isFinite(gForce) && gForce <= 1.25;
+  const smoothG = Number.isFinite(gForce) && gForce <= 1.35;
+  const heavyG = Number.isFinite(gForce) && gForce >= 1.8;
+
+  if (landingRate > 400) {
+    const penaltyPerStep = heavyG ? 0.2 : 0.1;
+    const steps = Math.max(1, Math.ceil((landingRate - 400) / 10));
+    return -roundPilotCoinValue(steps * penaltyPerStep);
+  }
+
+  if (landingRate > 300) {
+    return verySmoothG ? 0.4 : 0.3;
+  }
+
+  if (landingRate > 200) {
+    return smoothG ? 0.7 : 0.5;
+  }
+
+  return verySmoothG ? 1 : 0.7;
+};
+
+const resolvePilotActivityQualifiedCount = (progress, registrationCount, awardLimit, registrationRequired) => {
+  const normalizedLimit = Math.max(1, Number(awardLimit || 1) || 1);
+  const safeRegistrationCount = Math.max(0, Number(registrationCount || 0) || 0);
+  if (!progress) {
+    return registrationRequired ? Math.min(safeRegistrationCount, normalizedLimit) : Math.min(Math.max(1, safeRegistrationCount), normalizedLimit);
+  }
+
+  const progressPercent = Math.max(0, Number(progress?.progressPercent || 0) || 0);
+  const legCompleted = Math.max(0, Number(progress?.legCompleted || 0) || 0);
+  const status = String(progress?.status || "").trim().toLowerCase();
+  const completedStatus = ["completed", "complete", "done", "accepted"].includes(status);
+  const progressCount = Math.max(legCompleted, completedStatus || progressPercent >= 100 ? 1 : 0, safeRegistrationCount > 0 ? 1 : 0);
+
+  if (registrationRequired) {
+    return Math.min(progressCount, normalizedLimit);
+  }
+
+  return Math.min(Math.max(1, progressCount), normalizedLimit);
+};
+
+const isAcceptedPilotPirep = (pirep) =>
+  ["accepted", "auto_accepted", "approved"].includes(String(pirep?.status || "").toLowerCase());
+
+const resolvePilotPirepAirportSummary = (pirep, direction, airportsMap = new Map()) => {
+  const airportNode = pirep?.[`${direction}_airport`] && typeof pirep[`${direction}_airport`] === "object"
+    ? pirep[`${direction}_airport`]
+    : {};
+  const countryNode = airportNode?.country && typeof airportNode.country === "object" ? airportNode.country : {};
+  const airportId = Number(
+    pirep?.[`${direction}_id`] ||
+    pirep?.[`${direction}_airport_id`] ||
+    airportNode?.id ||
+    0
+  ) || 0;
+  const mappedAirport = airportId > 0 ? airportsMap.get(airportId) || null : null;
+
+  const icao = String(
+    airportNode?.icao ||
+    airportNode?.code ||
+    airportNode?.iata ||
+    pirep?.[`${direction}_icao`] ||
+    pirep?.[`${direction}_iata`] ||
+    mappedAirport?.icao ||
+    mappedAirport?.code ||
+    mappedAirport?.iata ||
+    ""
+  ).trim().toUpperCase() || null;
+
+  const name = String(airportNode?.name || mappedAirport?.name || icao || "").trim() || null;
+  const city = String(
+    airportNode?.city ||
+    airportNode?.municipality ||
+    mappedAirport?.city ||
+    ""
+  ).trim() || null;
+  const countryIso2 = normalizePilotCountryIso2(
+    countryNode?.iso2 ||
+    airportNode?.countryIso2 ||
+    airportNode?.country_iso2 ||
+    mappedAirport?.countryIso2 ||
+    mappedAirport?.country_iso2 ||
+    ""
+  );
+  const countryName = String(
+    countryNode?.name ||
+    airportNode?.countryName ||
+    airportNode?.country_name ||
+    mappedAirport?.countryName ||
+    mappedAirport?.country_name ||
+    resolveIcaoCountry(icao || "") ||
+    ""
+  ).trim() || null;
+
+  return {
+    id: airportId > 0 ? airportId : null,
+    icao,
+    name,
+    city,
+    countryIso2,
+    countryName,
+    latitude: Number(airportNode?.latitude || mappedAirport?.latitude || 0) || null,
+    longitude: Number(airportNode?.longitude || mappedAirport?.longitude || 0) || null,
+  };
+};
+
+app.get("/api/pilot/passport", async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  try {
+    const airportsMap = await loadAirportsLookup().catch(() => new Map());
+    let allPireps = [];
+    let cursor = null;
+    let page = 0;
+    while (page < 20) {
+      const params = new URLSearchParams({ "page[size]": "100", sort: "-created_at" });
+      if (cursor) params.set("page[cursor]", cursor);
+      const payload = await pilotApiRequest({ pilotId, sessionUser: session.user || {}, path: `/pireps?${params.toString()}` }).catch(() => null);
+      const items = getPilotApiCollectionItems(payload);
+      if (!items.length) break;
+      allPireps = [...allPireps, ...items];
+      cursor = payload?.links?.next ? new URL(payload.links.next).searchParams.get("page[cursor]") : null;
+      if (!cursor) break;
+      page++;
+    }
+
+    const accepted = allPireps.filter((pirep) => isAcceptedPilotPirep(pirep));
+    const pirepSource = accepted.length ? accepted : allPireps;
+
+    const airportVisits = new Map();
+    const routeCounts = new Map();
+    const countryFirstYear = new Map();
+
+    for (const pirep of pirepSource) {
+      const departure = resolvePilotPirepAirportSummary(pirep, "departure", airportsMap);
+      const arrival = resolvePilotPirepAirportSummary(pirep, "arrival", airportsMap);
+      const rawDate = pirep?.completed_at || pirep?.submitted_at || pirep?.created_at || "";
+      const pirepYear = rawDate ? new Date(rawDate).getFullYear() : null;
+
+      if (departure?.icao && departure.icao.length >= 4) {
+        const v = airportVisits.get(departure.icao) || {
+          icao: departure.icao,
+          name: departure.name || departure.icao,
+          city: departure.city,
+          country: departure.countryName,
+          countryIso2: departure.countryIso2,
+          visits: 0,
+        };
+        v.visits++;
+        airportVisits.set(departure.icao, v);
+        const depCountry = departure.countryName;
+        if (depCountry && pirepYear) {
+          const existing = countryFirstYear.get(depCountry);
+          if (!existing || pirepYear < existing) countryFirstYear.set(depCountry, pirepYear);
+        }
+      }
+      if (arrival?.icao && arrival.icao.length >= 4) {
+        const v = airportVisits.get(arrival.icao) || {
+          icao: arrival.icao,
+          name: arrival.name || arrival.icao,
+          city: arrival.city,
+          country: arrival.countryName,
+          countryIso2: arrival.countryIso2,
+          visits: 0,
+        };
+        v.visits++;
+        airportVisits.set(arrival.icao, v);
+        const arrCountry = arrival.countryName;
+        if (arrCountry && pirepYear) {
+          const existing = countryFirstYear.get(arrCountry);
+          if (!existing || pirepYear < existing) countryFirstYear.set(arrCountry, pirepYear);
+        }
+      }
+      if (departure?.icao && arrival?.icao && departure.icao.length >= 4 && arrival.icao.length >= 4) {
+        const routeKey = `${departure.icao}-${arrival.icao}`;
+        routeCounts.set(routeKey, (routeCounts.get(routeKey) || 0) + 1);
+      }
+    }
+
+    const airports = Array.from(airportVisits.values()).sort((a, b) => b.visits - a.visits);
+    const countries = Array.from(new Set(airports.map((a) => a.country).filter(Boolean))).sort();
+    const topRoutes = Array.from(routeCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([route, count]) => ({ route, count, from: route.split("-")[0], to: route.split("-")[1] }));
+    const rarestAirports = airports.filter((a) => a.visits <= 2).slice(0, 10);
+
+    const countriesByYearRaw = {};
+    for (const [country, year] of countryFirstYear) {
+      if (!countriesByYearRaw[year]) countriesByYearRaw[year] = [];
+      countriesByYearRaw[year].push(country);
+    }
+    for (const year of Object.keys(countriesByYearRaw)) {
+      countriesByYearRaw[year].sort();
+    }
+
+    res.json({
+      totalFlights: pirepSource.length,
+      airports,
+      countries,
+      countryCount: countries.length,
+      topRoutes,
+      rarestAirports,
+      uniqueAirports: airports.length,
+      countriesByYear: countriesByYearRaw,
+    });
+  } catch (error) {
+    res.status(500).json({ error: String(error) });
+  }
+});
+
 app.get("/api/vamsys/dashboard/home", async (req, res) => {
   if (!requireCredentials(res)) {
     return;
@@ -17291,6 +19955,42 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
     const avgLandingRate = landingRates.length
       ? Math.round(landingRates.reduce((sum, value) => sum + value, 0) / landingRates.length)
       : null;
+    const normalizedIdentityUsername = normalizeAdminText(pilotIdentity?.username || "").toLowerCase();
+    const normalizedIdentityEmail = normalizeAdminText(pilotIdentity?.email || "").toLowerCase();
+    const matchedStaffRoles = listManagedAdminCollection("staff")
+      .filter((item) => normalizeAdminText(item?.status || "active").toLowerCase() !== "archived")
+      .filter((item) => {
+        const entryPilotId = Number(item?.pilotId || 0) || 0;
+        const entryUsername = normalizeAdminText(item?.username || "").toLowerCase();
+        const entryEmail = normalizeAdminText(item?.email || "").toLowerCase();
+
+        if (pilotId && entryPilotId > 0 && entryPilotId === pilotId) {
+          return true;
+        }
+        if (normalizedIdentityUsername && entryUsername && entryUsername === normalizedIdentityUsername) {
+          return true;
+        }
+        return Boolean(normalizedIdentityEmail && entryEmail && entryEmail === normalizedIdentityEmail);
+      })
+      .map((item) => serializePublicStaffEntry(item));
+    const fallbackStaffRoles = extractPilotRoleLabels(pilot).map((label, index) => {
+      const division = inferStaffDivision([label]);
+      return {
+        id: `derived-${index}-${slugifyAdminValue(label, "staff")}`,
+        pilotId,
+        username: normalizeAdminText(pilotIdentity?.username || "") || null,
+        handle: normalizeAdminText(pilotIdentity?.username || "").replace(/^@+/, "") || null,
+        name: normalizeAdminText(pilot?.name || `${pilot?.first_name || ""} ${pilot?.last_name || ""}`) || normalizeAdminText(pilotIdentity?.username || "Pilot") || "Pilot",
+        role: label,
+        rank: normalizeAdminText(pilot?.rank || "") || null,
+        division,
+        color: resolveStaffAccentColor(division),
+        discord: null,
+        status: "active",
+        bio: "",
+        order: index,
+      };
+    });
     const recentFlightsPreview = flights.slice(0, 3);
     const needsReplyFlights = flights.filter((item) => Boolean(item?.needReply)).slice(0, 3);
 
@@ -17310,14 +20010,7 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
         regularName:
           String(pilotApiDashboard?.rank?.regularRankName || "").trim() ||
           String(pilot?.rank || "Member"),
-        honoraryName:
-          String(pilotApiDashboard?.rank?.honoraryRankName || "").trim() ||
-          String(
-            pilot?.honorary_rank?.name ||
-              pilot?.honoraryRankName ||
-              pilot?.honorary_rank_name ||
-              ""
-          ).trim(),
+        honoraryName: String(pilotApiDashboard?.rank?.honoraryRankName || "").trim() || resolveHonoraryRankLabel(pilot),
         nextRankName: String(pilotApiDashboard?.rank?.nextRankName || "").trim() || "",
         progressPercent: Number(pilotApiDashboard?.rank?.progressPercent || 0) || 0,
         progressHoursRemaining: Number.isFinite(Number(pilotApiDashboard?.rank?.progressHoursRemaining))
@@ -17334,6 +20027,7 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
           : null,
         hours: Number(pilotApiDashboard?.statistics?.totalHours ?? pilot?.hours ?? pilot?.totalHours ?? 0) || 0,
       },
+      staffRoles: matchedStaffRoles.length > 0 ? matchedStaffRoles : fallbackStaffRoles,
       upcomingFlights,
       recentFlightsPreview,
       needsReplyFlights,
@@ -17352,6 +20046,252 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
   } catch {
     res.status(502).json({
       error: "Failed to load dashboard data",
+    });
+  }
+});
+
+const normalizeDashboardLeaderboardPeriod = (value) => {
+  const normalized = String(value || "month").trim().toLowerCase();
+  return ["day", "week", "month", "all"].includes(normalized) ? normalized : "month";
+};
+
+const resolveDashboardLeaderboardCutoff = (period) => {
+  if (period === "all") {
+    return null;
+  }
+
+  const now = new Date();
+  if (period === "day") {
+    return new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  }
+  if (period === "week") {
+    return new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  }
+
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() - 1);
+  return cutoff;
+};
+
+const resolveLeaderboardPirepTimestamp = (pirep) => {
+  const raw = String(
+    pirep?.arrival_time ||
+    pirep?.completed_at ||
+    pirep?.submitted_at ||
+    pirep?.created_at ||
+    ""
+  ).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const loadPirepsForDashboardLeaderboard = async (period) => {
+  const cutoff = resolveDashboardLeaderboardCutoff(period);
+  const cutoffTime = cutoff ? cutoff.getTime() : null;
+  const path = "/pireps?page[size]=100&sort=-created_at";
+  let url = `${API_BASE}${path}`;
+  const rows = [];
+
+  while (url) {
+    const token = await getAccessToken();
+    const response = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+    });
+
+    if (!response.ok) {
+      const details = await response.text().catch(() => "");
+      throw new Error(`Leaderboard PIREP request failed: ${response.status} ${details}`);
+    }
+
+    const payload = await response.json();
+    const items = Array.isArray(payload?.data)
+      ? payload.data.map((item) => (item && typeof item === "object" ? flattenJsonApiNode(item) : item))
+      : [];
+    if (!items.length) {
+      break;
+    }
+
+    for (const item of items) {
+      if (!isAcceptedPilotPirep(item)) {
+        continue;
+      }
+
+      const timestamp = resolveLeaderboardPirepTimestamp(item);
+      if (cutoffTime != null && (!timestamp || timestamp.getTime() < cutoffTime)) {
+        continue;
+      }
+
+      rows.push(item);
+    }
+
+    const oldestTimestamp = resolveLeaderboardPirepTimestamp(items[items.length - 1]);
+    if (cutoffTime != null && oldestTimestamp && oldestTimestamp.getTime() < cutoffTime) {
+      break;
+    }
+
+    const meta = payload?.meta || {};
+    const nextUrl = meta.next_cursor_url || meta.next_page_url || null;
+    if (typeof nextUrl === "string" && nextUrl.length > 0) {
+      url = nextUrl.startsWith("http") ? nextUrl : `${API_BASE}${nextUrl}`;
+      continue;
+    }
+
+    if (meta.next_cursor) {
+      url = `${API_BASE}${path}&page[cursor]=${encodeURIComponent(meta.next_cursor)}`;
+      continue;
+    }
+
+    url = null;
+  }
+
+  return rows;
+};
+
+const buildDashboardLeaderboardPayload = async (period) => {
+  const rosterPayload = await loadPilotsRoster();
+  const roster = Array.isArray(rosterPayload?.pilots) ? rosterPayload.pilots : [];
+  const rosterById = new Map(
+    roster
+      .filter((pilot) => Number(pilot?.id || 0) > 0)
+      .map((pilot) => [Number(pilot.id), pilot])
+  );
+
+  const pireps = await loadPirepsForDashboardLeaderboard(period);
+  const totals = {
+    pilots: 0,
+    flights: 0,
+    points: 0,
+  };
+
+  const grouped = new Map();
+  const toHours = (pirep) => {
+    const minutes = Number(pirep?.flight_time || 0);
+    const seconds = Number(pirep?.flight_length || 0);
+    if (seconds > 0 && seconds > minutes * 10) {
+      return seconds / 3600;
+    }
+    return minutes / 60;
+  };
+
+  pireps.forEach((pirep) => {
+    const pilotId = Number(pirep?.pilot_id || 0) || 0;
+    if (pilotId <= 0) {
+      return;
+    }
+
+    const current = grouped.get(pilotId) || {
+      pilotId,
+      flights: 0,
+      hours: 0,
+      distance: 0,
+      points: 0,
+      landingRateTotal: 0,
+      landingRateCount: 0,
+      lastFlightAt: null,
+    };
+
+    current.flights += 1;
+    current.hours += toHours(pirep);
+    current.distance += Math.max(0, Number(pirep?.distance || pirep?.flight_distance || 0) || 0);
+    current.points += Math.max(0, Number(pirep?.score ?? pirep?.points ?? 0) || 0);
+
+    const landingRate = resolvePirepLandingRate(pirep);
+    if (Number.isFinite(landingRate) && landingRate !== 0) {
+      current.landingRateTotal += landingRate;
+      current.landingRateCount += 1;
+    }
+
+    const timestamp = resolveLeaderboardPirepTimestamp(pirep);
+    if (timestamp) {
+      const nextIso = timestamp.toISOString();
+      if (!current.lastFlightAt || nextIso > current.lastFlightAt) {
+        current.lastFlightAt = nextIso;
+      }
+    }
+
+    grouped.set(pilotId, current);
+  });
+
+  const rows = Array.from(grouped.values())
+    .map((entry) => {
+      const rosterPilot = rosterById.get(entry.pilotId) || null;
+      return {
+        pilotId: entry.pilotId,
+        name: String(rosterPilot?.name || rosterPilot?.username || `Pilot #${entry.pilotId}`),
+        rankName: String(rosterPilot?.rank || "Pilot"),
+        flights: entry.flights,
+        hours: Math.round(entry.hours * 10) / 10,
+        distance: Math.round(entry.distance),
+        points: Math.round(entry.points),
+        avgLandingRate: entry.landingRateCount > 0 ? Math.round(entry.landingRateTotal / entry.landingRateCount) : null,
+        lastFlightAt: entry.lastFlightAt,
+      };
+    })
+    .sort((left, right) => {
+      const pointsDiff = right.points - left.points;
+      if (pointsDiff !== 0) return pointsDiff;
+      const flightsDiff = right.flights - left.flights;
+      if (flightsDiff !== 0) return flightsDiff;
+      const hoursDiff = right.hours - left.hours;
+      if (hoursDiff !== 0) return hoursDiff;
+      return left.name.localeCompare(right.name);
+    })
+    .map((entry, index) => ({ ...entry, rank: index + 1 }));
+
+  totals.pilots = rows.length;
+  totals.flights = rows.reduce((sum, entry) => sum + entry.flights, 0);
+  totals.points = rows.reduce((sum, entry) => sum + entry.points, 0);
+
+  return {
+    period,
+    updatedAt: new Date().toISOString(),
+    totals,
+    rows,
+  };
+};
+
+app.get("/api/vamsys/dashboard/leaderboard", async (req, res) => {
+  if (!requireCredentials(res)) {
+    return;
+  }
+
+  const period = normalizeDashboardLeaderboardPeriod(req.query.period);
+  const pilotIdentity = resolveLoggedInPilotIdentity(req);
+  const currentPilotId = Number(pilotIdentity?.pilotId || 0) || null;
+
+  try {
+    const cacheEntry = dashboardLeaderboardCache.get(period);
+    let payload = cacheEntry?.data || null;
+
+    if (!payload || Date.now() >= Number(cacheEntry?.expiresAt || 0)) {
+      payload = await buildDashboardLeaderboardPayload(period);
+      dashboardLeaderboardCache.set(period, {
+        data: payload,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+      });
+    }
+
+    const currentPilot = currentPilotId
+      ? payload.rows.find((row) => Number(row?.pilotId || 0) === currentPilotId) || null
+      : null;
+
+    res.json({
+      ok: true,
+      ...payload,
+      rows: Array.isArray(payload?.rows) ? payload.rows.slice(0, 100) : [],
+      currentPilot,
+    });
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      error: String(error?.message || "Failed to load leaderboard"),
     });
   }
 });
@@ -17485,6 +20425,22 @@ app.get("/api/vamsys/dashboard/airports", async (_req, res) => {
   }
 });
 
+app.get("/api/vamsys/dashboard/bootstrap", async (_req, res) => {
+  if (!requireCredentials(res)) {
+    return;
+  }
+
+  try {
+    const payload = await loadDashboardBootstrapCatalog();
+    res.json(payload);
+  } catch (error) {
+    logger.warn("[dashboard] bootstrap_load_failed", { error: String(error) });
+    res.status(502).json({
+      error: "Failed to load dashboard bootstrap",
+    });
+  }
+});
+
 app.get("/api/weather/metar/:icao", async (req, res) => {
   if (!requireCredentials(res)) {
     return;
@@ -17497,35 +20453,46 @@ app.get("/api/weather/metar/:icao", async (req, res) => {
       return;
     }
 
-    const response = await fetch(`https://tgftp.nws.noaa.gov/data/observations/metar/stations/${icao}.TXT`, {
-      headers: {
-        "User-Agent": "NordwindSite/1.0",
-      },
-    });
+    // Primary source: aviationweather.gov — global coverage including Russia/CIS
+    const awcUrl = `https://aviationweather.gov/api/data/metar?ids=${icao}&format=json&hours=3`;
+    let metar = null;
 
-    if (!response.ok) {
-      res.status(502).json({ error: "Failed to load METAR" });
-      return;
+    try {
+      const awcRes = await fetch(awcUrl, {
+        headers: { "User-Agent": "NordwindSite/1.0" },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (awcRes.ok) {
+        const json = await awcRes.json();
+        const entry = Array.isArray(json) && json.length > 0 ? json[0] : null;
+        if (entry?.rawOb) {
+          metar = {
+            station: icao,
+            raw: String(entry.rawOb),
+            observedAt: entry.reportTime || entry.receiptTime || null,
+          };
+        }
+      }
+    } catch { /* fall through to NOAA */ }
+
+    // Fallback: NOAA text feed (works for some non-US stations too)
+    if (!metar) {
+      try {
+        const noaaRes = await fetch(
+          `https://tgftp.nws.noaa.gov/data/observations/metar/stations/${icao}.TXT`,
+          { headers: { "User-Agent": "NordwindSite/1.0" }, signal: AbortSignal.timeout(5000) }
+        );
+        if (noaaRes.ok) {
+          const text = await noaaRes.text();
+          const lines = String(text || "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+          if (lines.length >= 2) {
+            metar = { station: icao, raw: lines[1], observedAt: lines[0] };
+          }
+        }
+      } catch { /* ignore */ }
     }
 
-    const text = await response.text();
-    const lines = String(text || "")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-
-    const observedAt = lines.length > 0 ? lines[0] : null;
-    const raw = lines.length > 1 ? lines[1] : null;
-
-    res.json({
-      metar: raw
-        ? {
-            station: icao,
-            raw,
-            observedAt,
-          }
-        : null,
-    });
+    res.json({ metar });
   } catch (error) {
     res.status(502).json({
       error: "Failed to load METAR",
@@ -17537,6 +20504,8 @@ app.get("/api/weather/metar/:icao", async (req, res) => {
 app.put("/api/admin/fleet/:fleetId/liveries/:liveryId", async (req, res) => {
   try {
     const updated = await updateFleetLiveryStatus(req.params.fleetId, req.params.liveryId, req.body || {});
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.json({ livery: updated });
   } catch (error) {
     const message = String(error?.message || error || "Failed to update livery status");
@@ -18598,6 +21567,95 @@ app.post("/api/telegram-bot/tickets/:id/status", express.json({ limit: "1mb" }),
   res.json({ ok: true, ticket: updatedTicket });
 });
 
+app.post("/api/telegram-bot/profile", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const chatId = normalizeAdminText(req.body?.chatId || req.body?.telegramChatId || "") || null;
+  const telegramId = normalizeAdminText(req.body?.telegramId || "") || null;
+
+  if (!chatId && !telegramId) {
+    res.status(400).json({ error: "chatId or telegramId required" });
+    return;
+  }
+
+  const pilotId = findPilotIdByTelegramIdentity({ chatId, telegramId });
+  if (!pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  try {
+    const [profile, pirepsRaw] = await Promise.all([
+      loadPilotProfileById(pilotId).catch(() => null),
+      fetchAllPages(`/pireps?page[size]=100&filter[pilot_id]=${pilotId}&sort=-created_at`).catch(() => []),
+    ]);
+
+    if (!profile) {
+      res.status(404).json({ error: "Pilot profile not found in vAMSYS" });
+      return;
+    }
+
+    const pireps = Array.isArray(pirepsRaw) ? pirepsRaw : [];
+    const accepted = pireps.filter((p) => ["accepted", "auto_accepted", "approved"].includes(String(p?.status || "").toLowerCase()));
+    const pirepSource = accepted.length ? accepted : pireps;
+
+    const vsRates = pirepSource.map((p) => Number(p?.landing_rate || 0)).filter((v) => Number.isFinite(v) && v !== 0);
+    const avgVs = vsRates.length > 0 ? Math.round(vsRates.reduce((sum, v) => sum + v, 0) / vsRates.length) : null;
+
+    const galleryStore = readSocialGalleryStore();
+    const allMedia = Array.isArray(galleryStore?.media) ? galleryStore.media : [];
+    const myMedia = allMedia.filter((item) => Number(item?.ownerPilotId || 0) === pilotId);
+    // New balance formula: 0.1 per NM + 5 per smooth landing + likes with daily cap
+    const totalNM = pirepSource.reduce((s, p) => s + Number(p?.distance || 0), 0);
+    const smoothLandings = pirepSource.filter((p) => { const vs = Number(p?.landing_rate || 0); return vs < 0 && vs >= -200; }).length;
+    const likesByDay = new Map();
+    myMedia.forEach((item) => { (Array.isArray(item?.likes) ? item.likes : []).forEach((like) => { const day = String(like?.createdAt || "").slice(0, 10); if (day) likesByDay.set(day, (likesByDay.get(day) || 0) + 1); }); });
+    const likeCoins = Array.from(likesByDay.values()).reduce((s, c) => s + Math.min(c, 5), 0);
+    const balance = Math.round(totalNM * 0.1 + smoothLandings * 5 + likeCoins);
+
+    res.json({
+      ok: true,
+      profile: {
+        id: profile.id,
+        name: profile.name,
+        callsign: profile.username,
+        rank: profile.rank,
+        flights: profile.flights,
+        hours: profile.hours,
+        joinedAt: profile.joinedAt,
+        balance,
+        avgVs,
+      },
+    });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load pilot profile") });
+  }
+});
+
+app.get("/api/discord-bot/balance", async (req, res) => {
+  if (!isAuthorizedDiscordBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const pilotId = Number(req.query.pilotId || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ error: "pilotId required" });
+    return;
+  }
+
+  const galleryStore = readSocialGalleryStore();
+  const allMedia = Array.isArray(galleryStore?.media) ? galleryStore.media : [];
+  const myMedia = allMedia.filter((item) => Number(item?.ownerPilotId || 0) === pilotId);
+  const galleryLikes = myMedia.reduce((sum, item) => sum + (Array.isArray(item?.likes) ? item.likes.length : 0), 0);
+  const galleryFeatured = myMedia.filter((item) => Boolean(item?.isFeatured)).length;
+
+  res.json({ ok: true, pilotId, galleryLikes, galleryFeatured });
+});
+
 app.use("/api/admin", requireAdmin);
 app.use("/api/admin", createAdminAuditMiddleware());
 
@@ -18849,6 +21907,34 @@ app.put("/api/admin/discord-bot/config", express.json({ limit: "1mb" }), (req, r
   }
 });
 
+app.post("/api/admin/discord-bot/test-notification", requireAdmin, express.json({ limit: "256kb" }), async (req, res) => {
+  try {
+    const actorName = normalizeAdminText(req.adminUser?.name || req.adminUser?.username || "Admin") || "Admin";
+    const actorUsername = normalizeAdminText(req.adminUser?.username || req.adminUser?.callsign || "admin") || "admin";
+    const result = await sendDiscordBotNotification({
+      eventKey: "alertCreated",
+      title: "Discord bot self-test",
+      description: `Triggered from the admin panel by ${actorName}. If you received this message, Discord delivery is configured correctly.`,
+      author: actorName,
+      category: "TEST",
+      fields: [
+        { name: "Sender", value: `${actorName} (@${actorUsername})`, inline: true },
+        { name: "UTC", value: `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`, inline: true },
+      ],
+      force: true,
+    });
+
+    if (!result?.sent) {
+      res.status(400).json({ ok: false, error: result?.reason || "Discord delivery is not configured" });
+      return;
+    }
+
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(502).json({ ok: false, error: String(error?.message || "Failed to send Discord test notification") });
+  }
+});
+
 app.get("/api/admin/telegram-bot/config", (_req, res) => {
   res.json({
     botSettings: getTelegramBotSettingsStore(),
@@ -18862,6 +21948,31 @@ app.put("/api/admin/telegram-bot/config", express.json({ limit: "1mb" }), (req, 
     res.json({ ok: true, botSettings });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/admin/telegram-bot/test-notification", requireAdmin, express.json({ limit: "256kb" }), async (req, res) => {
+  try {
+    const actorName = normalizeAdminText(req.adminUser?.name || req.adminUser?.username || "Admin") || "Admin";
+    const actorUsername = normalizeAdminText(req.adminUser?.username || req.adminUser?.callsign || "admin") || "admin";
+    const result = await sendTelegramAdminNotification({
+      text: [
+        "Nordwind Telegram Bot self-test",
+        `Sender: ${actorName} (@${actorUsername})`,
+        `UTC: ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
+        "If you received this message, Telegram admin notifications are configured correctly.",
+      ].join("\n"),
+      force: true,
+    });
+
+    if (!result?.sent) {
+      res.status(400).json({ ok: false, error: result?.reason || "Telegram delivery is not configured" });
+      return;
+    }
+
+    res.json({ ok: true, result });
+  } catch (error) {
+    res.status(502).json({ ok: false, error: String(error?.message || "Failed to send Telegram test notification") });
   }
 });
 
@@ -18991,147 +22102,165 @@ app.post("/api/admin/acars/vac/message", express.json(), async (req, res) => {
   }
 });
 
+const buildAdminOverviewPayload = async () => {
+  const [summary, flightMap, notamsResponse, pirepsResponse] = await Promise.all([
+    loadSummaryStats().catch(() => null),
+    loadFlightMap().catch(() => null),
+    fetchAllPages("/notams?page[size]=100").catch(() => []),
+    fetchAllPages("/pireps?page[size]=250&sort=-created_at").catch(() => []),
+  ]);
+
+  const now = new Date();
+  const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pireps = Array.isArray(pirepsResponse) ? pirepsResponse : [];
+  const recentRaw = pireps.slice(0, 8);
+
+  const pirepTimestamps = pireps
+    .map((pirep) => Date.parse(String(pirep?.created_at || pirep?.submitted_at || pirep?.updated_at || "")))
+    .filter((value) => Number.isFinite(value));
+
+  const hourlyBase = new Date(now);
+  hourlyBase.setMinutes(0, 0, 0);
+
+  const buildHourlySeries = () => {
+    const buckets = [];
+    for (let offset = 23; offset >= 0; offset -= 1) {
+      const start = new Date(hourlyBase);
+      start.setHours(start.getHours() - offset);
+      const end = new Date(start);
+      end.setHours(end.getHours() + 1);
+      buckets.push({ label: start.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }), flights: 0, startMs: start.getTime(), endMs: end.getTime() });
+    }
+    for (const ts of pirepTimestamps) {
+      const b = buckets.find((item) => ts >= item.startMs && ts < item.endMs);
+      if (b) b.flights += 1;
+    }
+    return buckets.map(({ label, flights }) => ({ label, fullLabel: label, flights }));
+  };
+
+  const buildDailySeries = (days) => {
+    const buckets = [];
+    for (let offset = days - 1; offset >= 0; offset -= 1) {
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - offset);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      buckets.push({
+        label: days <= 7 ? dayLabels[start.getDay()] : `${start.getDate()}`,
+        fullLabel: start.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        flights: 0,
+        startMs: start.getTime(),
+        endMs: end.getTime(),
+      });
+    }
+    for (const ts of pirepTimestamps) {
+      const b = buckets.find((item) => ts >= item.startMs && ts < item.endMs);
+      if (b) b.flights += 1;
+    }
+    return buckets.map(({ label, fullLabel, flights }) => ({ label, fullLabel, flights }));
+  };
+
+  const buildMonthlySeries = () => {
+    const buckets = [];
+    for (let offset = 11; offset >= 0; offset -= 1) {
+      const start = new Date(now.getFullYear(), now.getMonth() - offset, 1, 0, 0, 0, 0);
+      const end = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0, 0);
+      buckets.push({
+        label: monthLabels[start.getMonth()],
+        fullLabel: `${monthLabels[start.getMonth()]} ${start.getFullYear()}`,
+        flights: 0,
+        startMs: start.getTime(),
+        endMs: end.getTime(),
+      });
+    }
+    for (const ts of pirepTimestamps) {
+      const b = buckets.find((item) => ts >= item.startMs && ts < item.endMs);
+      if (b) b.flights += 1;
+    }
+    return buckets.map(({ label, fullLabel, flights }) => ({ label, fullLabel, flights }));
+  };
+
+  const activitySeries = {
+    day: buildHourlySeries(),
+    week: buildDailySeries(7),
+    month: buildDailySeries(30),
+    year: buildMonthlySeries(),
+  };
+
+  // Resolve all pilot names in parallel instead of sequential awaits
+  const recentActivity = await Promise.all(recentRaw.map(async (pirep) => {
+    const pilotName = await loadPilotName(pirep?.pilot_id).catch(() => null);
+    const callsign = String(pirep?.callsign || pirep?.flight_number || "");
+    const from = String(pirep?.departure_airport?.icao || pirep?.departure_airport?.iata || pirep?.departure_icao || pirep?.departure_iata || "").toUpperCase();
+    const to = String(pirep?.arrival_airport?.icao || pirep?.arrival_airport?.iata || pirep?.arrival_icao || pirep?.arrival_iata || "").toUpperCase();
+    const statusRaw = String(pirep?.status || "completed").toLowerCase();
+    const gForceValue = [pirep?.g_force, pirep?.gForce, pirep?.landing_g_force, pirep?.landingGForce,
+      pirep?.landing_g, pirep?.landingG, pirep?.max_g_force, pirep?.maxGForce]
+      .map((v) => Number(v)).find((v) => Number.isFinite(v));
+    const status = statusRaw.includes("cancel") ? "cancelled"
+      : statusRaw.includes("invalid") ? "invalidated"
+      : statusRaw.includes("reject") || statusRaw.includes("declin") ? "rejected"
+      : statusRaw.includes("pend") ? "pending" : "approved";
+    return {
+      id: Number(pirep?.id || 0),
+      bookingId: Number(pirep?.booking_id || 0) || null,
+      user: pilotName || `Pilot #${pirep?.pilot_id || ""}`,
+      detail: `${callsign || "PIREP"} ${from || ""}${to ? `-${to}` : ""}`.trim(),
+      time: String(pirep?.created_at || ""),
+      status,
+      flightNumber: callsign || "PIREP",
+      departure: from || null,
+      arrival: to || null,
+      landedAt: String(pirep?.landing_time || pirep?.on_blocks_time || pirep?.created_at || pirep?.submitted_at || "") || null,
+      flightLengthSeconds: Number(pirep?.flight_length || 0) || 0,
+      blockLengthSeconds: Number(pirep?.block_length || 0) || 0,
+      landingRate: Number.isFinite(Number(pirep?.landing_rate)) ? Number(pirep?.landing_rate) : null,
+      gForce: Number.isFinite(gForceValue) ? Number(gForceValue) : null,
+    };
+  }));
+
+  const payload = {
+    kpi: {
+      totalPilots: Number(summary?.pilots || 0) || 0,
+      activeFlights: Array.isArray(flightMap?.flights) ? flightMap.flights.length : 0,
+      totalHours: Number(summary?.flightHours || 0) || 0,
+      totalNotams: Array.isArray(notamsResponse) ? notamsResponse.length : 0,
+    },
+    weeklyActivity: activitySeries.week.map((item) => ({ day: item.label, flights: item.flights })),
+    activitySeries,
+    recentActivity,
+  };
+
+  adminOverviewCache = { data: payload, expiresAt: Date.now() + ADMIN_OVERVIEW_TTL_MS };
+  adminOverviewInflight = null;
+  return payload;
+};
+
+const loadAdminOverview = async () => {
+  const now = Date.now();
+  if (adminOverviewCache.data && now < adminOverviewCache.expiresAt) {
+    return adminOverviewCache.data;
+  }
+  // Stale-while-revalidate
+  if (adminOverviewCache.data && now >= adminOverviewCache.expiresAt && !adminOverviewInflight) {
+    adminOverviewInflight = buildAdminOverviewPayload().catch(() => { adminOverviewInflight = null; });
+    return adminOverviewCache.data;
+  }
+  if (adminOverviewInflight) return adminOverviewInflight;
+  adminOverviewInflight = buildAdminOverviewPayload();
+  return adminOverviewInflight;
+};
+
 app.get("/api/admin/dashboard/overview", async (_req, res) => {
   if (!requireCredentials(res)) {
     return;
   }
 
   try {
-    const [summary, flightMap, notamsResponse, pirepsResponse] = await Promise.all([
-      loadSummaryStats(),
-      loadFlightMap(),
-      fetchAllPages("/notams?page[size]=100"),
-      fetchAllPages("/pireps?page[size]=250&sort=-created_at"),
-    ]);
-
-    const now = new Date();
-    const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const pireps = Array.isArray(pirepsResponse) ? pirepsResponse : [];
-    const recentRaw = pireps.slice(0, 8);
-
-    const pirepTimestamps = pireps
-      .map((pirep) => Date.parse(String(pirep?.created_at || pirep?.submitted_at || pirep?.updated_at || "")))
-      .filter((value) => Number.isFinite(value));
-
-    const buildHourlySeries = () => {
-      const buckets = [];
-      for (let offset = 23; offset >= 0; offset -= 1) {
-        const start = new Date(now);
-        start.setMinutes(0, 0, 0);
-        start.setHours(start.getHours() - offset);
-        const end = new Date(start);
-        end.setHours(end.getHours() + 1);
-        buckets.push({
-          label: start.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
-          flights: 0,
-          startedAt: start.getTime(),
-          endedAt: end.getTime(),
-        });
-      }
-
-      for (const timestamp of pirepTimestamps) {
-        const bucket = buckets.find((item) => timestamp >= item.startedAt && timestamp < item.endedAt);
-        if (bucket) {
-          bucket.flights += 1;
-        }
-      }
-
-      return buckets.map(({ label, flights }) => ({ label, flights }));
-    };
-
-    const buildDailySeries = (days) => {
-      const buckets = [];
-      for (let offset = days - 1; offset >= 0; offset -= 1) {
-        const start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-        start.setDate(start.getDate() - offset);
-        const end = new Date(start);
-        end.setDate(end.getDate() + 1);
-        buckets.push({
-          label: days <= 7 ? dayLabels[start.getDay()] : `${start.getDate()}`,
-          fullLabel: start.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-          flights: 0,
-          startedAt: start.getTime(),
-          endedAt: end.getTime(),
-        });
-      }
-
-      for (const timestamp of pirepTimestamps) {
-        const bucket = buckets.find((item) => timestamp >= item.startedAt && timestamp < item.endedAt);
-        if (bucket) {
-          bucket.flights += 1;
-        }
-      }
-
-      return buckets.map(({ label, fullLabel, flights }) => ({ label, fullLabel, flights }));
-    };
-
-    const buildMonthlySeries = () => {
-      const buckets = [];
-      for (let offset = 11; offset >= 0; offset -= 1) {
-        const start = new Date(now.getFullYear(), now.getMonth() - offset, 1, 0, 0, 0, 0);
-        const end = new Date(start.getFullYear(), start.getMonth() + 1, 1, 0, 0, 0, 0);
-        buckets.push({
-          label: monthLabels[start.getMonth()],
-          fullLabel: `${monthLabels[start.getMonth()]} ${start.getFullYear()}`,
-          flights: 0,
-          startedAt: start.getTime(),
-          endedAt: end.getTime(),
-        });
-      }
-
-      for (const timestamp of pirepTimestamps) {
-        const bucket = buckets.find((item) => timestamp >= item.startedAt && timestamp < item.endedAt);
-        if (bucket) {
-          bucket.flights += 1;
-        }
-      }
-
-      return buckets.map(({ label, fullLabel, flights }) => ({ label, fullLabel, flights }));
-    };
-
-    const activitySeries = {
-      day: buildHourlySeries(),
-      week: buildDailySeries(7),
-      month: buildDailySeries(30),
-      year: buildMonthlySeries(),
-    };
-
-    const recentActivity = [];
-    for (const pirep of recentRaw) {
-      const pilotName = await loadPilotName(pirep?.pilot_id);
-      const callsign = String(pirep?.callsign || pirep?.flight_number || "");
-      const from = String(pirep?.departure_icao || "");
-      const to = String(pirep?.arrival_icao || "");
-      const statusRaw = String(pirep?.status || "completed").toLowerCase();
-      const status =
-        statusRaw.includes("reject") || statusRaw.includes("declin")
-          ? "rejected"
-          : statusRaw.includes("pend")
-          ? "pending"
-          : "approved";
-
-      recentActivity.push({
-        id: Number(pirep?.id || 0),
-        user: pilotName || `Pilot #${pirep?.pilot_id || ""}`,
-        detail: `${callsign || "PIREP"} ${from || ""}${to ? `-${to}` : ""}`.trim(),
-        time: String(pirep?.created_at || ""),
-        status,
-      });
-    }
-
-    res.json({
-      kpi: {
-        totalPilots: Number(summary?.pilots || 0) || 0,
-        activeFlights: Array.isArray(flightMap?.flights) ? flightMap.flights.length : 0,
-        totalHours: Number(summary?.flightHours || 0) || 0,
-        totalNotams: Array.isArray(notamsResponse) ? notamsResponse.length : 0,
-      },
-      weeklyActivity: activitySeries.week.map((item) => ({ day: item.label, flights: item.flights })),
-      activitySeries,
-      recentActivity,
-    });
+    const payload = await loadAdminOverview();
+    res.json(payload);
   } catch {
     res.status(502).json({
       error: "Failed to load admin dashboard overview",
@@ -20385,6 +23514,142 @@ app.get("/api/public/activities", async (_req, res) => {
   }
 });
 
+app.get("/api/public/social-gallery/assets/:fileName", (req, res) => {
+  try {
+    const requested = path.basename(String(req.params.fileName || "").trim());
+    if (!requested) {
+      res.status(404).end();
+      return;
+    }
+
+    const assetPath = path.join(SOCIAL_GALLERY_ASSETS_DIR, requested);
+    if (!assetPath.startsWith(SOCIAL_GALLERY_ASSETS_DIR) || !fs.existsSync(assetPath)) {
+      res.status(404).end();
+      return;
+    }
+
+    const extension = path.extname(requested).toLowerCase();
+    const contentType = extension === ".png"
+      ? "image/png"
+      : extension === ".webp"
+      ? "image/webp"
+      : extension === ".gif"
+      ? "image/gif"
+      : "image/jpeg";
+
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.type(contentType);
+    res.sendFile(assetPath);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+app.post("/api/admin/banner-generator/assets", express.json({ limit: "24mb" }), (req, res) => {
+  if (!requireCredentials(res)) {
+    return;
+  }
+
+  try {
+    const asset = storeBannerGeneratorAsset({
+      imageDataUrl: req.body?.imageDataUrl,
+      mimeType: req.body?.mimeType,
+      fileName: req.body?.fileName,
+    });
+
+    res.status(201).json({
+      ok: true,
+      asset,
+    });
+  } catch (error) {
+    res.status(400).json({
+      ok: false,
+      error: String(error?.message || error || "Failed to store banner asset"),
+    });
+  }
+});
+
+app.get("/api/public/banner-generator/assets/:fileName", (req, res) => {
+  try {
+    const requested = path.basename(String(req.params.fileName || "").trim());
+    if (!requested) {
+      res.status(404).end();
+      return;
+    }
+
+    const assetPath = path.join(BANNER_GENERATOR_ASSETS_DIR, requested);
+    if (!assetPath.startsWith(BANNER_GENERATOR_ASSETS_DIR) || !fs.existsSync(assetPath)) {
+      res.status(404).end();
+      return;
+    }
+
+    const extension = path.extname(requested).toLowerCase();
+    const contentType = extension === ".png"
+      ? "image/png"
+      : extension === ".webp"
+      ? "image/webp"
+      : "image/jpeg";
+
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.type(contentType);
+    res.sendFile(assetPath);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+app.get("/api/public/social-gallery/picks", (_req, res) => {
+  try {
+    res.json(readSocialGalleryPicksStore());
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load social gallery picks") });
+  }
+});
+
+app.get("/api/public/social-gallery/overview", (_req, res) => {
+  try {
+    const store = readSocialGalleryStore();
+    const picksStore = readSocialGalleryPicksStore();
+    const publicMedia = (Array.isArray(store?.media) ? store.media : [])
+      .filter((item) => String(item?.visibility || "public") !== "private")
+      .sort((left, right) => Date.parse(String(right?.createdAt || "")) - Date.parse(String(left?.createdAt || "")));
+
+    const topShots = publicMedia
+      .map((item) => serializeSocialGalleryMedia(item, store, null))
+      .sort((left, right) => {
+        const likeDiff = Number(right?.likeCount || 0) - Number(left?.likeCount || 0);
+        if (likeDiff !== 0) {
+          return likeDiff;
+        }
+        return Date.parse(String(right?.createdAt || "")) - Date.parse(String(left?.createdAt || ""));
+      })
+      .slice(0, 12);
+
+    res.json({
+      categories: (Array.isArray(store?.categories) ? store.categories : []).map((item) => serializeSocialGalleryCategory(item)),
+      feed: buildSocialGalleryFeed(store, null, 24),
+      latestShots: publicMedia.slice(0, 18).map((item) => serializeSocialGalleryMedia(item, store, null)),
+      topShots,
+      topPilots: buildSocialGalleryPilotRanking(store, picksStore).slice(0, 10),
+      featuredPicks: Array.isArray(picksStore?.picks) ? picksStore.picks : [],
+    });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load social gallery overview") });
+  }
+});
+
+app.get("/api/public/staff", (_req, res) => {
+  try {
+    const staff = listManagedAdminCollection("staff")
+      .filter((item) => normalizeAdminText(item?.status || "active").toLowerCase() !== "archived")
+      .map((item) => serializePublicStaffEntry(item));
+
+    res.json({ staff });
+  } catch (error) {
+    res.status(502).json({ error: String(error || "Failed to load public staff") });
+  }
+});
+
 app.get("/api/public/documents/:slug", (req, res) => {
   const slug = slugifyAdminValue(req.params.slug, "");
   const document = listManagedAdminCollection("documents").find((item) => item.slug === slug && normalizeAdminBoolean(item?.published, true));
@@ -20534,22 +23799,42 @@ app.get("/api/admin/fleet/catalog", async (_req, res) => {
   res.json(payload);
 });
 
+app.get("/api/admin/bootstrap", async (req, res) => {
+  if (!requireCredentials(res)) {
+    return;
+  }
+
+  try {
+    const force = String(req.query.force || "").trim() === "1";
+    const payload = await loadAdminBootstrapCatalog({ force });
+    res.json(payload);
+  } catch {
+    res.status(502).json({ error: "Failed to load admin bootstrap" });
+  }
+});
+
 app.post("/api/admin/fleet/sync", express.json(), async (_req, res) => {
   if (!requireCredentials(res)) {
     return;
   }
 
   const payload = await getManagedFleetCatalog({ syncLive: true });
+  requestUnifiedCatalogResync();
+  void refreshPersistedDashboardCatalog({ forceFull: true });
   res.json({ ok: true, fleets: payload.fleets });
 });
 
 app.post("/api/admin/fleet/groups", express.json(), async (req, res) => {
   const group = await upsertFleetGroup(req.body || {});
+  invalidateDashboardCatalogCaches();
+  void refreshPersistedDashboardCatalog();
   res.status(201).json({ ok: true, group });
 });
 
 app.put("/api/admin/fleet/groups/:id", express.json(), async (req, res) => {
   const group = await upsertFleetGroup(req.body || {}, req.params.id);
+  invalidateDashboardCatalogCaches();
+  void refreshPersistedDashboardCatalog();
   res.json({ ok: true, group });
 });
 
@@ -20559,12 +23844,16 @@ app.delete("/api/admin/fleet/groups/:id", async (req, res) => {
     res.status(404).json({ error: "Fleet group not found" });
     return;
   }
+  invalidateDashboardCatalogCaches();
+  void refreshPersistedDashboardCatalog();
   res.json({ ok: true });
 });
 
 app.post("/api/admin/fleet/aircraft", express.json(), async (req, res) => {
   try {
     const aircraft = await upsertFleetAircraft(req.body || {});
+    invalidateDashboardCatalogCaches();
+    void refreshPersistedDashboardCatalog();
     res.status(201).json({ ok: true, aircraft });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20574,6 +23863,8 @@ app.post("/api/admin/fleet/aircraft", express.json(), async (req, res) => {
 app.put("/api/admin/fleet/aircraft/:id", express.json(), async (req, res) => {
   try {
     const aircraft = await upsertFleetAircraft(req.body || {}, req.params.id);
+    invalidateDashboardCatalogCaches();
+    void refreshPersistedDashboardCatalog();
     res.json({ ok: true, aircraft });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20586,6 +23877,8 @@ app.delete("/api/admin/fleet/aircraft/:id", async (req, res) => {
     res.status(404).json({ error: "Aircraft not found" });
     return;
   }
+  invalidateDashboardCatalogCaches();
+  void refreshPersistedDashboardCatalog();
   res.json({ ok: true });
 });
 
@@ -20830,6 +24123,31 @@ app.delete("/api/admin/activities/:section/:id", async (req, res) => {
   }
 });
 
+// Event coin bonuses — admin management
+app.get("/api/admin/event-coins", (_req, res) => {
+  if (!requireCredentials(res)) return;
+  res.json({ ok: true, eventCoins: readEventCoinsStore() });
+});
+
+app.put("/api/admin/event-coins/:activityId", express.json(), (req, res) => {
+  if (!requireCredentials(res)) return;
+  const activityId = Number(req.params.activityId || 0);
+  if (activityId <= 0) { res.status(400).json({ ok: false, error: "Invalid activityId" }); return; }
+  const rewardMode = normalizeEventCoinRewardMode(req.body?.rewardMode);
+  const rewardValue = Math.max(0, Number(req.body?.rewardValue ?? req.body?.coinBonus ?? 0) || 0);
+  const awardLimit = Math.max(1, Number(req.body?.awardLimit ?? 1) || 1);
+  const registrationRequired = req.body?.registrationRequired !== false;
+  const name = String(req.body?.name || "").trim() || null;
+  const store = readEventCoinsStore();
+  if (rewardValue <= 0) {
+    delete store[activityId];
+  } else {
+    store[activityId] = normalizeEventCoinConfig({ rewardMode, rewardValue, awardLimit, registrationRequired, name });
+  }
+  writeEventCoinsStore(store);
+  res.json({ ok: true });
+});
+
 app.get("/api/admin/hubs", async (_req, res) => {
   if (!requireCredentials(res)) {
     return;
@@ -20851,6 +24169,8 @@ app.post("/api/admin/hubs", express.json(), async (req, res) => {
   try {
     const payload = await buildAdminHubPayload(req.body || {});
     const hub = await apiRequest("/hubs", { method: "POST", body: payload });
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.status(201).json({ ok: true, hub });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20865,6 +24185,8 @@ app.put("/api/admin/hubs/:id", express.json(), async (req, res) => {
   try {
     const payload = await buildAdminHubPayload(req.body || {});
     const hub = await apiRequest(`/hubs/${encodeURIComponent(String(req.params.id || ""))}`, { method: "PUT", body: payload });
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.json({ ok: true, hub });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20878,6 +24200,8 @@ app.delete("/api/admin/hubs/:id", async (req, res) => {
 
   try {
     await apiRequest(`/hubs/${encodeURIComponent(String(req.params.id || ""))}`, { method: "DELETE" });
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20971,6 +24295,8 @@ app.post("/api/admin/airports", express.json({ limit: "2mb" }), async (req, res)
   try {
     const payload = buildAdminAirportPayload(req.body || {}, { isCreate: true });
     const airport = await apiRequest("/airports", { method: "POST", body: payload });
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.status(201).json({ ok: true, airport });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20985,6 +24311,8 @@ app.put("/api/admin/airports/:id", express.json({ limit: "2mb" }), async (req, r
   try {
     const payload = buildAdminAirportPayload(req.body || {}, { isCreate: false });
     const airport = await apiRequest(`/airports/${encodeURIComponent(String(req.params.id || ""))}`, { method: "PUT", body: payload });
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.json({ ok: true, airport });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -20998,6 +24326,8 @@ app.delete("/api/admin/airports/:id", async (req, res) => {
 
   try {
     await apiRequest(`/airports/${encodeURIComponent(String(req.params.id || ""))}`, { method: "DELETE" });
+    requestUnifiedCatalogResync();
+    void refreshPersistedDashboardCatalog();
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -21065,38 +24395,29 @@ app.put("/api/admin/bookings/:id/meta", express.json(), (req, res) => {
 app.get("/api/admin/pireps", async (req, res) => {
   if (!requireCredentials(res)) return;
   try {
-    const pageSize = Math.max(1, Math.min(100, Number(req.query["page[size]"] || 25) || 25));
-    const cursor = String(req.query["page[cursor]"] || "").trim();
-    const sort = String(req.query.sort || "-id").trim() || "-id";
-    const params = new URLSearchParams();
-    params.set("page[size]", String(pageSize));
-    params.set("sort", sort);
-    if (cursor) params.set("page[cursor]", cursor);
-    const filterKeys = [
+    const filters = {};
+    [
       "id", "pilot_id", "booking_id", "route_id", "callsign", "flight_number",
       "status", "type", "need_reply", "network", "departure_airport_id", "arrival_airport_id",
-    ];
-    filterKeys.forEach((key) => {
-      const val = String(req.query[`filter[${key}]`] || "").trim();
-      if (val) params.set(`filter[${key}]`, val);
+      "aircraft_id",
+    ].forEach((key) => {
+      const value = String(req.query[`filter[${key}]`] || "").trim();
+      if (value) {
+        filters[key] = value;
+      }
     });
-    const token = await getAccessToken();
-    const url = `${API_BASE}/pireps?${params.toString()}`;
-    const response = await fetch(url, {
-      headers: { Accept: "application/json", Authorization: `Bearer ${token}` },
+
+    const payload = await loadAdminPirepsCatalogPage({
+      pageSize: Number(req.query["page[size]"] || 25) || 25,
+      cursor: String(req.query["page[cursor]"] || "").trim(),
+      sort: String(req.query.sort || "-id").trim() || "-id",
+      filters,
     });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      res.status(response.status).json({ ok: false, error: `vAMSYS error: ${response.status}`, detail: text.slice(0, 500) });
-      return;
-    }
-    const data = await response.json();
-    res.json({
-      pireps: Array.isArray(data?.data) ? data.data : [],
-      meta: data?.meta || null,
-    });
+
+    res.json(payload);
   } catch (error) {
-    res.status(502).json({ ok: false, error: String(error?.message || "Failed to load PIREPs") });
+    const statusCode = Number(error?.statusCode || 0) || 502;
+    res.status(statusCode).json({ ok: false, error: String(error?.message || "Failed to load PIREPs"), detail: error?.detail || undefined });
   }
 });
 
@@ -21405,6 +24726,257 @@ app.put("/api/admin/site-design", express.json({ limit: "8mb" }), (req, res) => 
   }
 });
 
+// ─── Gate Assigner ────────────────────────────────────────────────────────────
+
+// Known hub airports with their coordinates for VATSIM proximity matching
+const GATE_AIRPORTS = {
+  UUEE: { name: "Шереметьево", lat: 55.9726, lng: 37.4146, city: "Москва" },
+  UUDD: { name: "Домодедово",  lat: 55.4088, lng: 37.9063, city: "Москва" },
+  UUWW: { name: "Внуково",     lat: 55.5915, lng: 37.2615, city: "Москва" },
+  URRR: { name: "Ростов-на-Дону (Платов)", lat: 47.4938, lng: 39.9247, city: "Ростов-на-Дону" },
+  USSS: { name: "Кольцово",    lat: 56.7431, lng: 60.8027, city: "Екатеринбург" },
+  URSS: { name: "Сочи",        lat: 43.4499, lng: 39.9566, city: "Сочи" },
+  UNNT: { name: "Толмачёво",   lat: 54.9633, lng: 82.6507, city: "Новосибирск" },
+  ULLI: { name: "Пулково",     lat: 59.8003, lng: 30.2625, city: "Санкт-Петербург" },
+  URMO: { name: "Минеральные Воды", lat: 44.2251, lng: 43.0819, city: "Мин. Воды" },
+  URKK: { name: "Пашковский",  lat: 45.0346, lng: 39.1705, city: "Краснодар" },
+  UWWW: { name: "Курумоч",     lat: 53.5050, lng: 50.1642, city: "Самара" },
+  UUOB: { name: "Белгород",    lat: 50.6438, lng: 36.5900, city: "Белгород" },
+  LTFM: { name: "Стамбул (IST)", lat: 41.2753, lng: 28.7519, city: "Стамбул" },
+  LTAI: { name: "Анталья",     lat: 36.8987, lng: 30.7992, city: "Анталья" },
+  EGLL: { name: "Хитроу",      lat: 51.4775, lng: -0.4614, city: "Лондон" },
+  EDDF: { name: "Франкфурт",   lat: 50.0379, lng: 8.5622, city: "Франкфурт" },
+  OMDB: { name: "Дубай",       lat: 25.2532, lng: 55.3657, city: "Дубай" },
+};
+
+// VATSIM airlines filter
+const GATE_AIRLINE_PREFIXES = {
+  NWS: { label: "Nordwind", color: "#E31E24" },
+  IKS: { label: "Ikar",     color: "#FF6B35" },
+  SWV: { label: "Southwind", color: "#2563EB" },
+};
+
+// In-memory VATSIM cache (30s TTL)
+let vatsimCache = { data: null, fetchedAt: 0, inflight: null };
+
+async function fetchVatsimFeed() {
+  const now = Date.now();
+  if (vatsimCache.data && now - vatsimCache.fetchedAt < 30_000) return vatsimCache.data;
+  if (vatsimCache.inflight) return vatsimCache.inflight;
+
+  vatsimCache.inflight = (async () => {
+    try {
+      const resp = await fetch("https://data.vatsim.net/v3/vatsim-data.json", {
+        headers: { "User-Agent": "NordwindVA-GateAssigner/1.0" },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!resp.ok) throw new Error(`VATSIM feed HTTP ${resp.status}`);
+      const payload = await resp.json();
+      vatsimCache.data = payload;
+      vatsimCache.fetchedAt = Date.now();
+      return payload;
+    } finally {
+      vatsimCache.inflight = null;
+    }
+  })();
+  return vatsimCache.inflight;
+}
+
+// Custom gate data from data/airport-gates.json (chart-accurate, takes priority over Overpass)
+const CUSTOM_GATES_FILE = path.resolve(__dirname, "../data/airport-gates.json");
+let customGatesData = null;
+
+function loadCustomGatesData() {
+  if (customGatesData !== null) return customGatesData;
+  try {
+    const raw = fs.readFileSync(CUSTOM_GATES_FILE, "utf8");
+    customGatesData = JSON.parse(raw);
+  } catch {
+    customGatesData = {};
+  }
+  return customGatesData;
+}
+
+function getCustomGatesForAirport(icao) {
+  const data = loadCustomGatesData();
+  const entry = data[icao];
+  if (!entry || !Array.isArray(entry.gates) || entry.gates.length === 0) return null;
+  return entry.gates
+    .filter((g) => typeof g.lat === "number" && typeof g.lng === "number" && (g.ref || g.name))
+    .map((g) => ({
+      id: String(g.id || g.ref || g.name),
+      lat: g.lat,
+      lng: g.lng,
+      ref: String(g.ref || ""),
+      name: String(g.name || g.ref || ""),
+      type: String(g.type || "parking_position"),
+    }));
+}
+
+// In-memory Overpass gate cache per ICAO (24h TTL)
+const overpassGateCache = new Map();
+
+async function fetchAirportGatesFromOverpass(icao) {
+  const cached = overpassGateCache.get(icao);
+  if (cached && Date.now() - cached.fetchedAt < 86_400_000) return cached.gates;
+
+  const query = `
+[out:json][timeout:15];
+area["icao"="${icao}"]->.a;
+(
+  node(area.a)[aeroway=parking_position];
+  node(area.a)[aeroway=gate];
+  node(area.a)[aeroway=holding_position];
+);
+out body;`;
+
+  const resp = await fetch("https://overpass-api.de/api/interpreter", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "NordwindVA-GateAssigner/1.0" },
+    body: "data=" + encodeURIComponent(query),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!resp.ok) throw new Error(`Overpass HTTP ${resp.status}`);
+  const payload = await resp.json();
+
+  const gates = (Array.isArray(payload?.elements) ? payload.elements : [])
+    .filter((el) => el.type === "node" && typeof el.lat === "number" && typeof el.lon === "number")
+    .map((el) => ({
+      id: String(el.id),
+      lat: el.lat,
+      lng: el.lon,
+      ref: String(el.tags?.ref || ""),
+      name: String(el.tags?.name || el.tags?.ref || ""),
+      type: String(el.tags?.aeroway || "parking_position"),
+    }))
+    .filter((g) => g.ref || g.name);
+
+  overpassGateCache.set(icao, { gates, fetchedAt: Date.now() });
+  return gates;
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+app.get("/api/public/gates", (_req, res) => {
+  res.json({ airports: Object.entries(GATE_AIRPORTS).map(([icao, info]) => ({ icao, ...info })) });
+});
+
+app.get("/api/public/gates/:icao", async (req, res) => {
+  const icao = String(req.params.icao || "").toUpperCase().trim();
+  const airportInfo = GATE_AIRPORTS[icao];
+  if (!airportInfo) {
+    res.status(404).json({ error: "Airport not in gate assigner list" });
+    return;
+  }
+
+  try {
+    const customGates = getCustomGatesForAirport(icao);
+    const [gatesRaw, vatsimData] = await Promise.all([
+      customGates !== null
+        ? Promise.resolve(customGates)
+        : fetchAirportGatesFromOverpass(icao).catch(() => []),
+      fetchVatsimFeed().catch(() => null),
+    ]);
+
+    // Filter VATSIM pilots near this airport (within 10km, groundspeed < 10 kts)
+    const pilots = Array.isArray(vatsimData?.pilots) ? vatsimData.pilots : [];
+    const nearbyPilots = pilots.filter((p) => {
+      if (typeof p.latitude !== "number" || typeof p.longitude !== "number") return false;
+      if ((p.groundspeed ?? 999) > 10) return false;
+      const dist = haversineKm(airportInfo.lat, airportInfo.lng, p.latitude, p.longitude);
+      return dist < 10;
+    }).map((p) => {
+      const cs = String(p.callsign || "");
+      let airline = null;
+      for (const [prefix, info] of Object.entries(GATE_AIRLINE_PREFIXES)) {
+        if (cs.startsWith(prefix)) { airline = { code: prefix, ...info }; break; }
+      }
+      // Find nearest gate within 150m
+      let nearestGate = null;
+      let nearestDist = Infinity;
+      for (const gate of gatesRaw) {
+        const d = haversineKm(p.latitude, p.longitude, gate.lat, gate.lng) * 1000;
+        if (d < nearestDist) { nearestDist = d; nearestGate = gate; }
+      }
+      return {
+        callsign: cs,
+        cid: p.cid,
+        lat: p.latitude,
+        lng: p.longitude,
+        groundspeed: p.groundspeed ?? 0,
+        aircraft: p.flight_plan?.aircraft_short || p.flight_plan?.aircraft || null,
+        departure: p.flight_plan?.departure || null,
+        arrival: p.flight_plan?.arrival || null,
+        airline,
+        nearestGate: nearestDist < 150 ? nearestGate : null,
+        nearestGateDist: nearestDist < 150 ? Math.round(nearestDist) : null,
+      };
+    });
+
+    // Annotate gates with occupants
+    const gates = gatesRaw.map((gate) => {
+      const occupants = nearbyPilots.filter((p) => p.nearestGate?.id === gate.id);
+      return { ...gate, occupants };
+    });
+
+    res.json({
+      icao,
+      airport: airportInfo,
+      gates,
+      groundPilots: nearbyPilots,
+      stats: {
+        total: nearbyPilots.length,
+        byAirline: Object.fromEntries(
+          Object.keys(GATE_AIRLINE_PREFIXES).map((code) => [
+            code,
+            nearbyPilots.filter((p) => p.airline?.code === code).length,
+          ])
+        ),
+      },
+      fetchedAt: Date.now(),
+    });
+    res.setHeader("X-Gates-Source", customGates !== null ? "custom-charts" : "overpass-osm");
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load gate data") });
+  }
+});
+
+// Admin: reload custom gate data from file without server restart
+app.post("/api/admin/gates/reload-custom", (req, res) => {
+  if (!requireCredentials(res)) return;
+  customGatesData = null;
+  const data = loadCustomGatesData();
+  const summary = Object.entries(data)
+    .filter(([k]) => !k.startsWith("_"))
+    .map(([icao, entry]) => ({
+      icao,
+      count: Array.isArray(entry?.gates) ? entry.gates.length : 0,
+      source: entry?._source || null,
+    }));
+  res.json({ ok: true, airports: summary });
+});
+
+// Admin: get custom gate data status per airport
+app.get("/api/admin/gates/custom-status", (req, res) => {
+  if (!requireCredentials(res)) return;
+  const data = loadCustomGatesData();
+  const summary = Object.entries(data)
+    .filter(([k]) => !k.startsWith("_"))
+    .map(([icao, entry]) => ({
+      icao,
+      hasCustomData: Array.isArray(entry?.gates) && entry.gates.length > 0,
+      count: Array.isArray(entry?.gates) ? entry.gates.length : 0,
+      source: entry?._source || null,
+    }));
+  res.json({ airports: summary });
+});
+
 if (SERVE_STATIC) {
   app.use(express.static(DIST_DIR));
   app.get(/^(?!\/api\/).*/, (_req, res) => {
@@ -21415,6 +24987,14 @@ if (SERVE_STATIC) {
 const server = app.listen(PORT, () => {
   console.log(`vAMSYS proxy listening on port ${PORT}`);
   startUnifiedCatalogSyncScheduler();
+  startDashboardCatalogNightlyRefreshScheduler();
+  // Pre-warm admin bootstrap and overview so first navigation to admin panel is instant
+  void loadAdminBootstrapCatalog().catch((err) => {
+    console.warn("[admin-bootstrap] initial warmup failed:", String(err));
+  });
+  void loadAdminOverview().catch((err) => {
+    console.warn("[admin-overview] initial warmup failed:", String(err));
+  });
 });
 
 server.on("error", (error) => {

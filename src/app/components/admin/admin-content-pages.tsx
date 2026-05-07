@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { useLanguage } from "../../context/language-context";
 
 type AdminFieldType = "text" | "textarea" | "number" | "checkbox" | "color" | "datetime-local" | "select";
 
@@ -72,9 +73,9 @@ interface AdminActivityCatalogItem {
   updatedAt?: string | null;
 }
 
-const toDisplayValue = (value: unknown) => {
+const toDisplayValue = (value: unknown, tr?: (ru: string, en: string) => string) => {
   if (typeof value === "boolean") {
-    return value ? "Yes" : "No";
+    return value ? (tr ? tr("Да", "Yes") : "Yes") : (tr ? tr("Нет", "No") : "No");
   }
   if (value === null || value === undefined || value === "") {
     return "—";
@@ -110,6 +111,8 @@ const buildInitialState = (fields: AdminFieldDefinition[], item?: AdminItem | nu
 };
 
 function AdminCollectionPage({ title, subtitle, collection, createLabel, fields, templates = [] }: AdminCollectionPageProps) {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [items, setItems] = useState<AdminItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -126,7 +129,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Failed to load collection");
+        throw new Error(tr("Не удалось загрузить коллекцию", "Failed to load collection"));
       }
       const payload = await response.json();
       setItems(Array.isArray(payload?.items) ? payload.items : []);
@@ -233,7 +236,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
         body: JSON.stringify(payload),
       });
       if (!response.ok) {
-        throw new Error("Save failed");
+        throw new Error(tr("Не удалось сохранить элемент", "Failed to save item"));
       }
       setIsDialogOpen(false);
       await loadItems();
@@ -243,7 +246,12 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
   };
 
   const handleDelete = async (item: AdminItem) => {
-    const confirmed = window.confirm(`Delete ${String(item.title || item.name || item.id || "item")}?`);
+    const confirmed = window.confirm(
+      tr(
+        `Удалить ${String(item.title || item.name || item.id || "элемент")}?`,
+        `Delete ${String(item.title || item.name || item.id || "item")}?`
+      )
+    );
     if (!confirmed) {
       return;
     }
@@ -254,7 +262,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Delete failed");
+        throw new Error(tr("Не удалось удалить элемент", "Failed to delete item"));
       }
       await loadItems();
     } catch (error) {
@@ -283,17 +291,17 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={`Search ${title.toLowerCase()}...`}
+                placeholder={tr(`Поиск: ${title.toLowerCase()}...`, `Search: ${title.toLowerCase()}...`)}
                 className="pl-9"
               />
             </div>
             {stateOptions.length > 0 ? (
               <Select value={stateFilter} onValueChange={setStateFilter}>
                 <SelectTrigger className="w-full lg:w-52">
-                  <SelectValue placeholder="All statuses" />
+                  <SelectValue placeholder={tr("Все статусы", "All statuses")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{tr("Все статусы", "All statuses")}</SelectItem>
                   {stateOptions.map((option) => (
                     <SelectItem key={option} value={option}>
                       {option}
@@ -313,16 +321,16 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
                       {field.label}
                     </th>
                   ))}
-                  <th className="px-4 py-3 font-medium">State</th>
-                  <th className="px-4 py-3 font-medium">Updated</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  <th className="px-4 py-3 font-medium">{tr("Состояние", "State")}</th>
+                  <th className="px-4 py-3 font-medium">{tr("Обновлено", "Updated")}</th>
+                  <th className="px-4 py-3 text-right font-medium">{tr("Действия", "Actions")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {isLoading ? (
                   <tr>
                     <td colSpan={tableFields.length + 3} className="px-4 py-8 text-center text-gray-500">
-                      Loading...
+                      {tr("Загрузка...", "Loading...")}
                     </td>
                   </tr>
                 ) : filteredItems.length > 0 ? (
@@ -345,18 +353,18 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
                                 ? "border-green-200 bg-green-50 text-green-700"
                                 : "border-gray-200 bg-gray-50 text-gray-700"}
                             >
-                              {item[field.key] ? "Enabled" : "Disabled"}
+                              {item[field.key] ? tr("Включено", "Enabled") : tr("Выключено", "Disabled")}
                             </Badge>
                           ) : (
                             <span className={field.key === "content" ? "line-clamp-2 max-w-xl" : undefined}>
-                              {toDisplayValue(item[field.key])}
+                              {toDisplayValue(item[field.key], tr)}
                             </span>
                           )}
                         </td>
                       ))}
                       <td className="px-4 py-3">
                         <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">
-                          {getItemState(item) || "n/a"}
+                          {getItemState(item) || tr("н/д", "n/a")}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-gray-500">{String(item.updatedAt || "—").slice(0, 16).replace("T", " ")}</td>
@@ -364,7 +372,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
                         <div className="flex items-center justify-end gap-2">
                           <Button variant="outline" size="sm" onClick={() => openEdit(item)}>
                             <Edit className="mr-2 h-4 w-4" />
-                            Edit
+                            {tr("Изменить", "Edit")}
                           </Button>
                           <Button
                             variant="outline"
@@ -373,7 +381,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
                             onClick={() => handleDelete(item)}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
+                            {tr("Удалить", "Delete")}
                           </Button>
                         </div>
                       </td>
@@ -382,7 +390,7 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
                 ) : (
                   <tr>
                     <td colSpan={tableFields.length + 3} className="px-4 py-8 text-center text-gray-500">
-                      No items found.
+                      {tr("Элементы не найдены.", "No items found.")}
                     </td>
                   </tr>
                 )}
@@ -395,17 +403,17 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingItem ? `Edit ${title}` : createLabel}</DialogTitle>
+            <DialogTitle>{editingItem ? tr(`Изменить: ${title}`, `Edit: ${title}`) : createLabel}</DialogTitle>
           </DialogHeader>
           {templates.length > 0 ? (
             <div className="space-y-2 rounded-lg border border-dashed border-gray-200 bg-gray-50/70 p-4">
-              <Label htmlFor={`${collection}-template`}>Template</Label>
+              <Label htmlFor={`${collection}-template`}>{tr("Шаблон", "Template")}</Label>
               <Select value={selectedTemplateId || "none"} onValueChange={(value) => applyTemplate(value === "none" ? "" : value)}>
                 <SelectTrigger id={`${collection}-template`}>
-                  <SelectValue placeholder="Select template" />
+                  <SelectValue placeholder={tr("Выберите шаблон", "Select template")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No template</SelectItem>
+                  <SelectItem value="none">{tr("Без шаблона", "No template")}</SelectItem>
                   {templates.map((template) => (
                     <SelectItem key={template.id} value={template.id}>
                       {template.label}
@@ -473,10 +481,10 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
-              Cancel
+              {tr("Отмена", "Cancel")}
             </Button>
             <Button className="bg-[#E31E24] hover:bg-[#c41a20]" onClick={handleSubmit}>
-              Save
+              {tr("Сохранить", "Save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -486,26 +494,34 @@ function AdminCollectionPage({ title, subtitle, collection, createLabel, fields,
 }
 
 export function AdminDocuments() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+
   return (
     <AdminCollectionPage
-      title="Documents"
-      subtitle="Edit published VAC documents, create new pages and retire outdated content."
+      title={tr("Документы", "Documents")}
+      subtitle={tr(
+        "Редактируйте опубликованные VAC-документы, создавайте новые страницы и выводите устаревший контент из обращения.",
+        "Edit published VAC documents, create new pages, and retire outdated content."
+      )}
       collection="documents"
-      createLabel="New document"
+      createLabel={tr("Новый документ", "New document")}
       fields={[
-        { key: "title", label: "Title" },
+        { key: "title", label: tr("Заголовок", "Title") },
         { key: "slug", label: "Slug" },
-        { key: "category", label: "Category" },
-        { key: "description", label: "Description" },
-        { key: "content", label: "Content", type: "textarea", table: false },
-        { key: "published", label: "Published", type: "checkbox" },
-        { key: "order", label: "Order", type: "number" },
+        { key: "category", label: tr("Категория", "Category") },
+        { key: "description", label: tr("Описание", "Description") },
+        { key: "content", label: tr("Содержимое", "Content"), type: "textarea", table: false },
+        { key: "published", label: tr("Опубликовано", "Published"), type: "checkbox" },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
       ]}
     />
   );
 }
 
 export function AdminEvents() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [items, setItems] = useState<AdminActivityCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -520,7 +536,7 @@ export function AdminEvents() {
           credentials: "include",
         });
         if (!response.ok) {
-          throw new Error("Failed to load activities");
+          throw new Error(tr("Не удалось загрузить активности", "Failed to load activities"));
         }
         const payload = await response.json() as { activities?: AdminActivityCatalogItem[] };
         const activities = Array.isArray(payload?.activities) ? payload.activities : [];
@@ -564,8 +580,8 @@ export function AdminEvents() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-800">Events</h2>
-        <p className="text-sm text-gray-500">Live event catalog from vAMSYS Operations API.</p>
+        <h2 className="text-2xl font-bold text-gray-800">{tr("События", "Events")}</h2>
+        <p className="text-sm text-gray-500">{tr("Живой каталог событий из vAMSYS Operations API.", "Live catalog of events from vAMSYS Operations API.")}</p>
       </div>
 
       <Card className="border-none shadow-sm">
@@ -575,7 +591,7 @@ export function AdminEvents() {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search events..."
+              placeholder={tr("Поиск событий...", "Search events...")}
               className="pl-9"
             />
           </div>
@@ -584,12 +600,12 @@ export function AdminEvents() {
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Title</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Scheduled</th>
-                  <th className="px-4 py-3 font-medium">Location</th>
-                  <th className="px-4 py-3 font-medium">State</th>
-                  <th className="px-4 py-3 font-medium">Updated</th>
+                  <th className="px-4 py-3 font-medium">{tr("Заголовок", "Title")}</th>
+                  <th className="px-4 py-3 font-medium">{tr("Статус", "Status")}</th>
+                  <th className="px-4 py-3 font-medium">{tr("Запланировано", "Scheduled")}</th>
+                  <th className="px-4 py-3 font-medium">{tr("Локация", "Location")}</th>
+                  <th className="px-4 py-3 font-medium">{tr("Состояние", "State")}</th>
+                  <th className="px-4 py-3 font-medium">{tr("Обновлено", "Updated")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -598,7 +614,7 @@ export function AdminEvents() {
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
                       <div className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Loading events...
+                        {tr("Загрузка событий...", "Loading events...")}
                       </div>
                     </td>
                   </tr>
@@ -606,14 +622,14 @@ export function AdminEvents() {
                   filteredItems.map((item) => (
                     <tr key={item.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 align-top text-gray-700">
-                        <div className="font-medium text-gray-900">{item.name || `Event ${item.originalId}`}</div>
+                        <div className="font-medium text-gray-900">{item.name || tr(`Событие ${item.originalId}`, `Event ${item.originalId}`)}</div>
                         {item.description ? (
                           <div className="mt-1 line-clamp-2 max-w-xl text-xs text-gray-500">{item.description}</div>
                         ) : null}
                       </td>
                       <td className="px-4 py-3 align-top text-gray-700">
                         <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700 capitalize">
-                          {item.status || "n/a"}
+                          {item.status || tr("н/д", "n/a")}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 align-top text-gray-700">
@@ -625,8 +641,8 @@ export function AdminEvents() {
                       <td className="px-4 py-3 align-top text-gray-700">{item.target || "—"}</td>
                       <td className="px-4 py-3 align-top text-gray-700">
                         <div className="space-y-1 text-xs text-gray-500">
-                          <div>Regs: {Number(item.registrationCount || 0)}</div>
-                          <div>Done: {Number(item.completionCount || 0)}</div>
+                          <div>{tr("Регистраций", "Registrations")}: {Number(item.registrationCount || 0)}</div>
+                          <div>{tr("Завершено", "Completed")}: {Number(item.completionCount || 0)}</div>
                         </div>
                       </td>
                       <td className="px-4 py-3 align-top text-gray-500">
@@ -637,7 +653,7 @@ export function AdminEvents() {
                 ) : (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                      No events found.
+                      {tr("События не найдены.", "Events not found.")}
                     </td>
                   </tr>
                 )}
@@ -651,176 +667,221 @@ export function AdminEvents() {
 }
 
 export function AdminStaff() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+
   const staffRoleTemplates: AdminFormTemplate[] = [
     {
       id: "operations-management",
-      label: "Operations Management",
-      description: "For Chief Operations, dispatch leads and route oversight roles.",
+      label: tr("Управление операциями", "Operations management"),
+      description: tr(
+        "Для Chief Operations, диспетчеров и руководителей маршрутной сети.",
+        "For Chief Operations, dispatchers, and route network managers."
+      ),
       defaults: {
-        role: "Operations Manager",
-        division: "Operations",
+        role: tr("Менеджер операций", "Operations manager"),
+        division: tr("Операции", "Operations"),
         status: "active",
-        bio: "Oversees daily operations, route quality and pilot support workflows.",
+        bio: tr(
+          "Координирует ежедневные операции, качество маршрутной сети и поддержку пилотов.",
+          "Coordinates daily operations, route quality, and pilot support."
+        ),
       },
     },
     {
       id: "training-management",
-      label: "Training Department",
-      description: "For instructors, examiners and onboarding staff.",
+      label: tr("Отдел обучения", "Training department"),
+      description: tr(
+        "Для инструкторов, экзаменаторов и сотрудников онбординга.",
+        "For instructors, examiners, and onboarding staff."
+      ),
       defaults: {
-        role: "Training Manager",
-        division: "Training",
+        role: tr("Менеджер обучения", "Training manager"),
+        division: tr("Обучение", "Training"),
         status: "active",
-        bio: "Supports pilot onboarding, training standards and recurrent checks.",
+        bio: tr(
+          "Отвечает за ввод пилотов, стандарты подготовки и периодические проверки.",
+          "Oversees pilot onboarding, training standards, and periodic checks."
+        ),
       },
     },
     {
       id: "events-community",
-      label: "Events and Community",
-      description: "For event leads, media and community-facing staff.",
+      label: tr("События и комьюнити", "Events and community"),
+      description: tr(
+        "Для организаторов событий, медиа и внешних коммуникаций.",
+        "For event organizers, media, and external communications."
+      ),
       defaults: {
-        role: "Events Coordinator",
-        division: "Community",
+        role: tr("Координатор событий", "Events coordinator"),
+        division: tr("Комьюнити", "Community"),
         status: "active",
-        bio: "Coordinates events, communications and external community activity.",
+        bio: tr(
+          "Координирует события, коммуникации и внешнюю активность сообщества.",
+          "Coordinates events, communications, and external community activities."
+        ),
       },
     },
     {
       id: "hr-admin",
-      label: "HR and Recruitment",
-      description: "For roster maintenance, recruitment and internal people operations.",
+      label: tr("HR и рекрутинг", "HR and recruiting"),
+      description: tr(
+        "Для ведения состава, найма и внутренних кадровых процессов.",
+        "For team management, hiring, and internal HR processes."
+      ),
       defaults: {
-        role: "HR Manager",
+        role: tr("HR-менеджер", "HR manager"),
         division: "HR",
         status: "active",
-        bio: "Maintains staff roster, recruitment flow and internal people processes.",
+        bio: tr(
+          "Ведёт штатное расписание, процесс набора и внутренние кадровые задачи.",
+          "Manages staffing plans, hiring workflow, and internal HR tasks."
+        ),
       },
     },
     {
       id: "executive-management",
-      label: "Executive Management",
-      description: "For directors, chiefs and executive oversight roles.",
+      label: tr("Исполнительное руководство", "Executive leadership"),
+      description: tr(
+        "Для директоров, руководителей и ролей стратегического надзора.",
+        "For directors, heads, and strategic oversight roles."
+      ),
       defaults: {
-        role: "Executive Director",
-        division: "Management",
+        role: tr("Исполнительный директор", "Executive director"),
+        division: tr("Руководство", "Leadership"),
         status: "active",
-        bio: "Provides executive oversight, cross-department coordination and strategic direction.",
+        bio: tr(
+          "Обеспечивает стратегическое руководство, координацию отделов и управленческий контроль.",
+          "Provides strategic leadership, cross-team coordination, and management oversight."
+        ),
       },
     },
   ];
 
   return (
     <AdminCollectionPage
-      title="VA Staff"
-      subtitle="Maintain staff roles, contacts and department ownership."
+      title={tr("Персонал VA", "VA staff")}
+      subtitle={tr("Управляйте ролями персонала, контактами и закреплением отделов.", "Manage staff roles, contacts, and department assignments.")}
       collection="staff"
-      createLabel="Add staff"
+      createLabel={tr("Новый сотрудник", "New staff member")}
       templates={staffRoleTemplates}
       fields={[
-        { key: "name", label: "Name" },
-        { key: "role", label: "Role" },
-        { key: "division", label: "Division" },
+        { key: "name", label: tr("Имя", "Name") },
+        { key: "role", label: tr("Роль", "Role") },
+        { key: "division", label: tr("Отдел", "Department") },
         { key: "email", label: "Email" },
         { key: "discord", label: "Discord" },
         {
           key: "status",
-          label: "Status",
+          label: tr("Статус", "Status"),
           type: "select",
           options: [
-            { label: "Active", value: "active" },
-            { label: "On leave", value: "leave" },
-            { label: "Archived", value: "archived" },
+            { label: tr("Активен", "Active"), value: "active" },
+            { label: tr("В отпуске", "On leave"), value: "leave" },
+            { label: tr("Архив", "Archived"), value: "archived" },
           ],
         },
-        { key: "bio", label: "Bio", type: "textarea", table: false },
-        { key: "order", label: "Order", type: "number" },
+        { key: "bio", label: tr("О себе", "Bio"), type: "textarea", table: false },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
       ]}
     />
   );
 }
 
 export function AdminBadges() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+
   return (
     <AdminCollectionPage
-      title="Badges"
-      subtitle="Configure badge catalog entries and award criteria metadata."
+      title={tr("Награды", "Badges")}
+      subtitle={tr("Настраивайте каталог наград и метаданные критериев выдачи.", "Configure the badge catalog and award criteria metadata.")}
       collection="badges"
-      createLabel="New badge"
+      createLabel={tr("Новая награда", "New badge")}
       fields={[
-        { key: "title", label: "Title" },
-        { key: "code", label: "Code" },
-        { key: "color", label: "Color", type: "color" },
-        { key: "description", label: "Description" },
-        { key: "criteria", label: "Criteria", type: "textarea", table: false },
-        { key: "active", label: "Active", type: "checkbox" },
-        { key: "order", label: "Order", type: "number" },
+        { key: "title", label: tr("Название", "Title") },
+        { key: "code", label: tr("Код", "Code") },
+        { key: "color", label: tr("Цвет", "Color"), type: "color" },
+        { key: "description", label: tr("Описание", "Description") },
+        { key: "criteria", label: tr("Критерии", "Criteria"), type: "textarea", table: false },
+        { key: "active", label: tr("Активна", "Active"), type: "checkbox" },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
       ]}
     />
   );
 }
 
 export function AdminActivities() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+
   return (
     <AdminCollectionPage
-      title="Activities"
-      subtitle="Track activity blocks, automation targets and recurring work queues."
+      title={tr("Активности", "Activities")}
+      subtitle={tr(
+        "Отслеживайте блоки активностей, цели автоматизации и регулярные рабочие очереди.",
+        "Track activity streams, automation targets, and recurring work queues."
+      )}
       collection="activities"
-      createLabel="New activity"
+      createLabel={tr("Новая активность", "New activity")}
       fields={[
-        { key: "title", label: "Title" },
+        { key: "title", label: tr("Заголовок", "Title") },
         {
           key: "type",
-          label: "Type",
+          label: tr("Тип", "Type"),
           type: "select",
           options: [
-            { label: "News", value: "news" },
-            { label: "Event", value: "event" },
-            { label: "Automation", value: "automation" },
-            { label: "Roster", value: "roster" },
+            { label: tr("Новость", "News"), value: "news" },
+            { label: tr("Событие", "Event"), value: "event" },
+            { label: tr("Автоматизация", "Automation"), value: "automation" },
+            { label: tr("Ростер", "Roster"), value: "roster" },
           ],
         },
         {
           key: "status",
-          label: "Status",
+          label: tr("Статус", "Status"),
           type: "select",
           options: [
-            { label: "Active", value: "active" },
-            { label: "Paused", value: "paused" },
-            { label: "Archived", value: "archived" },
+            { label: tr("Активно", "Active"), value: "active" },
+            { label: tr("На паузе", "Paused"), value: "paused" },
+            { label: tr("Архив", "Archived"), value: "archived" },
           ],
         },
-        { key: "target", label: "Target" },
-        { key: "description", label: "Description", type: "textarea", table: false },
-        { key: "order", label: "Order", type: "number" },
+        { key: "target", label: tr("Цель", "Target") },
+        { key: "description", label: tr("Описание", "Description"), type: "textarea", table: false },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
       ]}
     />
   );
 }
 
 export function AdminHubs() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+
   return (
     <AdminCollectionPage
-      title="Hubs"
-      subtitle="Maintain operational hubs and their assigned airports."
+      title={tr("Хабы", "Hubs")}
+      subtitle={tr("Поддерживайте операционные хабы и закреплённые за ними аэропорты.", "Maintain operational hubs and their assigned airports.")}
       collection="hubs"
-      createLabel="New hub"
+      createLabel={tr("Новый хаб", "New hub")}
       fields={[
-        { key: "name", label: "Name" },
+        { key: "name", label: tr("Название", "Name") },
         { key: "icao", label: "ICAO" },
-        { key: "city", label: "City" },
-        { key: "country", label: "Country" },
+        { key: "city", label: tr("Город", "City") },
+        { key: "country", label: tr("Страна", "Country") },
         {
           key: "status",
-          label: "Status",
+          label: tr("Статус", "Status"),
           type: "select",
           options: [
-            { label: "Active", value: "active" },
-            { label: "Seasonal", value: "seasonal" },
-            { label: "Archived", value: "archived" },
+            { label: tr("Активен", "Active"), value: "active" },
+            { label: tr("Сезонный", "Seasonal"), value: "seasonal" },
+            { label: tr("Архив", "Archived"), value: "archived" },
           ],
         },
-        { key: "notes", label: "Notes", type: "textarea", table: false },
-        { key: "order", label: "Order", type: "number" },
+        { key: "notes", label: tr("Заметки", "Notes"), type: "textarea", table: false },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
       ]}
     />
   );

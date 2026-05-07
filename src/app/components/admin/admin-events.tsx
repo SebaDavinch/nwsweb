@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Checkbox } from "../ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -18,6 +19,14 @@ type ActivityView = "events" | "focus-airports" | "rosters" | "curated-rosters" 
 type ActivitySection = "events" | "focus-airports" | "rosters" | "community-goals" | "community-challenges";
 
 type EditorMode = "create" | "edit";
+
+interface EventCoinConfig {
+  rewardMode: "fixed" | "multiplier";
+  rewardValue: number;
+  awardLimit?: number;
+  registrationRequired?: boolean;
+  name: string | null;
+}
 
 interface ActivityCatalogItem {
   id: string;
@@ -51,8 +60,8 @@ const SECTION_LABELS: Record<ActivitySection, string> = {
   events: "admin.events.view.events",
   "focus-airports": "admin.events.view.focusAirports",
   rosters: "admin.events.view.rosters",
-  "community-goals": "Community Goals",
-  "community-challenges": "Community Challenges",
+  "community-goals": "Цели сообщества",
+  "community-challenges": "Испытания сообщества",
 };
 
 const normalizeView = (value: string | null): ActivityView => {
@@ -124,7 +133,7 @@ const tomorrowIso = () => new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString
 const buildDefaultPayload = (section: ActivitySection) => {
   if (section === "events") {
     return {
-      name: "New Event",
+      name: "Новое событие",
       subtype: "routes",
       description: "",
       points: 0,
@@ -138,7 +147,7 @@ const buildDefaultPayload = (section: ActivitySection) => {
   }
   if (section === "focus-airports") {
     return {
-      name: "New Focus Airport",
+      name: "Новый фокус-аэропорт",
       description: "",
       points: 0,
       time_award_scale: 3,
@@ -150,7 +159,7 @@ const buildDefaultPayload = (section: ActivitySection) => {
   }
   if (section === "rosters") {
     return {
-      name: "New Roster",
+      name: "Новая подборка",
       subtype: "standard",
       description: "",
       points: 0,
@@ -163,7 +172,7 @@ const buildDefaultPayload = (section: ActivitySection) => {
   }
   if (section === "community-challenges") {
     return {
-      name: "New Community Challenge",
+      name: "Новое испытание сообщества",
       description: "",
       points: 0,
       start: nowIso(),
@@ -176,7 +185,7 @@ const buildDefaultPayload = (section: ActivitySection) => {
     };
   }
   return {
-    name: "New Community Goal",
+    name: "Новая цель сообщества",
     description: "",
     points: 0,
     target: 100,
@@ -209,12 +218,19 @@ const viewSubtitleKey = (view: ActivityView): string => {
 };
 
 export function AdminEvents() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<ActivityCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isBusy, setIsBusy] = useState(false);
   const [query, setQuery] = useState("");
+  const [eventCoinBonuses, setEventCoinBonuses] = useState<Record<string, EventCoinConfig>>({});
+  const [editingCoinId, setEditingCoinId] = useState<number | null>(null);
+  const [coinRewardModeInput, setCoinRewardModeInput] = useState<"fixed" | "multiplier">("fixed");
+  const [coinBonusInput, setCoinBonusInput] = useState("");
+  const [coinAwardLimitInput, setCoinAwardLimitInput] = useState("1");
+  const [coinRegistrationRequiredInput, setCoinRegistrationRequiredInput] = useState(true);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
@@ -227,12 +243,17 @@ export function AdminEvents() {
   const loadItems = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch("/api/admin/activities", { credentials: "include" });
-      if (!response.ok) {
-        throw new Error("Failed to load activities");
-      }
-      const payload = await response.json() as { activities?: ActivityCatalogItem[] };
+      const [activitiesRes, coinBonusRes] = await Promise.all([
+        fetch("/api/admin/activities", { credentials: "include" }),
+        fetch("/api/admin/event-coins", { credentials: "include" }),
+      ]);
+      if (!activitiesRes.ok) throw new Error("Failed to load activities");
+      const payload = await activitiesRes.json() as { activities?: ActivityCatalogItem[] };
       setItems(Array.isArray(payload.activities) ? payload.activities : []);
+      if (coinBonusRes.ok) {
+        const coinData = await coinBonusRes.json() as { eventCoins?: Record<string, EventCoinConfig> };
+        setEventCoinBonuses(coinData.eventCoins || {});
+      }
     } catch (error) {
       console.error("Failed to load activities center", error);
       setItems([]);
@@ -241,6 +262,46 @@ export function AdminEvents() {
       setIsLoading(false);
     }
   }, []);
+
+  const saveCoinBonus = async (item: ActivityCatalogItem) => {
+    const rewardValue = Math.max(0, Number(coinBonusInput) || 0);
+    const awardLimit = Math.max(1, Number(coinAwardLimitInput) || 1);
+    try {
+      await fetch(`/api/admin/event-coins/${item.originalId}`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rewardMode: coinRewardModeInput,
+          rewardValue,
+          awardLimit,
+          registrationRequired: coinRegistrationRequiredInput,
+          name: item.name,
+        }),
+      });
+      setEventCoinBonuses((prev) => {
+        const next = { ...prev };
+        if (rewardValue > 0) {
+          next[item.originalId] = {
+            rewardMode: coinRewardModeInput,
+            rewardValue,
+            awardLimit,
+            registrationRequired: coinRegistrationRequiredInput,
+            name: item.name,
+          };
+        }
+        else delete next[item.originalId];
+        return next;
+      });
+      setEditingCoinId(null);
+      setCoinAwardLimitInput("1");
+      setCoinRewardModeInput("fixed");
+      setCoinRegistrationRequiredInput(true);
+      toast.success(rewardValue > 0 ? `Награда ${rewardValue} сохранена` : "Награда удалена");
+    } catch {
+      toast.error("Не удалось сохранить бонус");
+    }
+  };
 
   useEffect(() => {
     void loadItems();
@@ -303,7 +364,7 @@ export function AdminEvents() {
       setPayloadText(JSON.stringify(data.activity || {}, null, 2));
       setEditorOpen(true);
     } catch (error) {
-      toast.error(String((error as Error)?.message || "Failed to load activity detail"));
+      toast.error(String((error as Error)?.message || tr("Не удалось загрузить детали активности", "Failed to load activity detail")));
     } finally {
       setIsBusy(false);
     }
@@ -311,7 +372,7 @@ export function AdminEvents() {
 
   const handleDelete = async (item: ActivityCatalogItem) => {
     const section = resolveActivitySectionByType(item);
-    const confirmed = window.confirm(`Delete ${item.name || `${item.type} ${item.originalId}`}?`);
+    const confirmed = window.confirm(tr(`Удалить ${item.name || `${item.type} ${item.originalId}`}?`, `Delete ${item.name || `${item.type} ${item.originalId}`}?`));
     if (!confirmed) {
       return;
     }
@@ -327,7 +388,7 @@ export function AdminEvents() {
         throw new Error(data.error || `HTTP ${response.status}`);
       }
 
-      toast.success("Activity deleted");
+      toast.success(tr("Активность удалена", "Activity deleted"));
       await loadItems();
     } catch (error) {
       toast.error(String((error as Error)?.message || t("admin.events.error.delete")));
@@ -434,6 +495,7 @@ export function AdminEvents() {
                   <th className="px-4 py-3 font-medium">{t("admin.events.table.window")}</th>
                   <th className="px-4 py-3 font-medium">{t("admin.events.table.target")}</th>
                   <th className="px-4 py-3 font-medium">{t("admin.events.table.progress")}</th>
+                  <th className="px-4 py-3 font-medium">Монетки</th>
                   <th className="px-4 py-3 font-medium">{t("admin.events.table.updated")}</th>
                   <th className="px-4 py-3 text-right font-medium">{t("admin.events.table.actions")}</th>
                 </tr>
@@ -441,7 +503,7 @@ export function AdminEvents() {
               <tbody className="divide-y divide-gray-100">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       <div className="inline-flex items-center gap-2">
                         <Loader2 className="h-4 w-4 animate-spin" />
                         {t("admin.events.loading")}
@@ -488,6 +550,69 @@ export function AdminEvents() {
                           <div>{t("admin.events.points")} {Number(item.points || 0)}</div>
                         </div>
                       </td>
+                      <td className="px-4 py-3 align-top">
+                        {editingCoinId === item.originalId ? (
+                          <div className="min-w-[250px] space-y-2 rounded-xl border border-gray-200 bg-gray-50 p-2.5">
+                            <div className="grid grid-cols-[1fr_88px] gap-2">
+                              <Select value={coinRewardModeInput} onValueChange={(value) => setCoinRewardModeInput(value as "fixed" | "multiplier")}>
+                                <SelectTrigger className="h-8 text-xs">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="fixed">{tr("Фикс", "Fixed")}</SelectItem>
+                                  <SelectItem value="multiplier">{tr("Множитель", "Multiplier")}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.1"
+                                value={coinBonusInput}
+                                onChange={(e) => setCoinBonusInput(e.target.value)}
+                                className="h-8 text-xs px-2"
+                                autoFocus
+                                onKeyDown={(e) => { if (e.key === "Enter") void saveCoinBonus(item); if (e.key === "Escape") setEditingCoinId(null); }}
+                              />
+                            </div>
+                            <div className="grid grid-cols-[88px_1fr] items-center gap-2">
+                              <Input
+                                type="number"
+                                min={1}
+                                value={coinAwardLimitInput}
+                                onChange={(e) => setCoinAwardLimitInput(e.target.value)}
+                                className="h-8 text-xs px-2"
+                                title={tr("Сколько раз можно получить награду", "How many times the reward can be earned")}
+                              />
+                              <label className="flex items-center gap-2 text-xs text-gray-600">
+                                <Checkbox
+                                  checked={coinRegistrationRequiredInput}
+                                  onCheckedChange={(checked) => setCoinRegistrationRequiredInput(Boolean(checked))}
+                                />
+                                <span>{tr("Требует регистрацию", "Needs registration")}</span>
+                              </label>
+                            </div>
+                            <div className="flex items-center justify-end gap-2">
+                              <Button size="sm" className="h-7 px-2 text-xs bg-[#E31E24] hover:bg-[#c41a20]" onClick={() => void saveCoinBonus(item)}>✓</Button>
+                              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => { setEditingCoinId(null); setCoinAwardLimitInput("1"); setCoinRewardModeInput("fixed"); setCoinRegistrationRequiredInput(true); }}>✕</Button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            className="text-xs hover:text-[#E31E24] transition-colors"
+                            onClick={() => {
+                              setEditingCoinId(item.originalId);
+                              setCoinRewardModeInput(eventCoinBonuses[item.originalId]?.rewardMode || "fixed");
+                              setCoinBonusInput(String(eventCoinBonuses[item.originalId]?.rewardValue || 0));
+                              setCoinAwardLimitInput(String(eventCoinBonuses[item.originalId]?.awardLimit || 1));
+                              setCoinRegistrationRequiredInput(eventCoinBonuses[item.originalId]?.registrationRequired !== false);
+                            }}
+                          >
+                            {eventCoinBonuses[item.originalId]?.rewardValue
+                              ? <span className="font-semibold text-amber-600">{eventCoinBonuses[item.originalId].rewardMode === "multiplier" ? `×${eventCoinBonuses[item.originalId].rewardValue}` : `🪙 ${eventCoinBonuses[item.originalId].rewardValue}`} · лим {eventCoinBonuses[item.originalId].awardLimit || 1}{eventCoinBonuses[item.originalId].registrationRequired === false ? " · open" : ""}</span>
+                              : <span className="text-gray-300">+ задать</span>}
+                          </button>
+                        )}
+                      </td>
                       <td className="px-4 py-3 align-top text-gray-500">{formatDateTime(item.updatedAt)}</td>
                       <td className="px-4 py-3 align-top">
                         <div className="flex items-center justify-end gap-2">
@@ -505,7 +630,7 @@ export function AdminEvents() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                       {t("admin.events.table.empty")}
                     </td>
                   </tr>

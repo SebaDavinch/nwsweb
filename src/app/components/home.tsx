@@ -11,6 +11,16 @@ import galleryImg3 from "@/assets/e32c89aaade0d583e6bedee50681f610342d9a76.png";
 import galleryImg4 from "@/assets/26e15098031469524c864ad646ad94972bd0af05.png";
 import galleryImg5 from "@/assets/918b78e77231a5b76fcbed9da5749ce9227bc6ca.png";
 
+interface GalleryFeaturedItem {
+  id: string;
+  title: string;
+  assetUrl: string;
+  ownerName?: string | null;
+  ownerCallsign?: string | null;
+  likeCount?: number;
+  source?: string;
+}
+
 export function Home() {
   const { t, language } = useLanguage();
 
@@ -20,6 +30,16 @@ export function Home() {
     aircraftTotal?: number | null;
     flightHours?: number | null;
   } | null>(null);
+  const [featuredGallery, setFeaturedGallery] = useState<GalleryFeaturedItem[]>([]);
+
+  const staticFallback: GalleryFeaturedItem[] = [
+    { id: "s1", title: "Nordwind Boeing 737", assetUrl: galleryImg1, ownerName: null, ownerCallsign: null },
+    { id: "s2", title: "Nordwind Tail", assetUrl: galleryImg2, ownerName: null, ownerCallsign: null },
+    { id: "s3", title: "Nordwind Boeing 737 in Flight", assetUrl: galleryImg3, ownerName: null, ownerCallsign: null },
+    { id: "s4", title: "Nordwind A321 Sunset", assetUrl: galleryImg4, ownerName: null, ownerCallsign: null },
+    { id: "s5", title: "Nordwind Silhouette", assetUrl: galleryImg5, ownerName: null, ownerCallsign: null },
+  ];
+
   const [discordCommunity, setDiscordCommunity] = useState<{
     configured?: boolean;
     guildId?: string | null;
@@ -48,6 +68,19 @@ export function Home() {
     };
 
     loadSummary();
+  }, []);
+
+  useEffect(() => {
+    const loadFeaturedGallery = async () => {
+      try {
+        const response = await fetch("/api/public/gallery/featured");
+        if (!response.ok) return;
+        const payload = await response.json();
+        const items: GalleryFeaturedItem[] = Array.isArray(payload?.items) ? payload.items : [];
+        if (items.length > 0) setFeaturedGallery(items);
+      } catch { /* use static fallback */ }
+    };
+    void loadFeaturedGallery();
   }, []);
 
   useEffect(() => {
@@ -198,25 +231,37 @@ export function Home() {
       {/* Gallery Section */}
       <section className="py-16 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl md:text-4xl text-center mb-12">
+          <h2 className="text-3xl md:text-4xl text-center mb-4">
             {t("home.gallery.title")}
           </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div className="overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-              <img src={galleryImg1} alt="Nordwind Boeing 737" className="w-full h-64 object-cover" />
-            </div>
-            <div className="overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-              <img src={galleryImg2} alt="Nordwind Tail" className="w-full h-64 object-cover" />
-            </div>
-            <div className="overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-              <img src={galleryImg3} alt="Nordwind Boeing 737 in Flight" className="w-full h-64 object-cover" />
-            </div>
-            <div className="overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow lg:col-span-2">
-              <img src={galleryImg4} alt="Nordwind A321 Sunset" className="w-full h-64 object-cover" />
-            </div>
-            <div className="overflow-hidden rounded-lg shadow-lg hover:shadow-xl transition-shadow">
-              <img src={galleryImg5} alt="Nordwind Silhouette" className="w-full h-64 object-cover" />
-            </div>
+          <p className="text-center text-gray-500 mb-10 text-sm">Лучшие скриншоты от пилотов Nordwind Virtual</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {(featuredGallery.length > 0 ? featuredGallery : staticFallback).map((item, index) => (
+              <div
+                key={item.id}
+                className={`group relative overflow-hidden rounded-2xl shadow-lg hover:shadow-2xl transition-all duration-300 ${index === 3 ? "lg:col-span-2" : ""}`}
+              >
+                <img
+                  src={item.assetUrl}
+                  alt={item.title}
+                  className="w-full h-64 object-cover transition-transform duration-500 group-hover:scale-105"
+                />
+                {/* Authorship overlay — visible on hover */}
+                {(item.ownerName || item.ownerCallsign) && (
+                  <div className="absolute bottom-0 left-0 right-0 translate-y-full group-hover:translate-y-0 transition-transform duration-300 bg-gradient-to-t from-black/80 to-transparent px-4 py-3">
+                    <div className="text-white text-sm font-medium">
+                      {item.ownerName}
+                      {item.ownerCallsign && (
+                        <span className="ml-1.5 text-gray-300 font-normal">· {item.ownerCallsign.toUpperCase()}</span>
+                      )}
+                    </div>
+                    {typeof item.likeCount === "number" && item.likeCount > 0 && (
+                      <div className="text-gray-400 text-xs mt-0.5">❤ {item.likeCount}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </div>
       </section>

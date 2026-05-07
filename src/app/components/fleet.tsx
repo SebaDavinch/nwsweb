@@ -2,6 +2,7 @@ import { Card, CardContent } from "./ui/card";
 import { Plane } from "lucide-react";
 import { useLanguage } from "../context/language-context";
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 
 interface Aircraft {
   id?: number | string;
@@ -237,38 +238,57 @@ export function Fleet() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl mb-8 text-center">{t("fleet.list.title")}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {(currentFleet?.aircraft || []).map((plane, index) => (
-              <Card key={String(plane.id || `${plane.registration}-${index}`)} className="hover:shadow-lg transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="text-xl mb-1">{plane.model}</h3>
-                      <p className="text-gray-500">{plane.registration}</p>
+            {(currentFleet?.aircraft || []).map((plane, index) => {
+              const cardContent = (
+                <Card className="h-full hover:shadow-lg transition-shadow">
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between mb-4">
+                      <div>
+                        <h3 className="text-xl mb-1">{plane.model}</h3>
+                        <p className="text-gray-500">{plane.registration}</p>
+                      </div>
+                      <div
+                        className="w-12 h-12 rounded-full flex items-center justify-center"
+                        style={{ backgroundColor: currentFleet?.color || "#E31E24" }}
+                      >
+                        <Plane className="text-white" size={24} />
+                      </div>
                     </div>
-                    <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center"
-                      style={{ backgroundColor: currentFleet?.color || "#E31E24" }}
-                    >
-                      <Plane className="text-white" size={24} />
+                    <div className="space-y-2 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">{t("fleet.info.seats")}</span>
+                        <span>{plane.seats}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">{t("fleet.info.range")}</span>
+                        <span>{plane.range || "—"}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">{t("fleet.info.speed")}</span>
+                        <span>{plane.speed || "—"}</span>
+                      </div>
                     </div>
-                  </div>
-                  <div className="space-y-2 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">{t("fleet.info.seats")}</span>
-                      <span>{plane.seats}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">{t("fleet.info.range")}</span>
-                      <span>{plane.range || "—"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">{t("fleet.info.speed")}</span>
-                      <span>{plane.speed || "—"}</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    {currentFleet?.id && plane.id ? (
+                      <div className="mt-4 text-sm font-medium text-[#E31E24]">Open aircraft page →</div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              );
+
+              if (currentFleet?.id && plane.id) {
+                return (
+                  <Link
+                    key={String(plane.id || `${plane.registration}-${index}`)}
+                    to={`/fleet/${currentFleet.id}/aircraft/${plane.id}`}
+                    className="block"
+                  >
+                    {cardContent}
+                  </Link>
+                );
+              }
+
+              return <div key={String(plane.id || `${plane.registration}-${index}`)}>{cardContent}</div>;
+            })}
           </div>
           {!isLoading && !hasError && !currentFleet?.aircraft?.length ? (
             <div className="text-center text-gray-500 mt-8">No fleet aircraft found.</div>

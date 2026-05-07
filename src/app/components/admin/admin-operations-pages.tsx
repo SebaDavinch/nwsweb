@@ -1,5 +1,6 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
+import { useLanguage } from "../../context/language-context";
 import { Download, Edit, Eye, GitCompareArrows, Loader2, Plus, RefreshCw, Rocket, Search, Trash2, Upload, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "../ui/card";
@@ -26,6 +27,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { fetchAdminBootstrap, getCachedAdminBootstrap } from "./admin-bootstrap-cache";
 import { AdminRoutePreviewMap } from "./admin-route-preview-map";
 
 interface HubItem {
@@ -256,6 +258,94 @@ interface AdminRoutesManagementData {
 
 let adminRoutesManagementCache: AdminRoutesManagementData | null = null;
 let adminRoutesManagementRequest: Promise<AdminRoutesManagementData> | null = null;
+
+const mapAdminBootstrapToRoutesManagementData = (payload?: {
+  routes?: unknown[];
+  hubs?: unknown[];
+  airports?: unknown[];
+  fleets?: unknown[];
+} | null): AdminRoutesManagementData => {
+  const nextRoutes = Array.isArray(payload?.routes) ? (payload.routes as AdminRouteItem[]) : [];
+  const nextHubs = Array.isArray(payload?.hubs)
+    ? (payload.hubs as Array<{ id: string | number; name?: string; airportsText?: string }>)
+    : [];
+  const nextAirports = Array.isArray(payload?.airports)
+    ? (payload.airports as Array<{ id: number; name?: string; icao?: string; iata?: string; latitude?: number | null; longitude?: number | null }>)
+    : [];
+  const nextFleets = Array.isArray(payload?.fleets)
+    ? (payload.fleets as Array<{
+        id: string | number;
+        name?: string;
+        code?: string;
+        airlineCode?: string;
+        aircraft?: Array<{ model?: string; name?: string; registration?: string }>;
+      }>)
+    : [];
+
+  return {
+    routes: nextRoutes,
+    hubs: nextHubs.map((hub) => ({
+      id: String(hub.id),
+      name: String(hub.name || "Hub"),
+      airportsText: String(hub.airportsText || "") || undefined,
+    })),
+    airports: nextAirports.map((airport) => ({
+      id: Number(airport.id || 0) || 0,
+      name: String(airport.name || airport.icao || airport.iata || "Airport"),
+      icao: String(airport.icao || "").trim() || undefined,
+      iata: String(airport.iata || "").trim() || undefined,
+      latitude: Number.isFinite(Number(airport.latitude)) ? Number(airport.latitude) : null,
+      longitude: Number.isFinite(Number(airport.longitude)) ? Number(airport.longitude) : null,
+    })),
+    fleets: nextFleets.map((fleet) => {
+      const aircraft = Array.isArray(fleet.aircraft) ? fleet.aircraft : [];
+      const aircraftModels = Array.from(
+        new Set(
+          aircraft
+            .map((item) => String(item?.model || item?.name || "").trim())
+            .filter(Boolean)
+        )
+      );
+      const registrations = Array.from(
+        new Set(
+          aircraft
+            .map((item) => String(item?.registration || "").trim().toUpperCase())
+            .filter(Boolean)
+        )
+      );
+
+      const nextFleet = {
+        id: String(fleet.id),
+        name: String(fleet.name || fleet.code || `Fleet ${fleet.id}`),
+        code: String(fleet.code || "").trim() || undefined,
+        airlineCode: String(fleet.airlineCode || "").trim() || undefined,
+        aircraftModels,
+        registrations,
+        searchText: "",
+      };
+
+      return {
+        ...nextFleet,
+        searchText: buildFleetSearchText(nextFleet),
+      };
+    }),
+  };
+};
+
+const getCachedAdminRoutesManagementData = () => {
+  if (adminRoutesManagementCache) {
+    return adminRoutesManagementCache;
+  }
+
+  const cachedBootstrap = getCachedAdminBootstrap();
+  if (!cachedBootstrap) {
+    return null;
+  }
+
+  const data = mapAdminBootstrapToRoutesManagementData(cachedBootstrap);
+  adminRoutesManagementCache = data;
+  return data;
+};
 
 const formatDateTime = (value?: string | null) => {
   if (!value) {
@@ -660,8 +750,11 @@ const getImportField = (row: Record<string, unknown>, aliases: string[]) => {
 const loadXlsx = () => import("xlsx");
 
 const fetchAdminRoutesManagementData = async (force = false): Promise<AdminRoutesManagementData> => {
-  if (!force && adminRoutesManagementCache) {
-    return adminRoutesManagementCache;
+  if (!force) {
+    const cachedData = getCachedAdminRoutesManagementData();
+    if (cachedData) {
+      return cachedData;
+    }
   }
 
   if (!force && adminRoutesManagementRequest) {
@@ -669,82 +762,8 @@ const fetchAdminRoutesManagementData = async (force = false): Promise<AdminRoute
   }
 
   const request = (async () => {
-    const [routesResponse, hubsResponse, airportsResponse, fleetResponse] = await Promise.all([
-      fetch("/api/admin/routes", { credentials: "include" }),
-      fetch("/api/admin/hubs", { credentials: "include" }),
-      fetch("/api/admin/airports", { credentials: "include" }),
-      fetch("/api/admin/fleet/catalog", { credentials: "include" }),
-    ]);
-
-    const routesPayload = routesResponse.ok ? await routesResponse.json() : { routes: [] };
-    const hubsPayload = hubsResponse.ok ? await hubsResponse.json() : { hubs: [] };
-    const airportsPayload = airportsResponse.ok ? await airportsResponse.json() : { airports: [] };
-    const fleetPayload = fleetResponse.ok ? await fleetResponse.json() : { fleets: [] };
-    const nextRoutes = Array.isArray(routesPayload?.routes) ? (routesPayload.routes as AdminRouteItem[]) : [];
-    const nextHubs = Array.isArray(hubsPayload?.hubs)
-      ? (hubsPayload.hubs as Array<{ id: string | number; name?: string; airportsText?: string }>)
-      : [];
-    const nextAirports = Array.isArray(airportsPayload?.airports)
-      ? (airportsPayload.airports as Array<{ id: number; name?: string; icao?: string; iata?: string; latitude?: number | null; longitude?: number | null }>)
-      : [];
-    const nextFleets = Array.isArray(fleetPayload?.fleets)
-      ? (fleetPayload.fleets as Array<{
-          id: string | number;
-          name?: string;
-          code?: string;
-          airlineCode?: string;
-          aircraft?: Array<{ model?: string; name?: string; registration?: string }>;
-        }>)
-      : [];
-
-    const data = {
-      routes: nextRoutes,
-      hubs: nextHubs.map((hub) => ({
-        id: String(hub.id),
-        name: String(hub.name || "Hub"),
-        airportsText: String(hub.airportsText || "") || undefined,
-      })),
-      airports: nextAirports.map((airport) => ({
-        id: Number(airport.id || 0) || 0,
-        name: String(airport.name || airport.icao || airport.iata || "Airport"),
-        icao: String(airport.icao || "").trim() || undefined,
-        iata: String(airport.iata || "").trim() || undefined,
-        latitude: Number.isFinite(Number(airport.latitude)) ? Number(airport.latitude) : null,
-        longitude: Number.isFinite(Number(airport.longitude)) ? Number(airport.longitude) : null,
-      })),
-      fleets: nextFleets.map((fleet) => {
-        const aircraft = Array.isArray(fleet.aircraft) ? fleet.aircraft : [];
-        const aircraftModels = Array.from(
-          new Set(
-            aircraft
-              .map((item) => String(item?.model || item?.name || "").trim())
-              .filter(Boolean)
-          )
-        );
-        const registrations = Array.from(
-          new Set(
-            aircraft
-              .map((item) => String(item?.registration || "").trim().toUpperCase())
-              .filter(Boolean)
-          )
-        );
-
-        const nextFleet = {
-          id: String(fleet.id),
-          name: String(fleet.name || fleet.code || `Fleet ${fleet.id}`),
-          code: String(fleet.code || "").trim() || undefined,
-          airlineCode: String(fleet.airlineCode || "").trim() || undefined,
-          aircraftModels,
-          registrations,
-          searchText: "",
-        };
-
-        return {
-          ...nextFleet,
-          searchText: buildFleetSearchText(nextFleet),
-        };
-      }),
-    } satisfies AdminRoutesManagementData;
+    const bootstrapPayload = await fetchAdminBootstrap({ force });
+    const data = mapAdminBootstrapToRoutesManagementData(bootstrapPayload);
 
     adminRoutesManagementCache = data;
     return data;
@@ -763,11 +782,12 @@ const fetchAdminRoutesManagementData = async (force = false): Promise<AdminRoute
 
 export function AdminRoutesManagement() {
   const location = useLocation();
-  const [routes, setRoutes] = useState<AdminRouteItem[]>([]);
-  const [hubs, setHubs] = useState<HubItem[]>([]);
-  const [airports, setAirports] = useState<AirportItem[]>([]);
-  const [fleets, setFleets] = useState<FleetOption[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const initialCachedData = getCachedAdminRoutesManagementData();
+  const [routes, setRoutes] = useState<AdminRouteItem[]>(() => initialCachedData?.routes || []);
+  const [hubs, setHubs] = useState<HubItem[]>(() => initialCachedData?.hubs || []);
+  const [airports, setAirports] = useState<AirportItem[]>(() => initialCachedData?.airports || []);
+  const [fleets, setFleets] = useState<FleetOption[]>(() => initialCachedData?.fleets || []);
+  const [isLoading, setIsLoading] = useState(!initialCachedData);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [search, setSearch] = useState("");
   const [airlineFilter, setAirlineFilter] = useState("all");
@@ -817,8 +837,9 @@ export function AdminRoutesManagement() {
     } catch (error) {
       console.error("Failed to load admin routes", error);
       toast.error(force ? "Failed to refresh routes" : "Failed to load routes");
-      if (adminRoutesManagementCache) {
-        applyLoadedData(adminRoutesManagementCache);
+      const cachedData = getCachedAdminRoutesManagementData();
+      if (cachedData) {
+        applyLoadedData(cachedData);
       } else {
         setRoutes([]);
         setHubs([]);
@@ -2728,7 +2749,11 @@ export function AdminRoutesManagement() {
 }
 
 export function AdminBookingsManagement() {
-  const [bookings, setBookings] = useState<AdminBookingItem[]>([]);
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+  const initialBootstrap = getCachedAdminBootstrap();
+  const [bookings, setBookings] = useState<AdminBookingItem[]>(() => Array.isArray(initialBootstrap?.bookings) ? (initialBootstrap.bookings as AdminBookingItem[]) : []);
+  const [isLoading, setIsLoading] = useState(!Array.isArray(initialBootstrap?.bookings));
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
@@ -2738,14 +2763,16 @@ export function AdminBookingsManagement() {
   const [isBookingDetailLoading, setIsBookingDetailLoading] = useState(false);
   const [formState, setFormState] = useState({ tag: "", priority: "normal", notes: "" });
 
-  const loadBookings = async () => {
+  const loadBookings = async (force = false) => {
+    setIsLoading(true);
     try {
-      const response = await fetch("/api/admin/bookings?limit=150", { credentials: "include" });
-      const payload = response.ok ? await response.json() : { bookings: [] };
-      setBookings(Array.isArray(payload?.bookings) ? payload.bookings : []);
+      const payload = await fetchAdminBootstrap({ force });
+      setBookings(Array.isArray(payload?.bookings) ? (payload.bookings as AdminBookingItem[]) : []);
     } catch (error) {
       console.error("Failed to load admin bookings", error);
       setBookings([]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -2793,7 +2820,7 @@ export function AdminBookingsManagement() {
         throw new Error("Save failed");
       }
       setEditingBooking(null);
-      await loadBookings();
+      await loadBookings(true);
     } catch (error) {
       console.error("Failed to save booking metadata", error);
     }
@@ -2806,13 +2833,13 @@ export function AdminBookingsManagement() {
     try {
       const response = await fetch(`/api/admin/bookings/${bookingId}`, { credentials: "include" });
       if (!response.ok) {
-        throw new Error("Failed to load booking detail");
+        throw new Error(tr("Не удалось загрузить детали бронирования", "Failed to load booking details"));
       }
       const payload = (await response.json().catch(() => null)) as AdminBookingDetailPayload | null;
       setBookingDetail(payload || null);
     } catch (error) {
-      console.error("Failed to load booking detail", error);
-      toast.error("Failed to load booking detail");
+      console.error("Failed to load booking details", error);
+      toast.error(tr("Не удалось загрузить детали бронирования", "Failed to load booking details"));
       setBookingDetail(null);
     } finally {
       setIsBookingDetailLoading(false);
@@ -2822,8 +2849,8 @@ export function AdminBookingsManagement() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-800">Bookings</h2>
-        <p className="text-sm text-gray-500">Review current bookings, apply admin tags and highlight priority flights.</p>
+        <h2 className="text-2xl font-bold text-gray-800">{tr("Бронирования", "Bookings")}</h2>
+        <p className="text-sm text-gray-500">{tr("Проверка текущих бронирований, admin-тегов и приоритетных рейсов.", "Review current bookings, admin tags and priority flights.")}</p>
       </div>
 
       <Card className="border-none shadow-sm">
@@ -2831,25 +2858,25 @@ export function AdminBookingsManagement() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
             <div className="relative w-full xl:max-w-md">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search bookings..." className="pl-9" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr("Поиск бронирований...", "Search bookings...")} className="pl-9" />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full xl:w-48"><SelectValue placeholder="Status" /></SelectTrigger>
+              <SelectTrigger className="w-full xl:w-48"><SelectValue placeholder={tr("Статус", "Status")} /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="all">{tr("Все статусы", "All statuses")}</SelectItem>
+                <SelectItem value="active">{tr("Активные", "Active")}</SelectItem>
+                <SelectItem value="completed">{tr("Завершённые", "Completed")}</SelectItem>
+                <SelectItem value="cancelled">{tr("Отменённые", "Cancelled")}</SelectItem>
+                <SelectItem value="pending">{tr("Ожидающие", "Pending")}</SelectItem>
               </SelectContent>
             </Select>
             <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger className="w-full xl:w-48"><SelectValue placeholder="Priority" /></SelectTrigger>
+              <SelectTrigger className="w-full xl:w-48"><SelectValue placeholder={tr("Приоритет", "Priority")} /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
+                <SelectItem value="all">{tr("Все приоритеты", "All priorities")}</SelectItem>
+                <SelectItem value="normal">{tr("Обычный", "Normal")}</SelectItem>
+                <SelectItem value="high">{tr("Высокий", "High")}</SelectItem>
+                <SelectItem value="critical">{tr("Критический", "Critical")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -2858,37 +2885,38 @@ export function AdminBookingsManagement() {
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
-                  <th className="px-4 py-3 font-medium">Pilot</th>
-                  <th className="px-4 py-3 font-medium">Booking</th>
-                  <th className="px-4 py-3 font-medium">Aircraft</th>
-                  <th className="px-4 py-3 font-medium">Departure</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium">Priority</th>
-                  <th className="px-4 py-3 text-right font-medium">Actions</th>
+                  <th className="px-4 py-3 font-medium">Пилот</th>
+                  <th className="px-4 py-3 font-medium">Бронь</th>
+                  <th className="px-4 py-3 font-medium">Борт</th>
+                  <th className="px-4 py-3 font-medium">Вылет</th>
+                  <th className="px-4 py-3 font-medium">Статус</th>
+                  <th className="px-4 py-3 font-medium">Приоритет</th>
+                  <th className="px-4 py-3 text-right font-medium">Действия</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filteredBookings.map((booking) => (
+                {isLoading ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Загрузка бронирований...</td></tr> : null}
+                {!isLoading ? filteredBookings.map((booking) => (
                   <tr key={booking.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3"><div className="font-medium text-gray-900">{booking.pilotName}</div><div className="text-xs text-gray-500">{booking.pilotUsername}</div></td>
                     <td className="px-4 py-3 text-gray-700"><div className="font-medium">{booking.callsign}</div><div className="text-xs text-gray-500">{booking.routeLabel}</div></td>
                     <td className="px-4 py-3 text-gray-700">{booking.aircraftLabel}</td>
-                    <td className="px-4 py-3 text-gray-700"><div>{formatDateTime(booking.departureTime)}</div><div className="text-xs text-gray-500">Created {formatDateTime(booking.createdAt)}</div></td>
+                    <td className="px-4 py-3 text-gray-700"><div>{formatDateTime(booking.departureTime)}</div><div className="text-xs text-gray-500">Создано {formatDateTime(booking.createdAt)}</div></td>
                     <td className="px-4 py-3"><Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{booking.status}</Badge></td>
                     <td className="px-4 py-3"><Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{booking.meta?.priority || "normal"}</Badge></td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Button variant="outline" size="sm" onClick={() => void openBookingDetail(booking.id)}>
-                          <Eye className="mr-2 h-4 w-4" />View
+                          <Eye className="mr-2 h-4 w-4" />Открыть
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => openEditor(booking)}>
-                          <Edit className="mr-2 h-4 w-4" />Edit
+                          <Edit className="mr-2 h-4 w-4" />Изменить
                         </Button>
                       </div>
                     </td>
                   </tr>
-                ))}
-                {filteredBookings.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No bookings found.</td></tr> : null}
+                )) : null}
+                {!isLoading && filteredBookings.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Бронирования не найдены.</td></tr> : null}
               </tbody>
             </table>
           </div>
@@ -2898,32 +2926,32 @@ export function AdminBookingsManagement() {
       <Dialog open={Boolean(editingBooking)} onOpenChange={(open) => !open && setEditingBooking(null)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Edit Booking Metadata</DialogTitle>
+            <DialogTitle>Изменение метаданных бронирования</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label>Tag</Label>
+              <Label>Тег</Label>
               <Input value={formState.tag} onChange={(event) => setFormState((current) => ({ ...current, tag: event.target.value }))} placeholder="ops-review / vip / event" />
             </div>
             <div className="space-y-2">
-              <Label>Priority</Label>
+              <Label>Приоритет</Label>
               <Select value={formState.priority} onValueChange={(value) => setFormState((current) => ({ ...current, priority: value }))}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="normal">Обычный</SelectItem>
+                  <SelectItem value="high">Высокий</SelectItem>
+                  <SelectItem value="critical">Критический</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Notes</Label>
+              <Label>Заметки</Label>
               <Textarea value={formState.notes} onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))} className="min-h-[140px]" />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditingBooking(null)}>Cancel</Button>
-            <Button className="bg-[#E31E24] hover:bg-[#c41a20]" onClick={saveMeta}>Save</Button>
+            <Button variant="outline" onClick={() => setEditingBooking(null)}>Отмена</Button>
+            <Button className="bg-[#E31E24] hover:bg-[#c41a20]" onClick={saveMeta}>Сохранить</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -2931,35 +2959,35 @@ export function AdminBookingsManagement() {
       <Dialog open={Boolean(viewingBookingId)} onOpenChange={(open) => !open && setViewingBookingId(null)}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Booking Detail</DialogTitle>
+            <DialogTitle>Детали бронирования</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {isBookingDetailLoading ? (
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Loading booking detail...
+                Загрузка деталей бронирования...
               </div>
             ) : !bookingDetail ? (
-              <div className="text-sm text-gray-500">Booking detail is unavailable.</div>
+              <div className="text-sm text-gray-500">Детали бронирования недоступны.</div>
             ) : (
               <>
                 <div className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm md:grid-cols-3">
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-gray-500">Pilot</div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Пилот</div>
                     <div className="font-medium text-gray-900">{bookingDetail.summary?.pilotName || "—"}</div>
                   </div>
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-gray-500">Callsign</div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Позывной</div>
                     <div className="font-medium text-gray-900">{bookingDetail.summary?.callsign || "—"}</div>
                   </div>
                   <div>
-                    <div className="text-xs uppercase tracking-wide text-gray-500">Status</div>
+                    <div className="text-xs uppercase tracking-wide text-gray-500">Статус</div>
                     <div className="font-medium text-gray-900">{bookingDetail.summary?.status || "—"}</div>
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="text-xs uppercase tracking-wide text-gray-500">Raw payload</div>
+                  <div className="text-xs uppercase tracking-wide text-gray-500">Исходный payload</div>
                   <ScrollArea className="h-[320px] rounded-md border border-gray-200 bg-gray-950/95 p-3">
                     <pre className="text-xs leading-relaxed text-gray-100">
                       {JSON.stringify(bookingDetail.booking || {}, null, 2)}
@@ -2970,7 +2998,7 @@ export function AdminBookingsManagement() {
             )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setViewingBookingId(null)}>Close</Button>
+            <Button variant="outline" onClick={() => setViewingBookingId(null)}>Закрыть</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

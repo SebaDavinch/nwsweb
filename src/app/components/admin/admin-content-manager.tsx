@@ -29,6 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
+import { useLanguage } from "../../context/language-context";
 
 type AdminFieldType = "text" | "textarea" | "number" | "select" | "checkbox" | "datetime" | "color";
 
@@ -69,6 +70,10 @@ interface AdminContentManagerProps<T extends { id: string }> {
     formData: Record<string, string | boolean>;
     updateFormValue: (key: string, value: string | boolean) => void;
   }) => ReactNode;
+  formTop?: (args: {
+    updateFormValue: (key: string, value: string | boolean) => void;
+    editingItem: T | null;
+  }) => ReactNode;
   reloadToken?: string | number;
 }
 
@@ -87,11 +92,11 @@ const createInitialFormData = (fields: AdminFormField[]) =>
 
 const normalizeFilterValue = (value: unknown) => String(value || "").trim();
 
-const renderPrimitiveValue = (value: unknown) => {
+const renderPrimitiveValue = (value: unknown, tr?: (ru: string, en: string) => string) => {
   if (typeof value === "boolean") {
     return (
       <Badge variant="outline" className={value ? "border-green-200 bg-green-50 text-green-700" : "border-gray-200 bg-gray-50 text-gray-700"}>
-        {value ? "Yes" : "No"}
+        {value ? (tr ? tr("Да", "Yes") : "Yes") : (tr ? tr("Нет", "No") : "No")}
       </Badge>
     );
   }
@@ -115,8 +120,11 @@ export function AdminContentManager<T extends { id: string }>({
   fixedValues,
   toolbarActions,
   renderFieldExtras,
+  formTop,
   reloadToken,
 }: AdminContentManagerProps<T>) {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [items, setItems] = useState<T[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -131,7 +139,7 @@ export function AdminContentManager<T extends { id: string }>({
     try {
       const response = await fetch(`/api/admin/content/${collection}`, { credentials: "include" });
       if (!response.ok) {
-        throw new Error("Failed to load items");
+        throw new Error(tr("Не удалось загрузить элементы", "Failed to load items"));
       }
       const payload = await response.json();
       const nextItems = (Array.isArray(payload?.items) ? payload.items : []) as T[];
@@ -235,7 +243,7 @@ export function AdminContentManager<T extends { id: string }>({
       });
 
       if (!response.ok) {
-        throw new Error("Failed to save item");
+        throw new Error(tr("Не удалось сохранить элемент", "Failed to save item"));
       }
 
       await loadItems();
@@ -249,7 +257,7 @@ export function AdminContentManager<T extends { id: string }>({
   };
 
   const handleDelete = async (item: T) => {
-    if (!window.confirm(`Delete this ${singularLabel.toLowerCase()}?`)) {
+    if (!window.confirm(tr(`Удалить элемент: ${singularLabel.toLowerCase()}?`, `Delete item: ${singularLabel.toLowerCase()}?`))) {
       return;
     }
 
@@ -259,7 +267,7 @@ export function AdminContentManager<T extends { id: string }>({
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Failed to delete item");
+        throw new Error(tr("Не удалось удалить элемент", "Failed to delete item"));
       }
       await loadItems();
     } catch (error) {
@@ -278,7 +286,7 @@ export function AdminContentManager<T extends { id: string }>({
           {toolbarActions}
           <Button className="bg-[#E31E24] hover:bg-[#c41a20] text-white" onClick={openCreateDialog}>
             <Plus className="h-4 w-4" />
-            Add {singularLabel}
+            {tr(`Добавить ${singularLabel}`, `Add ${singularLabel}`)}
           </Button>
         </div>
       </div>
@@ -290,7 +298,7 @@ export function AdminContentManager<T extends { id: string }>({
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <Input
                 className="pl-9"
-                placeholder={`Search ${title.toLowerCase()}...`}
+                placeholder={tr(`Поиск: ${title.toLowerCase()}...`, `Search: ${title.toLowerCase()}...`)}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -311,7 +319,7 @@ export function AdminContentManager<T extends { id: string }>({
                     <SelectValue placeholder={String(key)} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All {String(key)}</SelectItem>
+                    <SelectItem value="all">{tr("Все", "All")}: {String(key)}</SelectItem>
                     {(filterOptions[String(key)] || []).map((option) => (
                       <SelectItem key={option} value={option}>
                         {option}
@@ -330,20 +338,20 @@ export function AdminContentManager<T extends { id: string }>({
                   {columns.map((column) => (
                     <TableHead key={column.key}>{column.label}</TableHead>
                   ))}
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead className="text-right">{tr("Действия", "Actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
                     <TableCell colSpan={columns.length + 1} className="py-10 text-center text-gray-500">
-                      Loading...
+                      {tr("Загрузка...", "Loading...")}
                     </TableCell>
                   </TableRow>
                 ) : filteredItems.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={columns.length + 1} className="py-10 text-center text-gray-500">
-                      No {title.toLowerCase()} found.
+                      {tr(`Ничего не найдено: ${title.toLowerCase()}.`, `Nothing found: ${title.toLowerCase()}.`)}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -351,18 +359,18 @@ export function AdminContentManager<T extends { id: string }>({
                     <TableRow key={item.id}>
                       {columns.map((column) => (
                         <TableCell key={column.key} className="align-top">
-                          {column.render ? column.render(item) : renderPrimitiveValue(item[column.key as keyof T])}
+                          {column.render ? column.render(item) : renderPrimitiveValue(item[column.key as keyof T], tr)}
                         </TableCell>
                       ))}
                       <TableCell>
                         <div className="flex justify-end gap-2">
                           <Button variant="outline" size="sm" onClick={() => openEditDialog(item)}>
                             <Pencil className="h-4 w-4" />
-                            Edit
+                            {tr("Изменить", "Edit")}
                           </Button>
                           <Button variant="destructive" size="sm" onClick={() => handleDelete(item)}>
                             <Trash2 className="h-4 w-4" />
-                            Delete
+                            {tr("Удалить", "Delete")}
                           </Button>
                         </div>
                       </TableCell>
@@ -378,8 +386,10 @@ export function AdminContentManager<T extends { id: string }>({
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{editingItem ? `Edit ${singularLabel}` : `Create ${singularLabel}`}</DialogTitle>
+            <DialogTitle>{editingItem ? tr(`Изменить: ${singularLabel}`, `Edit: ${singularLabel}`) : tr(`Создать: ${singularLabel}`, `Create: ${singularLabel}`)}</DialogTitle>
           </DialogHeader>
+
+          {formTop ? formTop({ updateFormValue, editingItem }) : null}
 
           <div className="grid gap-4 py-2 md:grid-cols-2">
             {fields.map((field) => {
@@ -418,7 +428,7 @@ export function AdminContentManager<T extends { id: string }>({
                         onCheckedChange={(checked) => updateFormValue(field.key, Boolean(checked))}
                       />
                       <Label htmlFor={field.key} className="ml-3 text-sm text-gray-700">
-                        Enabled
+                        {tr("Включено", "Enabled")}
                       </Label>
                     </div>
                   ) : (
@@ -435,13 +445,13 @@ export function AdminContentManager<T extends { id: string }>({
                           <div className="aspect-[16/6] w-full overflow-hidden bg-gray-100">
                             <img
                               src={String(value || "")}
-                              alt="Banner preview"
+                              alt={tr("Превью баннера", "Banner preview")}
                               className="h-full w-full object-cover"
                               loading="lazy"
                             />
                           </div>
                           <div className="flex items-center justify-between gap-3 px-3 py-2 text-xs text-gray-500">
-                            <span className="truncate">Banner preview</span>
+                            <span className="truncate">{tr("Превью баннера", "Banner preview")}</span>
                             <a
                               href={String(value || "")}
                               target="_blank"
@@ -449,7 +459,7 @@ export function AdminContentManager<T extends { id: string }>({
                               className="inline-flex items-center gap-1 text-[#E31E24] hover:text-[#c41a20]"
                             >
                               <ExternalLink className="h-3.5 w-3.5" />
-                              Open
+                              {tr("Открыть", "Open")}
                             </a>
                           </div>
                         </div>
@@ -464,10 +474,14 @@ export function AdminContentManager<T extends { id: string }>({
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
+              {tr("Отмена", "Cancel")}
             </Button>
             <Button className="bg-[#E31E24] hover:bg-[#c41a20] text-white" onClick={handleSave} disabled={isSaving}>
-              {isSaving ? "Saving..." : editingItem ? "Save changes" : `Create ${singularLabel}`}
+              {isSaving
+                ? tr("Сохранение...", "Saving...")
+                : editingItem
+                  ? tr("Сохранить изменения", "Save changes")
+                  : tr(`Создать: ${singularLabel}`, `Create: ${singularLabel}`)}
             </Button>
           </DialogFooter>
         </DialogContent>

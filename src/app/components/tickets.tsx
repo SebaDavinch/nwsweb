@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { Bell, LifeBuoy, Loader2, MessageSquare, PlusCircle } from "lucide-react";
 import { useAuth } from "../context/auth-context";
+import { useLanguage } from "../context/language-context";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -59,6 +60,8 @@ const statusMeta: Record<Ticket["status"], string> = {
 
 export function TicketsPage() {
   const { isAuthenticated, isAuthLoading, loginWithDiscord } = useAuth();
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isReplying, setIsReplying] = useState(false);
@@ -192,7 +195,7 @@ export function TicketsPage() {
   if (isAuthLoading) {
     return (
       <div className="min-h-[50vh] flex items-center justify-center text-gray-500">
-        <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading...
+        <Loader2 className="h-5 w-5 animate-spin mr-2" /> {tr("Загрузка...", "Loading...")}
       </div>
     );
   }
@@ -203,12 +206,12 @@ export function TicketsPage() {
         <Card className="border-none shadow-sm">
           <CardContent className="p-10 text-center space-y-4">
             <LifeBuoy className="h-10 w-10 text-[#E31E24] mx-auto" />
-            <h1 className="text-2xl font-bold text-gray-900">Support Tickets</h1>
+            <h1 className="text-2xl font-bold text-gray-900">{tr("Тикеты поддержки", "Support Tickets")}</h1>
             <p className="text-gray-500">
-              Для доступа к тикет-системе требуется авторизация через Discord.
+              {tr("Для доступа к тикет-системе требуется авторизация через Discord.", "Discord authorization is required to access the ticket system.")}
             </p>
             <Button onClick={() => loginWithDiscord("/tickets", "login")} className="bg-[#E31E24] hover:bg-[#c91a1f]">
-              Войти через Discord
+              {tr("Войти через Discord", "Sign in with Discord")}
             </Button>
           </CardContent>
         </Card>
@@ -220,11 +223,11 @@ export function TicketsPage() {
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Support Tickets</h1>
-          <p className="text-sm text-gray-500">История тикетов, ответы и статус обработки.</p>
+          <h1 className="text-2xl font-bold text-gray-900">{tr("Тикеты поддержки", "Support Tickets")}</h1>
+          <p className="text-sm text-gray-500">{tr("История тикетов, ответы и статус обработки.", "Ticket history, replies and processing status.")}</p>
         </div>
         <Link to="/dashboard" className="text-sm text-[#E31E24] hover:underline">
-          Back to dashboard
+          {tr("Вернуться в кабинет", "Back to dashboard")}
         </Link>
       </div>
 
@@ -232,13 +235,13 @@ export function TicketsPage() {
         <div className="lg:col-span-4 space-y-4">
           <Card className="border-none shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><PlusCircle className="h-4 w-4 text-[#E31E24]" /> New Ticket</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2"><PlusCircle className="h-4 w-4 text-[#E31E24]" /> {tr("Новый тикет", "New Ticket")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={180} />
+              <Input placeholder={tr("Тема", "Subject")} value={subject} onChange={(e) => setSubject(e.target.value)} maxLength={180} />
               <Select value={categoryId} onValueChange={setCategoryId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder={tr("Категория", "Category")} />
                 </SelectTrigger>
                 <SelectContent>
                   {categories.map((item) => (
@@ -248,32 +251,32 @@ export function TicketsPage() {
               </Select>
               <Select value={priority} onValueChange={(value) => setPriority(value as Ticket["priority"])}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Priority" />
+                  <SelectValue placeholder={tr("Приоритет", "Priority")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="low">{tr("Низкий", "Low")}</SelectItem>
+                  <SelectItem value="normal">{tr("Обычный", "Normal")}</SelectItem>
+                  <SelectItem value="high">{tr("Высокий", "High")}</SelectItem>
+                  <SelectItem value="critical">{tr("Критический", "Critical")}</SelectItem>
                 </SelectContent>
               </Select>
-              <Textarea placeholder="Describe your issue" value={message} onChange={(e) => setMessage(e.target.value)} rows={5} />
+              <Textarea placeholder={tr("Опишите вашу проблему", "Describe your issue")} value={message} onChange={(e) => setMessage(e.target.value)} rows={5} />
               <Button className="w-full bg-[#E31E24] hover:bg-[#c91a1f]" onClick={createTicket} disabled={isSaving}>
                 {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Create ticket
+                {tr("Создать тикет", "Create ticket")}
               </Button>
             </CardContent>
           </Card>
 
           <Card className="border-none shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2"><Bell className="h-4 w-4 text-[#E31E24]" /> My Tickets</CardTitle>
+              <CardTitle className="text-base flex items-center gap-2"><Bell className="h-4 w-4 text-[#E31E24]" /> {tr("Мои тикеты", "My Tickets")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 max-h-[420px] overflow-auto">
               {isLoading ? (
-                <div className="text-sm text-gray-500 flex items-center"><Loader2 className="h-4 w-4 animate-spin mr-2" /> Loading...</div>
+                <div className="text-sm text-gray-500 flex items-center"><Loader2 className="h-4 w-4 animate-spin mr-2" /> {tr("Загрузка...", "Loading...")}</div>
               ) : tickets.length === 0 ? (
-                <div className="text-sm text-gray-500">No tickets yet.</div>
+                <div className="text-sm text-gray-500">{tr("Тикетов пока нет.", "No tickets yet.")}</div>
               ) : (
                 tickets.map((ticket) => (
                   <button
@@ -286,7 +289,10 @@ export function TicketsPage() {
                       {ticket.unreadCount > 0 ? <Badge className="bg-[#E31E24]">{ticket.unreadCount}</Badge> : null}
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs">
-                      <Badge variant="outline" className={statusMeta[ticket.status]}>{ticket.status}</Badge>
+                      <Badge variant="outline" className={statusMeta[ticket.status]}>{tr(
+                        ticket.status === "open" ? "Открыт" : ticket.status === "in_progress" ? "В работе" : ticket.status === "resolved" ? "Решён" : "Закрыт",
+                        ticket.status
+                      )}</Badge>
                       <span className="text-gray-400">{formatDateTime(ticket.updatedAt)}</span>
                     </div>
                   </button>
@@ -305,16 +311,19 @@ export function TicketsPage() {
                     <div>
                       <CardTitle className="text-lg">#{selectedTicket.number} {selectedTicket.subject}</CardTitle>
                       <div className="text-sm text-gray-500 mt-1 flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className={statusMeta[selectedTicket.status]}>{selectedTicket.status}</Badge>
+                        <Badge variant="outline" className={statusMeta[selectedTicket.status]}>{tr(
+                          selectedTicket.status === "open" ? "Открыт" : selectedTicket.status === "in_progress" ? "В работе" : selectedTicket.status === "resolved" ? "Решён" : "Закрыт",
+                          selectedTicket.status
+                        )}</Badge>
                         <span>{selectedTicket.categoryName}</span>
-                        <span>Updated: {formatDateTime(selectedTicket.updatedAt)}</span>
+                        <span>{tr("Обновлён", "Updated")}: {formatDateTime(selectedTicket.updatedAt)}</span>
                       </div>
                     </div>
                     <div className="flex gap-2">
                       {selectedTicket.status !== "closed" ? (
-                        <Button variant="outline" onClick={() => changeStatus("closed")}>Close</Button>
+                        <Button variant="outline" onClick={() => changeStatus("closed")}>{tr("Закрыть", "Close")}</Button>
                       ) : (
-                        <Button variant="outline" onClick={() => changeStatus("open")}>Reopen</Button>
+                        <Button variant="outline" onClick={() => changeStatus("open")}>{tr("Переоткрыть", "Reopen")}</Button>
                       )}
                     </div>
                   </div>
@@ -324,7 +333,7 @@ export function TicketsPage() {
                     {selectedTicket.messages.map((item) => (
                       <div key={item.id} className={`rounded-xl border p-3 ${item.authorRole === "staff" ? "border-sky-200 bg-sky-50" : "border-gray-200 bg-white"}`}>
                         <div className="flex items-center justify-between text-xs text-gray-500 mb-1">
-                          <span className="font-medium text-gray-700">{item.authorName} ({item.authorRole})</span>
+                          <span className="font-medium text-gray-700">{item.authorName} ({item.authorRole === "staff" ? tr("персонал", "staff") : tr("пилот", "pilot")})</span>
                           <span>{formatDateTime(item.createdAt)}</span>
                         </div>
                         <p className="text-sm whitespace-pre-wrap text-gray-700">{item.content}</p>
@@ -332,17 +341,17 @@ export function TicketsPage() {
                     ))}
                   </div>
                   <div className="space-y-2 pt-2 border-t border-gray-100">
-                    <Textarea placeholder="Write a reply" value={reply} onChange={(e) => setReply(e.target.value)} rows={4} />
+                    <Textarea placeholder={tr("Написать ответ", "Write a reply")} value={reply} onChange={(e) => setReply(e.target.value)} rows={4} />
                     <Button onClick={sendReply} disabled={isReplying || selectedTicket.status === "closed"} className="bg-[#E31E24] hover:bg-[#c91a1f]">
                       {isReplying ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <MessageSquare className="h-4 w-4 mr-2" />}
-                      Send reply
+                      {tr("Отправить ответ", "Send reply")}
                     </Button>
                   </div>
                 </CardContent>
               </>
             ) : (
               <CardContent className="h-full min-h-[500px] flex items-center justify-center text-gray-500">
-                Select a ticket on the left to view details.
+                {tr("Выберите тикет слева для просмотра деталей.", "Select a ticket on the left to view details.")}
               </CardContent>
             )}
           </Card>
@@ -352,7 +361,7 @@ export function TicketsPage() {
       {tags.length > 0 ? (
         <Card className="border-none shadow-sm">
           <CardContent className="p-4 flex flex-wrap gap-2">
-            <span className="text-sm text-gray-500 mr-2">Available tags:</span>
+            <span className="text-sm text-gray-500 mr-2">{tr("Доступные теги:", "Available tags:")}</span>
             {tags.map((tag) => (
               <Badge key={tag.id} variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{tag.name}</Badge>
             ))}

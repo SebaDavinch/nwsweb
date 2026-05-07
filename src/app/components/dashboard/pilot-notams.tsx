@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 
@@ -85,6 +86,7 @@ export function PilotNotams() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [message, setMessage] = useState("");
   const [readingIds, setReadingIds] = useState<number[]>([]);
+  const [selectedNotam, setSelectedNotam] = useState<NotamItem | null>(null);
 
   const loadNotams = async ({ silent = false } = {}) => {
     if (silent) {
@@ -261,7 +263,11 @@ export function PilotNotams() {
             <Card key={item.id} className="border-none shadow-md overflow-hidden">
               <CardContent className="p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedNotam(item)}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <div className="mb-3 flex flex-wrap items-center gap-2">
                       <Badge variant="outline" className={TYPE_BADGE_CLASSNAMES[item.type]}>
                         {t(`notams.type.${item.type}`)}
@@ -288,7 +294,7 @@ export function PilotNotams() {
 
                     <div className="text-xl font-bold text-[#1d1d1f]">{item.title}</div>
                     <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-600">{item.content || "—"}</p>
-                  </div>
+                  </button>
 
                   <div className="w-full shrink-0 lg:w-56">
                     <div className="rounded-2xl bg-gray-50 p-4 text-sm text-gray-600">
@@ -297,12 +303,19 @@ export function PilotNotams() {
                         <div className="font-medium">{t("notams.posted")}</div>
                       </div>
                       <div className="mt-2">{formatDateTime(item.createdAt)}</div>
+                      <Button
+                        variant="outline"
+                        className="mt-4 w-full"
+                        onClick={() => setSelectedNotam(item)}
+                      >
+                        {t("notams.open")}
+                      </Button>
                       {item.url ? (
                         <a
                           href={item.url}
                           target="_blank"
                           rel="noreferrer"
-                          className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-[#E31E24] transition-colors hover:text-[#c41a20]"
+                          className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#E31E24] transition-colors hover:text-[#c41a20]"
                         >
                           <ExternalLink className="h-4 w-4" />
                           {t("notams.readMore")}
@@ -326,6 +339,75 @@ export function PilotNotams() {
           ))}
         </div>
       )}
+
+      <Dialog open={Boolean(selectedNotam)} onOpenChange={(open) => { if (!open) setSelectedNotam(null); }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
+          {selectedNotam ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>{selectedNotam.title}</DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline" className={TYPE_BADGE_CLASSNAMES[selectedNotam.type]}>
+                    {t(`notams.type.${selectedNotam.type}`)}
+                  </Badge>
+                  <Badge variant="outline" className={PRIORITY_BADGE_CLASSNAMES[selectedNotam.priority]}>
+                    {t(`notams.priority.${selectedNotam.priority}`)}
+                  </Badge>
+                  {selectedNotam.mustRead ? <Badge className="bg-[#E31E24] text-white">{t("notams.mustRead")}</Badge> : null}
+                  {selectedNotam.isRead ? (
+                    <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                      {t("notams.readDone")}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="border-orange-200 bg-orange-50 text-orange-700">
+                      {t("notams.unread")}
+                    </Badge>
+                  )}
+                  {selectedNotam.tag ? (
+                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">
+                      {selectedNotam.tag}
+                    </Badge>
+                  ) : null}
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                  <div className="font-medium text-gray-900">{t("notams.posted")}</div>
+                  <div className="mt-1">{formatDateTime(selectedNotam.createdAt)}</div>
+                </div>
+
+                <div className="whitespace-pre-wrap rounded-2xl border border-gray-200 bg-white px-5 py-4 text-sm leading-7 text-gray-700">
+                  {selectedNotam.content || "—"}
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  {!selectedNotam.isRead ? (
+                    <Button
+                      onClick={() => void handleMarkAsRead(selectedNotam.id)}
+                      disabled={readingIds.includes(selectedNotam.id)}
+                    >
+                      {readingIds.includes(selectedNotam.id) ? t("notams.reading") : t("notams.read")}
+                    </Button>
+                  ) : null}
+                  {selectedNotam.url ? (
+                    <Button variant="outline" asChild>
+                      <a href={selectedNotam.url} target="_blank" rel="noreferrer">
+                        <ExternalLink className="mr-2 h-4 w-4" />
+                        {t("notams.readMore")}
+                      </a>
+                    </Button>
+                  ) : null}
+                  <Button variant="outline" onClick={() => setSelectedNotam(null)}>
+                    {t("notams.close")}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

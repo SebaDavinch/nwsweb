@@ -1,8 +1,10 @@
-import { Plane, Mail, Users, ExternalLink } from "lucide-react";
+import { MessageSquare, ExternalLink } from "lucide-react";
 import { Link } from "react-router";
 import { useLanguage } from "../context/language-context";
 import { Button } from "./ui/button";
 import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
+import vatsimLogo from "@/assets/vatsim-logo.svg";
+import ragLogo from "@/app/components/admin/banner-generator/assets/rag-logo.svg";
 import { useSiteDesign } from "../hooks/use-site-design";
 
 export function Footer() {
@@ -11,6 +13,7 @@ export function Footer() {
   const primaryColor = design.primaryColor || "#E31E24";
   const accentColor = design.accentColor || "#2A2A2A";
   const footerLogo = design.footerLogoDataUrl || logo;
+  const myNextAirlineLogoUrl = "https://mynextairline.com/images/logo-light.png";
 
   return (
     <footer className="text-white mt-auto" style={{ backgroundColor: accentColor }}>
@@ -69,40 +72,89 @@ export function Footer() {
           <div>
             <h3 className="text-lg mb-4" style={{ color: primaryColor }}>{t("footer.contact.title")}</h3>
             <div className="space-y-3 text-sm">
-              <div className="flex items-center space-x-2 text-gray-300">
-                <Plane size={16} />
-                <span>vamsys.io</span>
-              </div>
-              <div className="flex items-center space-x-2 text-gray-300">
-                <Users size={16} />
+              <a
+                href="https://discord.gg/MfTT8KU5yC"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-gray-100 transition-colors hover:bg-white/10"
+              >
+                <ExternalLink size={16} />
                 <span>Discord</span>
-              </div>
-              <div className="flex items-center space-x-2 text-gray-300">
-                <Mail size={16} />
-                <span>support@nordwindvirtual.com</span>
+              </a>
+              <div>
+                <Button asChild className="bg-[#E31E24] text-white hover:bg-[#c41a20]">
+                  <Link to="/tickets">
+                    <MessageSquare className="mr-2" size={16} />
+                    {t("nav.tickets")}
+                  </Link>
+                </Button>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Other Projects Section */}
+        {/* Partner logos */}
         <div className="border-t border-gray-700 mt-8 pt-8">
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <p className="text-gray-400 text-sm">{t("footer.otherProjects")}</p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:items-stretch">
             <a
-              href="https://vamsys.io"
+              href="https://vatsim.net/"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-block"
+              aria-label="VATSIM"
+              className="group flex min-h-[138px] flex-col items-start justify-between rounded-2xl border border-white/10 bg-white/5 p-4 transition-colors hover:bg-white/10"
             >
-              <Button
-                variant="outline"
-                style={{ borderColor: primaryColor, color: primaryColor }}
-                className="bg-transparent border-[#E31E24] text-[#E31E24] hover:bg-[#E31E24] hover:text-white transition-colors"
-              >
-                Russian Airways Group
-                <ExternalLink className="ml-2" size={16} />
-              </Button>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                {t("footer.partners.official")}
+              </div>
+              <img
+                src={vatsimLogo}
+                alt="VATSIM"
+                className="h-auto max-h-[64px] w-full max-w-[260px] object-contain"
+                loading="lazy"
+              />
+              <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-cyan-300/80">
+                Aviate Educate Communicate
+              </div>
+            </a>
+
+            <a
+              href="https://vamsys.io/register/rag"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Russian Airways Group"
+              className="group flex min-h-[138px] flex-col items-start justify-between rounded-2xl border border-white/10 bg-white/5 p-4 transition-colors hover:bg-white/10"
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                {t("footer.partners.otherProject")}
+              </div>
+              <img
+                src={ragLogo}
+                alt="Russian Airways Group"
+                className="h-auto max-h-[52px] w-full max-w-[250px] object-contain"
+                loading="lazy"
+              />
+              <div className="text-sm text-gray-300">
+                {t("footer.partners.ragName")}
+              </div>
+            </a>
+
+            <a
+              href="https://mynextairline.com/airlines/nordwind-airlines-virtual"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="MyNextAirline"
+              className="group flex min-h-[138px] flex-col items-start justify-between rounded-2xl border border-white/10 bg-white/5 p-4 transition-colors hover:bg-white/10"
+            >
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
+                {t("footer.partners.voteForUs")}
+              </div>
+              <img
+                src={myNextAirlineLogoUrl}
+                alt="MyNextAirline"
+                className="h-auto max-h-[42px] w-full max-w-[250px] object-contain"
+                loading="lazy"
+              />
+              <div className="text-sm text-gray-300">My Next Airline</div>
             </a>
           </div>
         </div>
