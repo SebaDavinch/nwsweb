@@ -189,7 +189,7 @@ export function AdminNews() {
         setItems(mapped);
       }
     } catch (error) {
-      console.error("Failed to load alerts and NOTAMs", error);
+      console.error("Не удалось загрузить alerts и NOTAM", error);
     }
   }, [mapAlert, mapNotam]);
 
@@ -220,7 +220,7 @@ export function AdminNews() {
           body: JSON.stringify(requestBody),
         });
         if (!response.ok) {
-          alert(label("admin.news.notamSaveFailed", "Failed to save NOTAM in vAMSYS"));
+          alert(label("admin.news.notamSaveFailed", "Не удалось сохранить NOTAM в vAMSYS"));
           return;
         }
       } else if (data.category === "Alert") {
@@ -240,7 +240,7 @@ export function AdminNews() {
           body: JSON.stringify(requestBody),
         });
         if (!response.ok) {
-          alert(label("admin.news.alertSaveFailed", "Failed to save alert in vAMSYS"));
+          alert(label("admin.news.alertSaveFailed", "Не удалось сохранить alert в vAMSYS"));
           return;
         }
       }
@@ -249,8 +249,8 @@ export function AdminNews() {
       setIsFormOpen(false);
       setEditingItem(null);
     } catch (error) {
-      console.error("Ops announcement save failed", error);
-      alert(label("admin.news.operationFailed", "Operation failed"));
+      console.error("Не удалось сохранить операционное объявление", error);
+      alert(label("admin.news.operationFailed", "Операция не выполнена"));
     }
   };
 
@@ -265,12 +265,12 @@ export function AdminNews() {
         const endpoint = current.category === "Alert" ? `/api/admin/alerts/${current.externalId}` : `/api/admin/notams/${current.externalId}`;
         const response = await fetch(endpoint, { method: "DELETE" }).catch(() => null);
         if (!response || !response.ok) {
-          alert(current.category === "Alert" ? label("admin.news.deleteAlertFailed", "Failed to delete alert from vAMSYS") : t("admin.news.deleteNotamFailed") || "Failed to delete NOTAM from vAMSYS");
+          alert(current.category === "Alert" ? label("admin.news.deleteAlertFailed", "Не удалось удалить alert из vAMSYS") : t("admin.news.deleteNotamFailed") || "Не удалось удалить NOTAM из vAMSYS");
           return;
         }
         await loadOps();
       } catch (error) {
-        console.error("Delete operation failed", error);
+        console.error("Операция удаления завершилась ошибкой", error);
       }
     }
   };
@@ -291,8 +291,8 @@ export function AdminNews() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">{label("admin.news.title", "Alerts & NOTAMs")}</h2>
-          <p className="text-sm text-gray-500">{label("admin.news.subtitle", "Manage vAMSYS dashboard alerts and operational NOTAM bulletins.")}</p>
+          <h2 className="text-2xl font-bold text-gray-800">{label("admin.news.title", "Оповещения и NOTAM")}</h2>
+          <p className="text-sm text-gray-500">{label("admin.news.subtitle", "Управление оповещениями панели vAMSYS и операционными бюллетенями NOTAM.")}</p>
         </div>
         <Button 
           onClick={() => {
@@ -302,7 +302,7 @@ export function AdminNews() {
           className="bg-[#E31E24] hover:bg-[#c41a20] text-white"
         >
           <Plus className="w-4 h-4 mr-2" />
-          {label("admin.news.create", "Create Entry")}
+          {label("admin.news.create", "Создать запись")}
         </Button>
       </div>
 
@@ -313,7 +313,7 @@ export function AdminNews() {
             <div className="relative w-full md:w-96">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <Input 
-                placeholder={label("admin.news.search", "Search posts...")}
+                placeholder={label("admin.news.search", "Поиск записей...")}
                 className="pl-9"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -336,10 +336,10 @@ export function AdminNews() {
                   <SelectValue placeholder={t("admin.news.table.status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="archived">Archived</SelectItem>
+                  <SelectItem value="all">Все статусы</SelectItem>
+                  <SelectItem value="published">Опубликовано</SelectItem>
+                  <SelectItem value="draft">Черновик</SelectItem>
+                  <SelectItem value="archived">Архив</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -350,13 +350,13 @@ export function AdminNews() {
             <table className="w-full text-sm text-left">
               <thead className="bg-gray-50 text-gray-500 font-medium">
                 <tr>
-                  <th className="px-4 py-3">{label("admin.news.table.title", "Title")}</th>
+                  <th className="px-4 py-3">{label("admin.news.table.title", "Заголовок")}</th>
                   <th className="px-4 py-3">{t("news.category")}</th>
-                  <th className="px-4 py-3">{label("admin.news.table.source", "Source")}</th>
-                  <th className="px-4 py-3">{label("admin.news.table.status", "Status")}</th>
-                  <th className="px-4 py-3">{label("admin.news.table.author", "Author")}</th>
-                  <th className="px-4 py-3">{label("admin.news.table.date", "Date")}</th>
-                  <th className="px-4 py-3 text-right">{label("admin.news.table.actions", "Actions")}</th>
+                  <th className="px-4 py-3">{label("admin.news.table.source", "Источник")}</th>
+                  <th className="px-4 py-3">{label("admin.news.table.status", "Статус")}</th>
+                  <th className="px-4 py-3">{label("admin.news.table.author", "Автор")}</th>
+                  <th className="px-4 py-3">{label("admin.news.table.date", "Дата")}</th>
+                  <th className="px-4 py-3 text-right">{label("admin.news.table.actions", "Действия")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -380,7 +380,7 @@ export function AdminNews() {
                               : "border-gray-200 bg-gray-50 text-gray-700"
                           }
                         >
-                          {item.source === "vamsys" ? "vAMSYS" : "Local"}
+                          {item.source === "vamsys" ? "vAMSYS" : "Локально"}
                         </Badge>
                       </td>
                       <td className="px-4 py-3">
@@ -409,14 +409,14 @@ export function AdminNews() {
                               setIsFormOpen(true);
                             }}>
                               <Edit className="w-4 h-4 mr-2" />
-                              {label("admin.news.edit", "Edit")}
+                              {label("admin.news.edit", "Изменить")}
                             </DropdownMenuItem>
                             <DropdownMenuItem 
                               className="text-red-600 focus:text-red-600 focus:bg-red-50"
                               onClick={() => handleDelete(item.id)}
                             >
                               <Trash2 className="w-4 h-4 mr-2" />
-                              {label("admin.news.delete", "Delete")}
+                              {label("admin.news.delete", "Удалить")}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -426,7 +426,7 @@ export function AdminNews() {
                 ) : (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      {label("admin.news.noPosts", "No posts found for the current filters.")}
+                      {label("admin.news.noPosts", "Для текущих фильтров записи не найдены.")}
                     </td>
                   </tr>
                 )}

@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
+import { useLanguage } from "../../context/language-context";
 
 interface BookingItem {
   id: number;
@@ -46,6 +47,8 @@ interface BookingItem {
 }
 
 export function AdminBookingsPage() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [bookings, setBookings] = useState<BookingItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -64,7 +67,7 @@ export function AdminBookingsPage() {
       const payload = response.ok ? await response.json() : { bookings: [] };
       setBookings(Array.isArray(payload?.bookings) ? payload.bookings : []);
     } catch (error) {
-      console.error("Failed to load admin bookings", error);
+      console.error("Не удалось загрузить бронирования админки", error);
       setBookings([]);
     } finally {
       setIsLoading(false);
@@ -121,8 +124,8 @@ export function AdminBookingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">Bookings</h2>
-        <p className="text-sm text-gray-500">Review booking flow and annotate operational priorities.</p>
+        <h2 className="text-2xl font-bold text-gray-900">{tr("Бронирования", "Bookings")}</h2>
+        <p className="text-sm text-gray-500">{tr("Проверяйте поток бронирований и отмечайте операционные приоритеты.", "Review booking flow and mark operational priorities.")}</p>
       </div>
 
       <Card className="border-none shadow-sm">
@@ -130,15 +133,15 @@ export function AdminBookingsPage() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="relative w-full xl:max-w-sm">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <Input className="pl-9" placeholder="Search bookings..." value={search} onChange={(event) => setSearch(event.target.value)} />
+              <Input className="pl-9" placeholder={tr("Поиск бронирований...", "Search bookings...")} value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
                 <SelectTrigger className="w-full sm:w-44">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={tr("Статус", "Status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
+                  <SelectItem value="all">{tr("Все статусы", "All statuses")}</SelectItem>
                   {statusOptions.map((item) => (
                     <SelectItem key={item} value={item}>{item}</SelectItem>
                   ))}
@@ -146,10 +149,10 @@ export function AdminBookingsPage() {
               </Select>
               <Select value={priorityFilter} onValueChange={setPriorityFilter}>
                 <SelectTrigger className="w-full sm:w-44">
-                  <SelectValue placeholder="Priority" />
+                  <SelectValue placeholder={tr("Приоритет", "Priority")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All priorities</SelectItem>
+                  <SelectItem value="all">{tr("Все приоритеты", "All priorities")}</SelectItem>
                   {priorityOptions.map((item) => (
                     <SelectItem key={item} value={item}>{item}</SelectItem>
                   ))}
@@ -162,28 +165,28 @@ export function AdminBookingsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Pilot</TableHead>
-                  <TableHead>Booking</TableHead>
-                  <TableHead>Flight</TableHead>
-                  <TableHead>Meta</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{tr("Пилот", "Pilot")}</TableHead>
+                  <TableHead>{tr("Бронирование", "Booking")}</TableHead>
+                  <TableHead>{tr("Рейс", "Flight")}</TableHead>
+                  <TableHead>{tr("Метаданные", "Metadata")}</TableHead>
+                  <TableHead className="text-right">{tr("Действия", "Actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">Loading bookings...</TableCell>
+                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">{tr("Загрузка бронирований...", "Loading bookings...")}</TableCell>
                   </TableRow>
                 ) : filteredBookings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">No bookings found.</TableCell>
+                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">{tr("Бронирования не найдены.", "No bookings found.")}</TableCell>
                   </TableRow>
                 ) : (
                   filteredBookings.map((booking) => (
                     <TableRow key={booking.id}>
                       <TableCell>
                         <div className="font-medium text-gray-900">{booking.pilotName}</div>
-                        <div className="text-xs text-gray-500">{booking.pilotUsername || "—"}</div>
+                        <div className="text-xs text-gray-500">{booking.pilotUsername || tr("—", "—")}</div>
                       </TableCell>
                       <TableCell>
                         <div className="font-medium text-gray-900">{booking.callsign}</div>
@@ -191,20 +194,20 @@ export function AdminBookingsPage() {
                       </TableCell>
                       <TableCell>
                         <div>{booking.aircraftLabel}</div>
-                        <div className="text-xs text-gray-500">{booking.departureTime || "—"}</div>
+                        <div className="text-xs text-gray-500">{booking.departureTime || tr("—", "—")}</div>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-2">
                           <Badge variant="outline">{booking.status}</Badge>
                           <Badge variant="outline">{booking.meta?.priority || "normal"}</Badge>
                         </div>
-                        <div className="mt-1 text-xs text-gray-500">{booking.meta?.tag || "No tag"}</div>
+                        <div className="mt-1 text-xs text-gray-500">{booking.meta?.tag || tr("Без тега", "No tag")}</div>
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end">
                           <Button variant="outline" size="sm" onClick={() => openDialog(booking)}>
                             <Pencil className="h-4 w-4" />
-                            Edit
+                            {tr("Изменить", "Edit")}
                           </Button>
                         </div>
                       </TableCell>
@@ -220,34 +223,34 @@ export function AdminBookingsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Edit Booking Metadata</DialogTitle>
+            <DialogTitle>{tr("Изменение метаданных бронирования", "Edit booking metadata")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>Tag</Label>
+              <Label>{tr("Тег", "Tag")}</Label>
               <Input value={tag} onChange={(event) => setTag(event.target.value)} placeholder="manual-review" />
             </div>
             <div className="space-y-2">
-              <Label>Priority</Label>
+              <Label>{tr("Приоритет", "Priority")}</Label>
               <Select value={priority} onValueChange={setPriority}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="normal">Normal</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="normal">{tr("Обычный", "Normal")}</SelectItem>
+                  <SelectItem value="high">{tr("Высокий", "High")}</SelectItem>
+                  <SelectItem value="critical">{tr("Критический", "Critical")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2 md:col-span-2">
-              <Label>Notes</Label>
+              <Label>{tr("Заметки", "Notes")}</Label>
               <Textarea className="min-h-32" value={notes} onChange={(event) => setNotes(event.target.value)} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button className="bg-[#E31E24] hover:bg-[#c41a20] text-white" onClick={saveMeta}>Save</Button>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>{tr("Отмена", "Cancel")}</Button>
+            <Button className="bg-[#E31E24] hover:bg-[#c41a20] text-white" onClick={saveMeta}>{tr("Сохранить", "Save")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

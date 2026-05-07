@@ -2,6 +2,7 @@ import { Badge } from "../ui/badge";
 import { AdminContentManager } from "./admin-content-manager";
 import { Button } from "../ui/button";
 import { useSiteDesign } from "../../hooks/use-site-design";
+import { useLanguage } from "../../context/language-context";
 
 interface ActivityItem {
   id: string;
@@ -23,14 +24,15 @@ interface ActivityItem {
 
 export function AdminActivities() {
   const design = useSiteDesign();
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
 
   const openBannerGenerator = (formData: Record<string, string | boolean>) => {
-    const baseUrl = String(design.bannerGeneratorUrl || "").trim();
-    if (!baseUrl || typeof window === "undefined") {
+    if (typeof window === "undefined") {
       return;
     }
 
-    const params = new URL(baseUrl, window.location.origin);
+    const params = new URL("/admin/banner-generator", window.location.origin);
     const push = (key: string, value: string | boolean | undefined) => {
       const normalized = String(value ?? "").trim();
       if (normalized) {
@@ -54,9 +56,9 @@ export function AdminActivities() {
   return (
     <AdminContentManager<ActivityItem>
       collection="activities"
-      title="Activities"
-      subtitle="Manage the public Activities page with fully manual News, Event, and NOTAM entries."
-      singularLabel="Activity"
+      title={tr("Активности", "Activities")}
+      subtitle={tr("Управляйте публичной страницей активностей с ручными записями новостей, событий и NOTAM.", "Manage the public activities page with manual news, event, and NOTAM entries.")}
+      singularLabel={tr("Активность", "Activity")}
       searchKeys={["title", "category", "type", "author", "tag", "summary", "content", "bannerUrl"]}
       filterKeys={["category", "status", "type"]}
       renderFieldExtras={({ field, formData }) => {
@@ -64,88 +66,83 @@ export function AdminActivities() {
           return null;
         }
 
-        const generatorUrl = String(design.bannerGeneratorUrl || "").trim();
-        return generatorUrl ? (
+        return (
           <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2">
-            <span className="text-xs text-gray-500">Open the configured banner generator with the current activity fields prefilled.</span>
+            <span className="text-xs text-gray-500">{tr("Открыть встроенный генератор баннеров с уже заполненными полями текущей активности, затем сохранить локальный ассет и вставить полученный URL сюда.", "Open the embedded banner generator with current activity fields prefilled, save the local asset, then paste the resulting URL here.")}</span>
             <Button type="button" variant="outline" size="sm" onClick={() => openBannerGenerator(formData)}>
-              Open generator
+              {tr("Открыть генератор", "Open generator")}
             </Button>
-          </div>
-        ) : (
-          <div className="text-xs text-gray-500">
-            Configure Banner generator URL in System Settings to launch a prefilled generator from this editor.
           </div>
         );
       }}
       columns={[
         {
           key: "bannerUrl",
-          label: "Banner",
+          label: tr("Баннер", "Banner"),
           render: (item) => item.bannerUrl ? (
             <div className="h-12 w-24 overflow-hidden rounded-lg border border-gray-200 bg-gray-100">
-              <img src={item.bannerUrl} alt={item.title || "Banner"} className="h-full w-full object-cover" loading="lazy" />
+              <img src={item.bannerUrl} alt={item.title || tr("Баннер", "Banner")} className="h-full w-full object-cover" loading="lazy" />
             </div>
-          ) : "—",
+          ) : tr("—", "—"),
         },
-        { key: "title", label: "Activity" },
+        { key: "title", label: tr("Активность", "Activity") },
         {
           key: "category",
-          label: "Category",
-          render: (item) => <Badge variant="outline">{item.category || "News"}</Badge>,
+          label: tr("Категория", "Category"),
+          render: (item) => <Badge variant="outline">{item.category || tr("Новость", "News")}</Badge>,
         },
         {
           key: "status",
-          label: "Status",
-          render: (item) => <Badge variant="outline">{item.status || "Published"}</Badge>,
+          label: tr("Статус", "Status"),
+          render: (item) => <Badge variant="outline">{item.status || tr("Опубликовано", "Published")}</Badge>,
         },
-        { key: "author", label: "Author" },
-        { key: "date", label: "Date" },
+        { key: "author", label: tr("Автор", "Author") },
+        { key: "date", label: tr("Дата", "Date") },
       ]}
       fields={[
-        { key: "title", label: "Title", type: "text" },
+        { key: "title", label: tr("Заголовок", "Title"), type: "text" },
         {
           key: "category",
-          label: "Category",
+          label: tr("Категория", "Category"),
           type: "select",
           options: [
-            { label: "News", value: "News" },
-            { label: "Event", value: "Event" },
+            { label: tr("Новость", "News"), value: "News" },
+            { label: tr("Событие", "Event"), value: "Event" },
           ],
         },
         {
           key: "type",
-          label: "Type",
+          label: tr("Тип", "Type"),
           type: "select",
           options: [
-            { label: "News", value: "news" },
-            { label: "Event", value: "event" },
-            { label: "Ops", value: "ops" },
-            { label: "Community", value: "community" },
+            { label: tr("Новость", "News"), value: "news" },
+            { label: tr("Событие", "Event"), value: "event" },
+            { label: tr("Операции", "Operations"), value: "ops" },
+            { label: tr("Комьюнити", "Community"), value: "community" },
           ],
         },
         {
           key: "status",
-          label: "Status",
+          label: tr("Статус", "Status"),
           type: "select",
           options: [
-            { label: "Published", value: "Published" },
-            { label: "Draft", value: "Draft" },
-            { label: "Archived", value: "Archived" },
+            { label: tr("Опубликовано", "Published"), value: "Published" },
+            { label: tr("Черновик", "Draft"), value: "Draft" },
+            { label: tr("Архив", "Archived"), value: "Archived" },
           ],
         },
-        { key: "author", label: "Author", type: "text" },
-        { key: "date", label: "Date", type: "text", placeholder: "2026-04-18" },
-        { key: "tag", label: "Tag", type: "text" },
-        { key: "linkUrl", label: "Link URL", type: "text", placeholder: "https://..." },
-        { key: "bannerUrl", label: "Banner URL", type: "text", placeholder: "https://cdn.example.com/banner.webp" },
-        { key: "target", label: "Target", type: "text" },
-        { key: "summary", label: "Summary", type: "textarea" },
-        { key: "content", label: "Content", type: "textarea" },
-        { key: "published", label: "Published", type: "checkbox" },
-        { key: "featured", label: "Featured", type: "checkbox" },
-        { key: "order", label: "Order", type: "number" },
-        { key: "views", label: "Views", type: "number" },
+        { key: "author", label: tr("Автор", "Author"), type: "text" },
+        { key: "date", label: tr("Дата", "Date"), type: "text", placeholder: "2026-04-18" },
+        { key: "tag", label: tr("Тег", "Tag"), type: "text" },
+        { key: "linkUrl", label: tr("Ссылка", "Link"), type: "text", placeholder: "https://..." },
+        { key: "bannerUrl", label: tr("URL баннера", "Banner URL"), type: "text", placeholder: "https://cdn.example.com/banner.webp" },
+        { key: "target", label: tr("Цель", "Target"), type: "text" },
+        { key: "summary", label: tr("Краткое описание", "Summary"), type: "textarea" },
+        { key: "content", label: tr("Содержимое", "Content"), type: "textarea" },
+        { key: "published", label: tr("Опубликовано", "Published"), type: "checkbox" },
+        { key: "featured", label: tr("Рекомендуемое", "Featured"), type: "checkbox" },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
+        { key: "views", label: tr("Просмотры", "Views"), type: "number" },
       ]}
     />
   );

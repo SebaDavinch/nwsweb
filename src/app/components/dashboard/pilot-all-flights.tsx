@@ -16,6 +16,7 @@ import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { FlightMap, type Airport, type Route as FlightMapRoute, type SelectableRoute } from "./flight-map";
+import { fetchDashboardBootstrap, getCachedDashboardBootstrap } from "./dashboard-bootstrap-cache";
 
 interface RouteOption {
   id: number;
@@ -172,6 +173,11 @@ export function PilotAllFlights({ onOpenBookings }: PilotAllFlightsProps) {
   const [search, setSearch] = useState("");
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [reportingRouteId, setReportingRouteId] = useState<number | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [filterAirline, setFilterAirline] = useState<string>("all");
+  const [filterCity, setFilterCity] = useState("");
+  const [filterHub, setFilterHub] = useState<string>("all");
 
   const tr = (key: string, vars?: Record<string, string | number>) => {
     const template = t(key);
@@ -193,13 +199,9 @@ export function PilotAllFlights({ onOpenBookings }: PilotAllFlightsProps) {
     }
 
     try {
-      const [routesResponse, fleetResponse] = await Promise.all([
-        fetch("/api/vamsys/routes", { credentials: "include" }),
-        fetch("/api/vamsys/fleet", { credentials: "include" }),
-      ]);
-
-      const routesPayload = (await routesResponse.json().catch(() => null)) as RoutesResponse | null;
-      const fleetPayload = (await fleetResponse.json().catch(() => null)) as FleetResponse | null;
+      const bootstrap = await fetchDashboardBootstrap({ force: false });
+      const routesPayload = { routes: Array.isArray(bootstrap?.routes) ? bootstrap.routes : [] } as RoutesResponse;
+      const fleetPayload = { fleets: Array.isArray(bootstrap?.fleets) ? bootstrap.fleets : [] } as FleetResponse;
 
       setRouteOptions(Array.isArray(routesPayload?.routes) ? routesPayload.routes : []);
       setAircraftOptions(
@@ -216,8 +218,28 @@ export function PilotAllFlights({ onOpenBookings }: PilotAllFlightsProps) {
           : []
       );
     } catch {
-      setRouteOptions([]);
-      setAircraftOptions([]);
+      const cached = getCachedDashboardBootstrap();
+      if (cached) {
+        const routesPayload = { routes: Array.isArray(cached?.routes) ? cached.routes : [] } as RoutesResponse;
+        const fleetPayload = { fleets: Array.isArray(cached?.fleets) ? cached.fleets : [] } as FleetResponse;
+        setRouteOptions(Array.isArray(routesPayload?.routes) ? routesPayload.routes : []);
+        setAircraftOptions(
+          Array.isArray(fleetPayload?.fleets)
+            ? fleetPayload.fleets.flatMap((fleet) =>
+                (Array.isArray(fleet?.aircraft) ? fleet.aircraft : []).map((aircraft) => ({
+                  id: Number(aircraft?.id || 0) || 0,
+                  fleetId: Number(fleet?.id || 0) || 0,
+                  model: String(aircraft?.model || "Aircraft").trim() || "Aircraft",
+                  registration: String(aircraft?.registration || "").trim(),
+                  fleetName: String(fleet?.name || fleet?.code || "Fleet").trim() || "Fleet",
+                }))
+              )
+            : []
+        );
+      } else {
+        setRouteOptions([]);
+        setAircraftOptions([]);
+      }
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -228,30 +250,41 @@ export function PilotAllFlights({ onOpenBookings }: PilotAllFlightsProps) {
     void loadData();
   }, []);
 
+  const airlineOptions = useMemo(() => {
+    return Array.from(new Set(routeOptions.map((r) => String(r.airlineCode || "").trim()).filter(Boolean))).sort();
+  }, [routeOptions]);
+
+  const hubOptions = useMemo(() => {
+    return Array.from(new Set(routeOptions.map((r) => String(r.fromCode || "").trim().toUpperCase()).filter(Boolean))).sort();
+  }, [routeOptions]);
+
   const filteredRoutes = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
+    const normalizedCity = filterCity.trim().toLowerCase();
     const base = [...routeOptions].sort((left, right) => {
       const leftFlight = String(left.flightNumber || left.callsign || "");
       const rightFlight = String(right.flightNumber || right.callsign || "");
       return leftFlight.localeCompare(rightFlight);
     });
 
-    if (!normalizedSearch) {
-      return base;
-    }
-
-    return base.filter((route) =>
-      [
-        route.flightNumber,
-        route.callsign,
-        route.fromCode,
-        route.fromName,
-        route.toCode,
-        route.toName,
-        route.routeText,
-      ].some((value) => String(value || "").toLowerCase().includes(normalizedSearch))
-    );
-  }, [routeOptions, search]);
+    return base.filter((route) => {
+      if (filterAirline !== "all" && String(route.airlineCode || "").trim() !== filterAirline) return false;
+      if (filterHub !== "all" && String(route.fromCode || "").trim().toUpperCase() !== filterHub) return false;
+      if (normalizedCity) {
+        const match = [route.fromCode, route.fromName, route.toCode, route.toName].some(
+          (v) => String(v || "").toLowerCase().includes(normalizedCity)
+        );
+        if (!match) return false;
+      }
+      if (normalizedSearch) {
+        const match = [route.flightNumber, route.callsign, route.fromCode, route.fromName, route.toCode, route.toName, route.routeText].some(
+          (v) => String(v || "").toLowerCase().includes(normalizedSearch)
+        );
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [routeOptions, search, filterAirline, filterCity, filterHub]);
 
   useEffect(() => {
     if (!filteredRoutes.length) {
@@ -431,182 +464,245 @@ export function PilotAllFlights({ onOpenBookings }: PilotAllFlightsProps) {
     }
   };
 
+  const activeFilterCount = (filterAirline !== "all" ? 1 : 0) + (filterCity.trim() ? 1 : 0) + (filterHub !== "all" ? 1 : 0);
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1d1d1f]">{t("dashboard.tabs.allFlights")}</h1>
-          <p className="mt-1 text-sm text-gray-500">{t("allFlights.subtitle")}</p>
+    <div className="relative -mx-8 -mt-6 overflow-hidden rounded-2xl" style={{ height: "calc(100svh - 100px)" }}>
+      {/* ── Full-screen map ── */}
+      {isLoading ? (
+        <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-gray-500">
+          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+          {t("allFlights.loading")}
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" onClick={() => void loadData({ silent: true })} disabled={isRefreshing || isLoading}>
-            {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-            {t("allFlights.refresh")}
-          </Button>
-          <Button className="bg-[#E31E24] hover:bg-[#c41a20] text-white" onClick={onOpenBookings}>
-            <Plane className="mr-2 h-4 w-4" />
-            {t("allFlights.openBookings")}
-          </Button>
-        </div>
+      ) : (
+        <FlightMap
+          route={selectedMapRoute}
+          airports={airportFallbacks}
+          availableRoutes={mapRoutes}
+          selectedAirportCode={String(selectedRoute?.toCode || "").trim().toUpperCase() || null}
+          onAirportSelect={(airportCode) => {
+            const nextRoute = filteredRoutes.find(
+              (route) => String(route.toCode || "").trim().toUpperCase() === String(airportCode).trim().toUpperCase()
+            );
+            if (nextRoute) setSelectedRouteId(nextRoute.id);
+          }}
+        />
+      )}
+
+      {/* ── Top-left controls ── */}
+      <div className="absolute left-4 top-4 z-[1000] flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setSidebarOpen((v) => !v)}
+          className="flex items-center gap-2 rounded-full bg-white/95 px-4 py-2 text-sm font-medium text-gray-700 shadow-lg backdrop-blur-sm transition hover:bg-white"
+        >
+          <MapPin className="h-4 w-4 text-[#E31E24]" />
+          {sidebarOpen ? "Скрыть рейсы" : `Рейсы (${filteredRoutes.length})`}
+        </button>
+        <button
+          type="button"
+          onClick={() => void loadData({ silent: true })}
+          disabled={isRefreshing}
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-white/95 shadow-lg backdrop-blur-sm transition hover:bg-white"
+          title="Обновить"
+        >
+          <RefreshCcw className={`h-4 w-4 text-gray-600 ${isRefreshing ? "animate-spin" : ""}`} />
+        </button>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-5">
-            <div className="text-sm text-gray-500">{t("allFlights.kpi.routes")}</div>
-            <div className="mt-1 text-3xl font-bold text-[#1d1d1f]">{routeStats.routes}</div>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-5">
-            <div className="text-sm text-gray-500">{t("allFlights.kpi.origins")}</div>
-            <div className="mt-1 text-3xl font-bold text-[#1d1d1f]">{routeStats.origins}</div>
-          </CardContent>
-        </Card>
-        <Card className="border-none shadow-sm">
-          <CardContent className="p-5">
-            <div className="text-sm text-gray-500">{t("allFlights.kpi.destinations")}</div>
-            <div className="mt-1 text-3xl font-bold text-[#1d1d1f]">{routeStats.destinations}</div>
-          </CardContent>
-        </Card>
+      {/* ── Top-right: stats + filter button ── */}
+      <div className="absolute right-4 top-4 z-[1000] flex items-center gap-2">
+        <div className="flex items-center gap-1.5 rounded-full bg-white/95 px-4 py-2 text-xs text-gray-600 shadow-lg backdrop-blur-sm">
+          <span className="font-semibold text-gray-900">{routeStats.routes}</span> рейсов ·
+          <span className="font-semibold text-gray-900">{routeStats.origins}</span> аэропортов
+        </div>
+        <button
+          type="button"
+          onClick={() => setFilterOpen((v) => !v)}
+          className={`relative flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-sm transition ${
+            filterOpen || activeFilterCount > 0
+              ? "bg-[#E31E24] text-white"
+              : "bg-white/95 text-gray-700 hover:bg-white"
+          }`}
+        >
+          <Search className="h-4 w-4" />
+          Фильтры
+          {activeFilterCount > 0 && (
+            <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] font-bold text-[#E31E24]">
+              {activeFilterCount}
+            </span>
+          )}
+        </button>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
-        <Card className="border-none shadow-md overflow-hidden">
-          <CardHeader className="border-b border-gray-100">
-            <CardTitle className="flex items-center gap-2 text-lg text-[#1d1d1f]">
-              <MapPin className="h-5 w-5 text-[#E31E24]" />
-              {t("allFlights.mapTitle")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {isLoading ? (
-              <div className="flex min-h-[520px] items-center justify-center text-sm text-gray-500">
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                {t("allFlights.loading")}
-              </div>
-            ) : (
-              <div className="h-[520px]">
-                <FlightMap
-                  route={selectedMapRoute}
-                  airports={airportFallbacks}
-                  availableRoutes={mapRoutes}
-                  selectedAirportCode={String(selectedRoute?.toCode || "").trim().toUpperCase() || null}
-                  onAirportSelect={(airportCode) => {
-                    const nextRoute = filteredRoutes.find(
-                      (route) => String(route.toCode || "").trim().toUpperCase() === String(airportCode).trim().toUpperCase()
-                    );
-                    if (nextRoute) {
-                      setSelectedRouteId(nextRoute.id);
-                    }
-                  }}
-                />
-              </div>
-            )}
-          </CardContent>
-        </Card>
+      {/* ── Filter panel ── */}
+      {filterOpen && (
+        <div className="absolute right-4 top-16 z-[1000] w-80 rounded-2xl bg-white/98 p-4 shadow-2xl backdrop-blur-sm">
+          {/* City/ICAO search */}
+          <div className="mb-4">
+            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Город или ИКАО</div>
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={filterCity}
+                onChange={(e) => setFilterCity(e.target.value)}
+                placeholder="Москва, UUEE, Antalya…"
+                className="w-full rounded-xl border border-gray-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-[#E31E24] focus:ring-1 focus:ring-[#E31E24]"
+              />
+            </div>
+          </div>
 
-        <div className="space-y-4">
-          <Card className="border-none shadow-sm">
-            <CardContent className="p-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder={t("allFlights.searchPlaceholder")}
-                  className="pl-9"
-                />
-              </div>
-            </CardContent>
-          </Card>
+          {/* Search by flight number */}
+          <div className="mb-4">
+            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Номер рейса</div>
+            <div className="relative">
+              <Plane className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="2S023…"
+                className="w-full rounded-xl border border-gray-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-[#E31E24] focus:ring-1 focus:ring-[#E31E24]"
+              />
+            </div>
+          </div>
 
-          <Card className="border-none shadow-md">
-            <CardHeader className="border-b border-gray-100">
-              <CardTitle className="text-lg text-[#1d1d1f]">{t("allFlights.listTitle")}</CardTitle>
-            </CardHeader>
-            <CardContent className="max-h-[560px] space-y-3 overflow-y-auto p-4">
-              {!isLoading && filteredRoutes.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50 p-6 text-center text-sm text-gray-500">
-                  {t("allFlights.empty")}
-                </div>
-              ) : null}
-
-              {filteredRoutes.map((route) => {
-                const isActive = route.id === selectedRouteId;
-                return (
+          {/* Airline filter */}
+          {airlineOptions.length > 1 && (
+            <div className="mb-4">
+              <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Авиакомпания</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFilterAirline("all")}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterAirline === "all" ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  Все
+                </button>
+                {airlineOptions.map((code) => (
                   <button
-                    key={route.id}
+                    key={code}
                     type="button"
-                    onClick={() => setSelectedRouteId(route.id)}
-                    className={`w-full rounded-2xl border p-4 text-left transition ${
-                      isActive ? "border-[#E31E24] bg-red-50/70 shadow-sm" : "border-gray-200 bg-white hover:border-gray-300"
-                    }`}
+                    onClick={() => setFilterAirline(filterAirline === code ? "all" : code)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterAirline === code ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <div className="text-lg font-bold text-[#1d1d1f]">{route.flightNumber || route.callsign || `Route ${route.id}`}</div>
-                          <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">
-                            {getRouteFrequencyLabel(route, t)}
-                          </Badge>
-                        </div>
-                        <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
-                          <span>{route.fromCode || "—"}</span>
-                          <ArrowRight className="h-3.5 w-3.5 text-gray-400" />
-                          <span>{route.toCode || "—"}</span>
-                        </div>
-                        <div className="mt-1 text-xs text-gray-500">
-                          {(route.fromName || route.fromCode || "—") + " • " + (route.toName || route.toCode || "—")}
-                        </div>
-                      </div>
-                      <div className="text-right text-xs text-gray-500">
-                        <div>{formatRouteDistanceNm(route.distance)}</div>
-                        <div className="mt-1">{formatRouteDuration(route.duration)}</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-gray-500">
-                      <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
-                        {getRouteAircraftTypeLabel(route, aircraftOptions, t)}
-                      </Badge>
-                      {route.routeText ? (
-                        <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
-                          {route.routeText}
-                        </Badge>
-                      ) : null}
-                    </div>
-
-                    {isActive ? (
-                      <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-red-100 pt-4">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="border-amber-300 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void handleReportOutdatedRoute(route);
-                          }}
-                          disabled={reportingRouteId === route.id}
-                        >
-                          {reportingRouteId === route.id ? (
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          ) : (
-                            <AlertTriangle className="mr-2 h-4 w-4" />
-                          )}
-                          {t("bookings.reportInactive")}
-                        </Button>
-                        <div className="text-xs text-gray-500">{t("bookings.reportInactiveHint")}</div>
-                      </div>
-                    ) : null}
+                    {code}
                   </button>
-                );
-              })}
-            </CardContent>
-          </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Hub filter */}
+          <div>
+            <div className="mb-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500">Хаб вылета</div>
+            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => setFilterHub("all")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterHub === "all" ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+              >
+                Все
+              </button>
+              {hubOptions.map((code) => (
+                <button
+                  key={code}
+                  type="button"
+                  onClick={() => setFilterHub(filterHub === code ? "all" : code)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterHub === code ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  {code}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activeFilterCount > 0 && (
+            <button
+              type="button"
+              onClick={() => { setFilterAirline("all"); setFilterCity(""); setFilterHub("all"); setSearch(""); }}
+              className="mt-4 w-full rounded-xl border border-gray-200 py-1.5 text-xs text-gray-500 hover:bg-gray-50 transition"
+            >
+              Сбросить все фильтры
+            </button>
+          )}
         </div>
-      </div>
+      )}
+
+      {/* ── Sidebar ── */}
+      {sidebarOpen && (
+        <div className="absolute left-4 top-16 bottom-4 z-[999] w-80 overflow-hidden rounded-2xl bg-white/98 shadow-2xl backdrop-blur-sm flex flex-col">
+          <div className="border-b border-gray-100 px-4 py-3">
+            <div className="text-sm font-semibold text-gray-800">{t("allFlights.listTitle")}</div>
+            <div className="text-xs text-gray-500">{filteredRoutes.length} рейсов</div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            {filteredRoutes.length === 0 ? (
+              <div className="py-8 text-center text-sm text-gray-400">{t("allFlights.empty")}</div>
+            ) : null}
+            {filteredRoutes.map((route) => {
+              const isActive = route.id === selectedRouteId;
+              return (
+                <button
+                  key={route.id}
+                  type="button"
+                  onClick={() => setSelectedRouteId(route.id)}
+                  className={`w-full rounded-xl border p-3 text-left transition ${
+                    isActive ? "border-[#E31E24] bg-red-50 shadow-sm" : "border-gray-100 hover:border-gray-200 hover:bg-gray-50"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-sm text-gray-900">{route.flightNumber || route.callsign || `#${route.id}`}</span>
+                        <span className="text-[10px] text-gray-400">{getRouteFrequencyLabel(route, t)}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-gray-600 mt-0.5">
+                        <span className="font-medium">{route.fromCode || "—"}</span>
+                        <ArrowRight className="h-3 w-3 text-gray-400" />
+                        <span className="font-medium">{route.toCode || "—"}</span>
+                      </div>
+                      <div className="text-[11px] text-gray-400 truncate mt-0.5">
+                        {(route.fromName || "") + (route.toName ? ` · ${route.toName}` : "")}
+                      </div>
+                    </div>
+                    <div className="text-right text-[11px] text-gray-400 shrink-0">
+                      <div>{formatRouteDistanceNm(route.distance)}</div>
+                      <div>{formatRouteDuration(route.duration)}</div>
+                    </div>
+                  </div>
+                  {isActive && (
+                    <div className="mt-2 flex flex-wrap gap-1.5 border-t border-red-100 pt-2">
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                        {getRouteAircraftTypeLabel(route, aircraftOptions, t)}
+                      </span>
+                      {route.routeText && (
+                        <div className="w-full text-[11px] text-sky-600 break-all">{route.routeText}</div>
+                      )}
+                      <button
+                        type="button"
+                        className="mt-1 flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-700 hover:bg-amber-100 transition"
+                        onClick={(e) => { e.stopPropagation(); void handleReportOutdatedRoute(route); }}
+                        disabled={reportingRouteId === route.id}
+                      >
+                        {reportingRouteId === route.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <AlertTriangle className="h-3 w-3" />}
+                        {t("bookings.reportInactive")}
+                      </button>
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <div className="border-t border-gray-100 p-3">
+            <Button size="sm" className="w-full bg-[#E31E24] hover:bg-[#c41a20] text-white" onClick={onOpenBookings}>
+              <Plane className="mr-2 h-3.5 w-3.5" />
+              {t("allFlights.openBookings")}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

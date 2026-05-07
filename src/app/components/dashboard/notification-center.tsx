@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 import {
   Bell,
@@ -13,6 +13,7 @@ import {
   Trash2,
   Trophy,
 } from "lucide-react";
+import { useAuth } from "../../context/auth-context";
 import { useNotifications, type NotificationCategory, type NotificationItem } from "../../context/notifications-context";
 import { useLanguage } from "../../context/language-context";
 import { Badge } from "../ui/badge";
@@ -91,6 +92,15 @@ const formatNotificationTime = (value: string, locale: string) => {
   });
 };
 
+interface StaffTicketPreview {
+  id: string;
+  number: number;
+  subject: string;
+  status: string;
+  unreadCount: number;
+  updatedAt?: string;
+}
+
 const NotificationCard = ({
   item,
   onRead,
@@ -157,9 +167,13 @@ const NotificationCard = ({
   );
 };
 
-export function NotificationCenter() {
+export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashboard" | "header" }) {
   const [open, setOpen] = useState(false);
+  const [isTicketLoading, setIsTicketLoading] = useState(false);
+  const [staffTicketUnreadCount, setStaffTicketUnreadCount] = useState(0);
+  const [staffTickets, setStaffTickets] = useState<StaffTicketPreview[]>([]);
   const navigate = useNavigate();
+  const { isAuthenticated, isAdmin, isStaff } = useAuth();
   const { t, language } = useLanguage();
   const {
     notifications,
@@ -170,6 +184,51 @@ export function NotificationCenter() {
     deleteAllNotifications,
   } = useNotifications();
   const locale = language === "ru" ? "ru-RU" : "en-US";
+  const canViewStaffNotifications = isAuthenticated && (isAdmin || isStaff);
+  const totalUnreadCount = unreadCount + staffTicketUnreadCount;
+
+  useEffect(() => {
+    if (!canViewStaffNotifications) {
+      setIsTicketLoading(false);
+      setStaffTicketUnreadCount(0);
+      setStaffTickets([]);
+      return;
+    }
+
+    let active = true;
+    const loadTickets = async () => {
+      setIsTicketLoading(true);
+      try {
+        const response = await fetch("/api/tickets", { credentials: "include" });
+        if (!response.ok) {
+          return;
+        }
+
+        const payload = await response.json().catch(() => null);
+        if (!active) {
+          return;
+        }
+
+        const nextTickets = Array.isArray(payload?.tickets) ? payload.tickets : [];
+        setStaffTicketUnreadCount(Number(payload?.unreadCount || 0) || 0);
+        setStaffTickets(nextTickets.slice(0, 6));
+      } finally {
+        if (active) {
+          setIsTicketLoading(false);
+        }
+      }
+    };
+
+    void loadTickets();
+    const timer = window.setInterval(() => {
+      void loadTickets();
+    }, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [canViewStaffNotifications]);
 
   const groupedNotifications = useMemo(() => {
     const groups = new Map<NotificationCategory, NotificationItem[]>();
@@ -192,18 +251,33 @@ export function NotificationCenter() {
     navigate(item.actionUrl);
   };
 
+  const handleOpenStaffTickets = () => {
+    setOpen(false);
+    navigate("/admin/tickets");
+  };
+
+  const hasAnyNotifications = notifications.length > 0 || staffTickets.length > 0;
+  const showStaffSection = canViewStaffNotifications && (isTicketLoading || staffTickets.length > 0);
+  const buttonClass = variant === "header"
+    ? "relative h-10 w-10 rounded-full border border-white/10 bg-transparent text-[#E31E24] hover:bg-white/10 hover:text-white"
+    : "relative h-11 w-11 rounded-xl border-red-100 bg-white text-[#E31E24] hover:bg-red-50 hover:text-[#c21920]";
+  const staffTitle = language === "ru" ? "Уведомления staff" : "Staff notifications";
+  const staffEmptyText = language === "ru" ? "Новых staff-уведомлений нет." : "No new staff notifications.";
+  const staffOpenText = language === "ru" ? "Открыть staff-центр" : "Open staff center";
+  const staffStatusLabel = language === "ru" ? "Статус" : "Status";
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button
           variant="outline"
           size="icon"
-          className="relative h-11 w-11 rounded-xl border-red-100 bg-white text-[#E31E24] hover:bg-red-50 hover:text-[#c21920]"
+          className={buttonClass}
         >
           <Bell className="h-5 w-5" />
-          {unreadCount > 0 ? (
+          {totalUnreadCount > 0 ? (
             <span className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[#E31E24] px-1 text-[11px] font-bold text-white shadow-sm">
-              {unreadCount > 99 ? "99+" : unreadCount}
+              {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
             </span>
           ) : null}
         </Button>
@@ -222,7 +296,7 @@ export function NotificationCenter() {
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-y border-gray-100 py-3">
           <div className="text-sm text-gray-500">
-            {unreadCount > 0 ? `${unreadCount} ${t("notifications.unreadSuffix")}` : t("notifications.allRead")}
+            {totalUnreadCount > 0 ? `${totalUnreadCount} ${t("notifications.unreadSuffix")}` : t("notifications.allRead")}
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={markAllAsRead} disabled={!notifications.length || unreadCount === 0}>
@@ -242,7 +316,7 @@ export function NotificationCenter() {
           </div>
         </div>
 
-        {notifications.length === 0 ? (
+        {!hasAnyNotifications && !showStaffSection ? (
           <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-red-50 text-[#E31E24]">
               <Bell className="h-7 w-7" />
@@ -255,6 +329,51 @@ export function NotificationCenter() {
         ) : (
           <ScrollArea className="h-[56vh] pr-4">
             <div className="space-y-6">
+              {showStaffSection ? (
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-semibold text-sky-600">{staffTitle}</div>
+                    <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
+                      {staffTicketUnreadCount > 0 ? staffTicketUnreadCount : staffTickets.length}
+                    </Badge>
+                  </div>
+                  {isTicketLoading && staffTickets.length === 0 ? (
+                    <div className="text-sm text-gray-500">Loading...</div>
+                  ) : staffTickets.length === 0 ? (
+                    <div className="text-sm text-gray-500">{staffEmptyText}</div>
+                  ) : (
+                    <div className="space-y-3">
+                      {staffTickets.map((item) => (
+                        <Card key={item.id} className={`border shadow-none ${item.unreadCount > 0 ? "border-sky-100 bg-sky-50/60" : "bg-white"}`}>
+                          <CardContent className="p-4">
+                            <div className="flex items-start gap-3">
+                              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-sky-600">
+                                <MessageSquareWarning className="h-5 w-5" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                  <div className="font-semibold text-[#1d1d1f]">#{item.number} {item.subject}</div>
+                                  <Badge variant="outline" className="border-sky-200 bg-sky-50 text-sky-700">
+                                    {staffTitle}
+                                  </Badge>
+                                  {item.unreadCount > 0 ? <Badge className="bg-[#E31E24] text-white">{item.unreadCount}</Badge> : null}
+                                </div>
+                                <div className="text-sm text-gray-600">{staffStatusLabel}: {item.status}</div>
+                                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                  <div className="text-xs text-gray-400">{formatNotificationTime(item.updatedAt || "", locale)}</div>
+                                  <Button variant="outline" size="sm" onClick={handleOpenStaffTickets}>
+                                    {staffOpenText}
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              ) : null}
               {groupedNotifications.map(([category, items]) => {
                 const meta = CATEGORY_META[category] || CATEGORY_META.system;
 

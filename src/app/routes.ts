@@ -3,6 +3,7 @@ import { Root } from "./components/root";
 import { Home } from "./components/home";
 import { About } from "./components/about";
 import { Fleet } from "./components/fleet";
+import { FleetAircraftPage } from "./components/fleet-aircraft-page";
 import { Routes } from "./components/routes";
 import { Join } from "./components/join";
 import { LiveFlights } from "./components/live-flights";
@@ -19,7 +20,7 @@ import { AdminPilots } from "./components/admin/admin-pilots";
 import { AdminPilotProfile } from "./components/admin/admin-pilot-profile";
 import { AdminFleet } from "./components/admin/admin-fleet";
 import { AdminSettings } from "./components/admin/admin-settings";
-import { AdminRoot } from "./components/admin/admin-root";
+import { AdminLayout } from "./components/admin/admin-layout";
 import { AdminDocuments } from "./components/admin/admin-documents";
 import { AdminStaff } from "./components/admin/admin-staff";
 import { AdminEvents } from "./components/admin/admin-events";
@@ -35,6 +36,9 @@ import { AdminDiscordBot } from "./components/admin/admin-discord-bot";
 import { AdminTelegramBot } from "./components/admin/admin-telegram-bot";
 import { AdminAuditLogs } from "./components/admin/admin-audit-logs";
 import { AdminAuthLogs } from "./components/admin/admin-auth-logs";
+import { StaffTeam } from "./components/staff-team";
+import { GateAssigner } from "./components/gate-assigner";
+import { AdminBannerGeneratorPage, BannerGeneratorStandalonePage } from "./components/admin/admin-banner-generator";
 
 export const router = createBrowserRouter([
   {
@@ -46,19 +50,24 @@ export const router = createBrowserRouter([
       { path: "activities", Component: ActivitiesPage },
       { path: "news", Component: NewsPage },
       { path: "fleet", Component: Fleet },
+      { path: "fleet/:fleetId/aircraft/:aircraftId", Component: FleetAircraftPage },
       { path: "routes", Component: Routes },
+      { path: "team", Component: StaffTeam },
+      { path: "gates", Component: GateAssigner },
       { path: "join", Component: Join },
       { path: "live", Component: LiveFlights },
       { path: "login", Component: Login },
       { path: "documents", Component: Documents },
       { path: "tickets", Component: TicketsPage },
+      { path: "banner-generator", Component: BannerGeneratorStandalonePage },
       { path: "dashboard", Component: PilotDashboard },
+      { path: "dashboard/passport/:countryIso2", Component: PilotDashboard },
       { path: "dashboard/booking/:id", Component: PilotBookingView },
     ],
   },
   {
     path: "/admin",
-    Component: AdminRoot,
+    Component: AdminLayout,
     children: [
       { index: true, Component: AdminDashboard },
       { path: "news", Component: AdminNews },
@@ -82,6 +91,7 @@ export const router = createBrowserRouter([
       { path: "tickets", Component: AdminTickets },
       { path: "discord-bot", Component: AdminDiscordBot },
       { path: "telegram-bot", Component: AdminTelegramBot },
+      { path: "banner-generator", Component: AdminBannerGeneratorPage },
       { path: "acars", Component: AdminAcars },
       { path: "settings", Component: AdminSettings },
       { path: "*", Component: AdminDashboard },

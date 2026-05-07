@@ -397,6 +397,30 @@ const formatDateTime = (value?: string | null) => {
   });
 };
 
+// Module-level cache — survives tab switches, cleared on manual refresh or mutations
+const CACHE_TTL = 5 * 60 * 1000;
+
+interface BookingsSupportCache {
+  routeOptions: RouteOption[];
+  aircraftOptions: AircraftOption[];
+  pilotLocationCode: string;
+  pilotLocationLabel: string;
+  bookingGateMessage: string;
+  timestamp: number;
+}
+
+interface BookingsListCache {
+  bookings: Booking[];
+  connectionMessage: string;
+  timestamp: number;
+}
+
+let supportCache: BookingsSupportCache | null = null;
+let listCache: BookingsListCache | null = null;
+
+const isSupportCacheValid = () => supportCache !== null && Date.now() - supportCache.timestamp < CACHE_TTL;
+const isListCacheValid = () => listCache !== null && Date.now() - listCache.timestamp < CACHE_TTL;
+
 export function PilotBookings() {
   const { t } = useLanguage();
   const { addNotification } = useNotifications();
@@ -861,7 +885,14 @@ export function PilotBookings() {
     }
   }, [form.aircraftId, form.aircraftQuery, selectableAircraftOptions]);
 
-  const loadBookings = async ({ silent = false } = {}) => {
+  const loadBookings = async ({ silent = false, bust = false } = {}) => {
+    if (isListCacheValid() && !bust) {
+      setBookings(listCache!.bookings);
+      setConnectionMessage(listCache!.connectionMessage);
+      setIsLoading(false);
+      return;
+    }
+
     if (silent) {
       setIsRefreshing(true);
     } else {
@@ -875,14 +906,18 @@ export function PilotBookings() {
       const payload = (await response.json().catch(() => null)) as BookingsResponse | null;
 
       if (!response.ok) {
+        listCache = null;
         setBookings([]);
         setConnectionMessage(resolveBookingsConnectionMessage(payload, response.status));
         return;
       }
 
-      setBookings(Array.isArray(payload?.bookings) ? payload.bookings : []);
+      const nextBookings = Array.isArray(payload?.bookings) ? payload.bookings : [];
+      listCache = { bookings: nextBookings, connectionMessage: "", timestamp: Date.now() };
+      setBookings(nextBookings);
       setConnectionMessage("");
     } catch {
+      listCache = null;
       setBookings([]);
       setConnectionMessage(t("bookings.connection.failedLoad"));
     } finally {
@@ -895,6 +930,15 @@ export function PilotBookings() {
     let isMounted = true;
 
     const loadSupportingData = async () => {
+      if (isSupportCacheValid()) {
+        setRouteOptions(supportCache!.routeOptions);
+        setAircraftOptions(supportCache!.aircraftOptions);
+        setPilotLocationCode(supportCache!.pilotLocationCode);
+        setPilotLocationLabel(supportCache!.pilotLocationLabel);
+        setBookingGateMessage(supportCache!.bookingGateMessage);
+        return;
+      }
+
       try {
         const [routesResponse, fleetResponse, locationResponse, notamsResponse] = await Promise.all([
           fetch("/api/vamsys/routes", { credentials: "include" }),
@@ -908,32 +952,39 @@ export function PilotBookings() {
         const locationPayload = (await locationResponse.json().catch(() => null)) as PilotLocationResponse | null;
         const notamsPayload = (await notamsResponse.json().catch(() => null)) as NotamSummaryResponse | null;
 
-        if (!isMounted) {
-          return;
-        }
+        if (!isMounted) return;
 
-        setRouteOptions(Array.isArray(routesPayload?.routes) ? routesPayload.routes : []);
-        setAircraftOptions(
-          Array.isArray(fleetPayload?.fleets)
-            ? fleetPayload.fleets.flatMap((fleet) =>
-                (Array.isArray(fleet?.aircraft) ? fleet.aircraft : []).map((aircraft) => ({
-                  id: Number(aircraft?.id || 0) || 0,
-                  fleetId: Number(fleet?.id || 0) || 0,
-                  model: String(aircraft?.model || "Aircraft").trim() || "Aircraft",
-                  registration: String(aircraft?.registration || "").trim(),
-                  fleetName: String(fleet?.name || fleet?.code || "Fleet").trim() || "Fleet",
-                }))
-              )
-            : []
-        );
-        setPilotLocationCode(String(locationPayload?.airportCode || "").trim().toUpperCase());
-        setPilotLocationLabel(String(locationPayload?.locationLabel || "").trim());
+        const nextRoutes = Array.isArray(routesPayload?.routes) ? routesPayload.routes : [];
+        const nextAircraft = Array.isArray(fleetPayload?.fleets)
+          ? fleetPayload.fleets.flatMap((fleet) =>
+              (Array.isArray(fleet?.aircraft) ? fleet.aircraft : []).map((aircraft) => ({
+                id: Number(aircraft?.id || 0) || 0,
+                fleetId: Number(fleet?.id || 0) || 0,
+                model: String(aircraft?.model || "Aircraft").trim() || "Aircraft",
+                registration: String(aircraft?.registration || "").trim(),
+                fleetName: String(fleet?.name || fleet?.code || "Fleet").trim() || "Fleet",
+              }))
+            )
+          : [];
+        const nextLocationCode = String(locationPayload?.airportCode || "").trim().toUpperCase();
+        const nextLocationLabel = String(locationPayload?.locationLabel || "").trim();
         const unreadNotams = Number(notamsPayload?.summary?.unread || 0) || 0;
-        setBookingGateMessage(
-          unreadNotams > 0
-            ? tr("bookings.gate.unreadNotams", { count: unreadNotams })
-            : ""
-        );
+        const nextGateMessage = unreadNotams > 0 ? tr("bookings.gate.unreadNotams", { count: unreadNotams }) : "";
+
+        supportCache = {
+          routeOptions: nextRoutes,
+          aircraftOptions: nextAircraft,
+          pilotLocationCode: nextLocationCode,
+          pilotLocationLabel: nextLocationLabel,
+          bookingGateMessage: nextGateMessage,
+          timestamp: Date.now(),
+        };
+
+        setRouteOptions(nextRoutes);
+        setAircraftOptions(nextAircraft);
+        setPilotLocationCode(nextLocationCode);
+        setPilotLocationLabel(nextLocationLabel);
+        setBookingGateMessage(nextGateMessage);
       } catch {
         if (isMounted) {
           setRouteOptions([]);
@@ -954,7 +1005,8 @@ export function PilotBookings() {
   }, []);
 
   const handleRefresh = async () => {
-    await loadBookings({ silent: true });
+    listCache = null;
+    await loadBookings({ silent: true, bust: true });
   };
 
   const handleViewDetails = async (bookingId: number) => {
@@ -1099,7 +1151,8 @@ export function PilotBookings() {
       });
       setIsCreateOpen(false);
       setForm(createEmptyForm());
-      await loadBookings({ silent: true });
+      listCache = null;
+      await loadBookings({ silent: true, bust: true });
     } catch (error) {
       toast.error(String(error || t("bookings.toast.createError")));
     } finally {
@@ -1221,7 +1274,8 @@ export function PilotBookings() {
         }),
       });
       setCancelBookingId(null);
-      await loadBookings({ silent: true });
+      listCache = null;
+      await loadBookings({ silent: true, bust: true });
     } catch (error) {
       toast.error(String(error || t("bookings.toast.cancelError")));
     }
@@ -1434,7 +1488,7 @@ export function PilotBookings() {
                     <span className="rounded-full bg-white/5 px-2.5 py-1">{selectedRoute.type || t("bookings.typeScheduled")}</span>
                   </div>
                   {selectedRoute.routeText ? (
-                    <div className="mt-3 rounded-xl border border-white/10 bg-black/10 px-3 py-2 text-xs text-slate-300">
+                    <div className="mt-3 rounded-xl border border-white/10 bg-black/10 px-3 py-2 text-xs text-slate-300 break-all overflow-hidden">
                       {selectedRoute.routeText}
                     </div>
                   ) : null}

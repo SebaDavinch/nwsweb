@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1318 245" role="img" aria-labelledby="title">
+  <title>Russian Airways Group logo</title>
+  <rect width="1318" height="245" fill="#000000"/>
+  <g clip-path="url(#flag-clip)">
+    <rect x="0" y="0" width="245" height="245" fill="#000000"/>
+    <path d="M0 76C45 38 88 38 134 38C186 38 216 30 245 0V85C215 62 186 58 135 66C88 74 45 72 0 100V76Z" fill="#ffffff"/>
+    <path d="M0 116C44 84 88 82 134 86C183 90 214 80 245 48V133C213 110 183 106 135 112C88 118 44 118 0 146V116Z" fill="#31239b"/>
+    <path d="M0 156C44 124 88 120 134 122C184 124 214 114 245 84V188C212 164 183 158 134 162C88 166 44 166 0 196V156Z" fill="#d00000"/>
+    <path d="M206 0C248 22 255 66 233 100C267 126 268 182 233 245H245V0H206Z" fill="#ffffff"/>
+  </g>
+  <text x="269" y="199" fill="#ffffff" font-family="Manrope, 'Segoe UI', sans-serif" font-size="154" font-weight="300" letter-spacing="-4">RAG</text>
+  <line x1="816" y1="123" x2="1290" y2="123" stroke="#ffffff" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="907" cy="123" r="45" fill="#bfd845"/>
+  <circle cx="1044" cy="123" r="45" fill="#a759d5"/>
+  <circle cx="1181" cy="123" r="45" fill="#43bbd1"/>
+  <circle cx="1290" cy="123" r="45" fill="#4735ea"/>
+  <defs>
+    <clipPath id="flag-clip">
+      <rect x="0" y="0" width="245" height="245"/>
+    </clipPath>
+  </defs>
+</svg>

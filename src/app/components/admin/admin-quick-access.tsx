@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
+import { useLanguage } from "../../context/language-context";
 import {
+  ArrowLeft,
+  ArrowRight,
   ArrowDown,
   ArrowUp,
   Bell,
@@ -70,7 +73,9 @@ type AdminQuickAccessItem =
 interface QuickLinkPreset {
   id: QuickLinkPresetId;
   label: string;
+  labelEn: string;
   description: string;
+  descriptionEn: string;
   icon: LucideIcon;
   colorClass: string;
   path?: string;
@@ -81,7 +86,9 @@ interface ResolvedQuickAccessItem {
   id: string;
   type: "preset" | "custom";
   label: string;
+  labelEn: string;
   description: string;
+  descriptionEn: string;
   url: string;
   isExternal: boolean;
   icon: LucideIcon;
@@ -101,88 +108,110 @@ const ADMIN_QUICK_ACCESS_COMPACT_KEY = "admin_dashboard_quick_access_compact_v1"
 const ADMIN_QUICK_LINK_PRESETS: QuickLinkPreset[] = [
   {
     id: "routes",
-    label: "Routes",
-    description: "Open route editor and curation tools.",
+    label: "Маршруты",
+    labelEn: "Routes",
+    description: "Открыть редактор маршрутов и инструменты курирования.",
+    descriptionEn: "Open the route editor and curation tools.",
     icon: Route,
     colorClass: "bg-red-50 text-red-700",
     path: "/admin/routes",
   },
   {
     id: "routesTurbo",
-    label: "Routes Turbo",
-    description: "Open route management with turbo editor mode as the active default.",
+    label: "Маршруты Turbo",
+    labelEn: "Routes Turbo",
+    description: "Открыть управление маршрутами с turbo-режимом редактора.",
+    descriptionEn: "Open route management with turbo editor mode.",
     icon: Route,
     colorClass: "bg-rose-50 text-rose-700",
     path: "/admin/routes?mode=turbo",
   },
   {
     id: "routesSoonStarting",
-    label: "Soon Starting",
-    description: "Jump into routes prefiltered to the soon-starting section in turbo mode.",
+    label: "Скоро стартуют",
+    labelEn: "Starting Soon",
+    description: "Перейти к маршрутам с фильтром по ближайшим вылетам.",
+    descriptionEn: "Go to routes filtered by upcoming departures.",
     icon: Route,
     colorClass: "bg-pink-50 text-pink-700",
     path: "/admin/routes?mode=turbo&section=soon-starting",
   },
   {
     id: "bookings",
-    label: "Bookings",
-    description: "Inspect and patch booking metadata.",
+    label: "Бронирования",
+    labelEn: "Bookings",
+    description: "Проверить и скорректировать метаданные бронирований.",
+    descriptionEn: "Review and adjust booking metadata.",
     icon: ClipboardList,
     colorClass: "bg-orange-50 text-orange-700",
     path: "/admin/bookings",
   },
   {
     id: "staff",
-    label: "VA Staff",
-    description: "Manage synced staff and rank data.",
+    label: "Команда VA",
+    labelEn: "VA Staff",
+    description: "Управление синхронизированным составом и рангами.",
+    descriptionEn: "Manage synced staff roster and ranks.",
     icon: ShieldCheck,
     colorClass: "bg-emerald-50 text-emerald-700",
     path: "/admin/staff",
   },
   {
     id: "staffSync",
-    label: "Staff Sync",
-    description: "Open VA Staff and trigger vAMSYS sync automatically.",
+    label: "Синхронизация staff",
+    labelEn: "Staff Sync",
+    description: "Открыть раздел команды и сразу запустить синхронизацию.",
+    descriptionEn: "Open staff section and trigger sync immediately.",
     icon: ShieldCheck,
     colorClass: "bg-lime-50 text-lime-700",
     path: "/admin/staff?sync=1",
   },
   {
     id: "documents",
-    label: "Documents",
-    description: "Jump straight into document editing.",
+    label: "Документы",
+    labelEn: "Documents",
+    description: "Быстрый переход к редактированию документов.",
+    descriptionEn: "Quick access to document editing.",
     icon: FileText,
     colorClass: "bg-sky-50 text-sky-700",
     path: "/admin/documents",
   },
   {
     id: "settings",
-    label: "Settings",
-    description: "Branding, integrations and global switches.",
+    label: "Настройки",
+    labelEn: "Settings",
+    description: "Брендинг, интеграции и глобальные переключатели.",
+    descriptionEn: "Branding, integrations and global toggles.",
     icon: Settings2,
     colorClass: "bg-violet-50 text-violet-700",
     path: "/admin/settings",
   },
   {
     id: "news",
-    label: "News",
-    description: "Update admin news and public announcements.",
+    label: "Новости",
+    labelEn: "News",
+    description: "Обновление новостей админки и публичных объявлений.",
+    descriptionEn: "Update admin news and public announcements.",
     icon: Bell,
     colorClass: "bg-amber-50 text-amber-700",
     path: "/admin/news",
   },
   {
     id: "airports",
-    label: "Airports",
-    description: "Edit airport overlays and references.",
+    label: "Аэропорты",
+    labelEn: "Airports",
+    description: "Редактирование аэропортов, оверлеев и справочников.",
+    descriptionEn: "Edit airports, overlays and reference data.",
     icon: Building2,
     colorClass: "bg-cyan-50 text-cyan-700",
     path: "/admin/airports",
   },
   {
     id: "hubs",
-    label: "Hubs",
-    description: "Manage hub placements and labels.",
+    label: "Хабы",
+    labelEn: "Hubs",
+    description: "Управление хабами, их позициями и подписями.",
+    descriptionEn: "Manage hubs, their positions and labels.",
     icon: Building2,
     colorClass: "bg-teal-50 text-teal-700",
     path: "/admin/hubs",
@@ -190,7 +219,9 @@ const ADMIN_QUICK_LINK_PRESETS: QuickLinkPreset[] = [
   {
     id: "vamsys",
     label: "vAMSYS Ops",
-    description: "Open the external backoffice in a new tab.",
+    labelEn: "vAMSYS Ops",
+    description: "Открыть внешний backoffice в новой вкладке.",
+    descriptionEn: "Open external backoffice in a new tab.",
     icon: ExternalLink,
     colorClass: "bg-slate-100 text-slate-700",
     href: "https://vamsys.io",
@@ -323,7 +354,9 @@ const resolveQuickAccessItem = (item: AdminQuickAccessItem): ResolvedQuickAccess
       id: item.id,
       type: "preset",
       label: preset.label,
+      labelEn: preset.labelEn,
       description: preset.description,
+      descriptionEn: preset.descriptionEn,
       url,
       isExternal: Boolean(preset.href),
       icon: preset.icon,
@@ -336,7 +369,9 @@ const resolveQuickAccessItem = (item: AdminQuickAccessItem): ResolvedQuickAccess
     id: item.id,
     type: "custom",
     label: item.label,
+    labelEn: item.label,
     description: item.description || item.url,
+    descriptionEn: item.description || item.url,
     url: item.url,
     isExternal: isExternalQuickLink(item.url),
     icon: Link2,
@@ -458,13 +493,14 @@ function useAdminQuickAccess() {
     });
   };
 
-  const moveItem = (itemId: string, direction: "up" | "down") => {
+  const moveItem = (itemId: string, direction: "up" | "down" | "left" | "right") => {
     const index = config.items.findIndex((item) => item.id === itemId);
     if (index === -1) {
       return;
     }
 
-    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    const movesBackward = direction === "up" || direction === "left";
+    const targetIndex = movesBackward ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= config.items.length) {
       return;
     }
@@ -523,6 +559,8 @@ function QuickAccessManageDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const quickAccess = useAdminQuickAccess();
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [customLinkLabel, setCustomLinkLabel] = useState("");
   const [customLinkUrl, setCustomLinkUrl] = useState("");
   const [customLinkDescription, setCustomLinkDescription] = useState("");
@@ -535,7 +573,7 @@ function QuickAccessManageDialog({
     });
 
     if (!didAdd) {
-      toast.error("Set both label and URL for the quick link");
+      toast.error(tr("Укажите название и URL ссылки", "Set both label and URL for the quick link"));
       return;
     }
 
@@ -555,13 +593,13 @@ function QuickAccessManageDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-5xl">
         <DialogHeader>
-          <DialogTitle>Customize quick access</DialogTitle>
+          <DialogTitle>{tr("Настроить быстрый доступ", "Customize Quick Access")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-6 py-2 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Current order</h3>
-              <p className="mt-1 text-sm text-gray-500">Reorder active links and remove items you do not need.</p>
+              <h3 className="text-sm font-semibold text-gray-900">{tr("Текущий порядок", "Current order")}</h3>
+              <p className="mt-1 text-sm text-gray-500">{tr("Меняйте порядок активных ссылок и убирайте лишнее.", "Reorder active links and remove unwanted ones.")}</p>
             </div>
             <div className="space-y-3">
               {quickAccess.resolvedItems.length > 0 ? (
@@ -576,8 +614,8 @@ function QuickAccessManageDialog({
                         <Icon className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium text-gray-900">{item.label}</div>
-                        <div className="truncate text-sm text-gray-500">{item.description}</div>
+                        <div className="font-medium text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
+                        <div className="truncate text-sm text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div>
                       </div>
                       <div className="flex items-center gap-1">
                         <Button variant="outline" size="sm" onClick={() => quickAccess.moveItem(item.id, "up")} disabled={index === 0}>
@@ -595,14 +633,14 @@ function QuickAccessManageDialog({
                 })
               ) : (
                 <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-6 text-sm text-gray-500">
-                  Quick access is empty. Pin a preset or add your own link.
+                  {tr("Быстрый доступ пуст. Закрепите пресет или добавьте собственную ссылку.", "Quick access is empty. Pin a preset or add a custom link.")}
                 </div>
               )}
             </div>
 
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Built-in admin destinations</h3>
-              <p className="mt-1 text-sm text-gray-500">Pin or unpin the standard destinations used across the admin panel.</p>
+              <h3 className="text-sm font-semibold text-gray-900">{tr("Встроенные разделы", "Built-in sections")}</h3>
+              <p className="mt-1 text-sm text-gray-500">{tr("Закрепляйте или снимайте стандартные admin-разделы.", "Pin or unpin standard admin sections.")}</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {ADMIN_QUICK_LINK_PRESETS.map((preset) => {
@@ -620,11 +658,11 @@ function QuickAccessManageDialog({
                         <Icon className="h-5 w-5" />
                       </div>
                       <span className={`rounded-full px-2 py-1 text-[11px] font-medium ${active ? "bg-red-100 text-red-700" : "bg-gray-100 text-gray-500"}`}>
-                        {active ? "Pinned" : "Available"}
+                        {active ? tr("Закреплено", "Pinned") : tr("Доступно", "Available")}
                       </span>
                     </div>
-                    <div className="mt-4 font-semibold text-gray-900">{preset.label}</div>
-                    <div className="mt-1 text-sm text-gray-500">{preset.description}</div>
+                    <div className="mt-4 font-semibold text-gray-900">{language === "ru" ? preset.label : preset.labelEn}</div>
+                    <div className="mt-1 text-sm text-gray-500">{language === "ru" ? preset.description : preset.descriptionEn}</div>
                   </button>
                 );
               })}
@@ -633,37 +671,37 @@ function QuickAccessManageDialog({
 
           <div className="space-y-4">
             <div>
-              <h3 className="text-sm font-semibold text-gray-900">Custom links</h3>
-              <p className="mt-1 text-sm text-gray-500">Add your own internal admin paths or external tools.</p>
+              <h3 className="text-sm font-semibold text-gray-900">{tr("Свои ссылки", "Custom links")}</h3>
+              <p className="mt-1 text-sm text-gray-500">{tr("Добавьте внутренние admin-пути или внешние инструменты.", "Add internal admin paths or external tools.")}</p>
             </div>
 
             <div className="space-y-3 rounded-2xl border border-gray-200 bg-gray-50 p-4">
               <div className="space-y-2">
-                <Label htmlFor="admin-quick-link-label">Label</Label>
+                <Label htmlFor="admin-quick-link-label">{tr("Название", "Label")}</Label>
                 <Input id="admin-quick-link-label" value={customLinkLabel} onChange={(event) => setCustomLinkLabel(event.target.value)} placeholder="Dispatch board" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="admin-quick-link-url">URL or path</Label>
+                <Label htmlFor="admin-quick-link-url">{tr("URL или путь", "URL or path")}</Label>
                 <Input id="admin-quick-link-url" value={customLinkUrl} onChange={(event) => setCustomLinkUrl(event.target.value)} placeholder="/admin/routes or https://vamsys.io" />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="admin-quick-link-description">Description</Label>
-                <Input id="admin-quick-link-description" value={customLinkDescription} onChange={(event) => setCustomLinkDescription(event.target.value)} placeholder="Optional helper text" />
+                <Label htmlFor="admin-quick-link-description">{tr("Описание", "Description")}</Label>
+                <Input id="admin-quick-link-description" value={customLinkDescription} onChange={(event) => setCustomLinkDescription(event.target.value)} placeholder={tr("Необязательная подсказка", "Optional hint")} />
               </div>
               <Button className="w-full" onClick={handleAddCustomLink}>
                 <Plus className="mr-2 h-4 w-4" />
-                Add custom link
+                {tr("Добавить ссылку", "Add link")}
               </Button>
             </div>
 
             <div className="rounded-2xl border border-dashed border-gray-300 bg-white px-4 py-4 text-sm text-gray-500">
-              Current presets not pinned: {quickAccess.availablePresets.length > 0 ? quickAccess.availablePresets.map((item) => item.label).join(", ") : "all pinned"}.
+              {tr("Не закреплены", "Unpinned")}: {quickAccess.availablePresets.length > 0 ? quickAccess.availablePresets.map((item) => (language === "ru" ? item.label : item.labelEn)).join(", ") : tr("все закреплены", "all pinned")}.
             </div>
           </div>
         </div>
         <DialogFooter className="sm:justify-between">
-          <Button variant="outline" onClick={handleReset}>Reset defaults</Button>
-          <Button onClick={() => onOpenChange(false)}>Done</Button>
+          <Button variant="outline" onClick={handleReset}>{tr("Сбросить по умолчанию", "Reset to default")}</Button>
+          <Button onClick={() => onOpenChange(false)}>{tr("Готово", "Done")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -672,6 +710,8 @@ function QuickAccessManageDialog({
 
 export function AdminQuickAccessPanel() {
   const quickAccess = useAdminQuickAccess();
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
 
@@ -699,52 +739,80 @@ export function AdminQuickAccessPanel() {
         <CardHeader className="gap-4">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle className="text-lg font-semibold text-gray-800">Quick Access</CardTitle>
-              <p className="mt-1 text-sm text-gray-500">Pin the admin destinations you use most and add your own internal or external links.</p>
+              <CardTitle className="text-lg font-semibold text-gray-800">{tr("Быстрый доступ", "Quick Access")}</CardTitle>
+              <p className="mt-1 text-sm text-gray-500">{tr("Закрепите часто используемые разделы админки и добавьте свои внутренние или внешние ссылки.", "Pin frequently used admin sections and add your own internal or external links.")}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600">{quickAccess.resolvedItems.length} active links</span>
+              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600">{quickAccess.resolvedItems.length} {tr("активных ссылок", "active links")}</span>
               <Button variant="outline" onClick={handleToggleCompactMode}>
                 <Grip className="mr-2 h-4 w-4" />
-                {compactMode ? "Expanded" : "Compact"}
+                {compactMode ? tr("Развёрнуто", "Expanded") : tr("Компактно", "Compact")}
               </Button>
               <Button variant="outline" onClick={() => setDialogOpen(true)}>
                 <Pin className="mr-2 h-4 w-4" />
-                Customize
+                {tr("Настроить", "Customize")}
               </Button>
             </div>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-4 pb-4">
           {quickAccess.resolvedItems.length > 0 ? (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {quickAccess.resolvedItems.map((item) => {
+            <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-200">
+                {quickAccess.resolvedItems.map((item, index) => {
                 const Icon = item.icon;
                 return (
-                  <QuickAccessLinkWrapper key={item.id} item={item}>
-                    <div className={`rounded-2xl border border-gray-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-md ${compactMode ? "p-3" : "p-4"}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className={`rounded-xl p-2 ${item.colorClass}`}>
-                          <Icon className="h-5 w-5" />
-                        </div>
-                        <ExternalLink className="mt-0.5 h-4 w-4 text-gray-300" />
+                  <div
+                    key={item.id}
+                    className={`flex shrink-0 w-52 flex-col rounded-2xl border border-gray-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-md ${compactMode ? "p-3" : "p-4"}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className={`rounded-xl p-1.5 ${item.colorClass}`}>
+                        <Icon className="h-4 w-4" />
                       </div>
-                      <div className={compactMode ? "mt-3" : "mt-4"}>
-                        <div className="font-semibold text-gray-900">{item.label}</div>
-                        {!compactMode ? <div className="mt-1 text-sm text-gray-500">{item.description}</div> : null}
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          onClick={() => quickAccess.moveItem(item.id, "left")}
+                          disabled={index === 0}
+                          aria-label={`Move ${item.label} left`}
+                        >
+                          <ArrowLeft className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="h-7 w-7 shrink-0"
+                          onClick={() => quickAccess.moveItem(item.id, "right")}
+                          disabled={index === quickAccess.resolvedItems.length - 1}
+                          aria-label={`Move ${item.label} right`}
+                        >
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </Button>
+                        <ExternalLink className="h-3.5 w-3.5 text-gray-300" />
                       </div>
                     </div>
-                  </QuickAccessLinkWrapper>
+                    <QuickAccessLinkWrapper item={item} className="mt-3 flex min-h-0 flex-1 flex-col">
+                      <div className="font-semibold text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
+                      {!compactMode ? <div className="mt-2 text-sm leading-5 text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div> : null}
+                      <div className="mt-auto pt-4 text-xs font-medium uppercase tracking-[0.18em] text-gray-400">
+                        {item.isExternal ? tr("Внешний инструмент", "External tool") : tr("Открыть раздел", "Open section")}
+                      </div>
+                    </QuickAccessLinkWrapper>
+                  </div>
                 );
               })}
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-8 text-center">
-              <div className="text-base font-medium text-gray-800">Quick access is empty</div>
-              <div className="mt-1 text-sm text-gray-500">Pin admin destinations or add your own links to build a personal control panel.</div>
+              <div className="text-base font-medium text-gray-800">{tr("Быстрый доступ пуст", "Quick access is empty")}</div>
+              <div className="mt-1 text-sm text-gray-500">{tr("Закрепите нужные разделы админки или добавьте свои ссылки для личной панели управления.", "Pin the admin sections you need or add custom links for your personal dashboard.")}</div>
               <Button className="mt-4" onClick={() => setDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
-                Configure quick access
+                {tr("Настроить быстрый доступ", "Customize quick access")}
               </Button>
             </div>
           )}
@@ -757,6 +825,8 @@ export function AdminQuickAccessPanel() {
 
 export function AdminQuickAccessHeaderMenu() {
   const quickAccess = useAdminQuickAccess();
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   return (
@@ -765,12 +835,12 @@ export function AdminQuickAccessHeaderMenu() {
         <DropdownMenuTrigger asChild>
           <Button variant="outline" className="border-gray-200 text-gray-700">
             <Pin className="mr-2 h-4 w-4" />
-            Quick Access
+            {tr("Быстрый доступ", "Quick Access")}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-[360px] p-2">
-          <DropdownMenuLabel>Quick Access</DropdownMenuLabel>
-          <div className="px-2 pb-2 text-xs text-gray-500">Compact jump list for your pinned admin destinations.</div>
+          <DropdownMenuLabel>{tr("Быстрый доступ", "Quick Access")}</DropdownMenuLabel>
+          <div className="px-2 pb-2 text-xs text-gray-500">{tr("Компактный список переходов по закреплённым admin-разделам.", "Compact navigation list for pinned admin sections.")}</div>
           <DropdownMenuSeparator />
           {quickAccess.resolvedItems.length > 0 ? (
             quickAccess.resolvedItems.map((item) => {
@@ -783,8 +853,8 @@ export function AdminQuickAccessHeaderMenu() {
                         <Icon className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium text-gray-900">{item.label}</div>
-                        <div className="truncate text-xs text-gray-500">{item.description}</div>
+                        <div className="font-medium text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
+                        <div className="truncate text-xs text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div>
                       </div>
                       <ExternalLink className="h-4 w-4 text-gray-300" />
                     </a>
@@ -794,8 +864,8 @@ export function AdminQuickAccessHeaderMenu() {
                         <Icon className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium text-gray-900">{item.label}</div>
-                        <div className="truncate text-xs text-gray-500">{item.description}</div>
+                        <div className="font-medium text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
+                        <div className="truncate text-xs text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div>
                       </div>
                     </Link>
                   )}
@@ -803,12 +873,12 @@ export function AdminQuickAccessHeaderMenu() {
               );
             })
           ) : (
-            <div className="px-2 py-3 text-sm text-gray-500">Quick access is empty. Add links in customization.</div>
+            <div className="px-2 py-3 text-sm text-gray-500">{tr("Быстрый доступ пуст. Добавьте ссылки в настройке.", "Quick access is empty. Add links in settings.")}</div>
           )}
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={() => setDialogOpen(true)}>
             <Pin className="mr-2 h-4 w-4" />
-            Customize quick access
+            {tr("Настроить быстрый доступ", "Customize quick access")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

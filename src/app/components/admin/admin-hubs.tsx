@@ -1,5 +1,6 @@
 import { Badge } from "../ui/badge";
 import { AdminContentManager } from "./admin-content-manager";
+import { useLanguage } from "../../context/language-context";
 
 interface HubItem {
   id: string;
@@ -11,18 +12,21 @@ interface HubItem {
 }
 
 export function AdminHubs() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+
   return (
     <AdminContentManager<HubItem>
       collection="hubs"
-      title="Hubs"
-      subtitle="Maintain active bases and operational hub mapping."
-      singularLabel="Hub"
+      title={tr("Хабы", "Hubs")}
+      subtitle={tr("Поддерживайте актуальные базы и операционные привязки хабов.", "Maintain up-to-date hub bases and operational assignments.")}
+      singularLabel={tr("Хаб", "Hub")}
       searchKeys={["icao", "name", "city", "country"]}
       filterKeys={["status", "country"]}
       columns={[
         {
           key: "name",
-          label: "Hub",
+          label: tr("Хаб", "Hub"),
           render: (item) => (
             <div>
               <div className="font-medium text-gray-900">{item.name}</div>
@@ -30,31 +34,31 @@ export function AdminHubs() {
             </div>
           ),
         },
-        { key: "city", label: "City" },
-        { key: "country", label: "Country" },
+        { key: "city", label: tr("Город", "City") },
+        { key: "country", label: tr("Страна", "Country") },
         {
           key: "status",
-          label: "Status",
+          label: tr("Статус", "Status"),
           render: (item) => <Badge variant="outline">{item.status || "active"}</Badge>,
         },
       ]}
       fields={[
         { key: "icao", label: "ICAO", type: "text", placeholder: "UUEE" },
-        { key: "name", label: "Name", type: "text" },
-        { key: "city", label: "City", type: "text" },
-        { key: "country", label: "Country", type: "text" },
+        { key: "name", label: tr("Название", "Name"), type: "text" },
+        { key: "city", label: tr("Город", "City"), type: "text" },
+        { key: "country", label: tr("Страна", "Country"), type: "text" },
         {
           key: "status",
-          label: "Status",
+          label: tr("Статус", "Status"),
           type: "select",
           options: [
-            { label: "Active", value: "active" },
-            { label: "Planned", value: "planned" },
-            { label: "Closed", value: "closed" },
+            { label: tr("Активен", "Active"), value: "active" },
+            { label: tr("Запланирован", "Planned"), value: "planned" },
+            { label: tr("Закрыт", "Closed"), value: "closed" },
           ],
         },
-        { key: "order", label: "Order", type: "number" },
-        { key: "notes", label: "Notes", type: "textarea" },
+        { key: "order", label: tr("Порядок", "Order"), type: "number" },
+        { key: "notes", label: tr("Заметки", "Notes"), type: "textarea" },
       ]}
     />
   );

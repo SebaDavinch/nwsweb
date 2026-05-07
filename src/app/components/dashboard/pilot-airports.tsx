@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, MapPin, Search } from "lucide-react";
+import { useNavigate } from "react-router";
+import { ExternalLink, MapPin, Search, X } from "lucide-react";
 import { useLanguage } from "../../context/language-context";
 import { Badge } from "../ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Button } from "../ui/button";
+import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import {
   Select,
@@ -14,6 +16,7 @@ import {
 import { FlightMap } from "./flight-map";
 import { CountryFlag } from "./country-flag";
 import { createDashboardSessionCache, fetchDashboardSessionCache, getDashboardSessionCache } from "./dashboard-session-cache";
+import { fetchDashboardBootstrap, getCachedDashboardBootstrap } from "./dashboard-bootstrap-cache";
 
 interface DashboardAirport {
   id: number;
@@ -42,8 +45,38 @@ interface AirportsResponse {
 
 const pilotAirportsCache = createDashboardSessionCache<DashboardAirport[]>("nws.dashboard.pilotAirports.v1", 10 * 60 * 1000);
 
+const normalizeAirports = (value: unknown): DashboardAirport[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((airport, index) => {
+    const record = (airport && typeof airport === "object" ? airport : {}) as Record<string, unknown>;
+    return {
+      id: Number(record.id || 0) || index + 1,
+      code: String(record.code || record.icao || record.iata || `APT${index + 1}`),
+      icao: typeof record.icao === "string" ? record.icao : null,
+      iata: typeof record.iata === "string" ? record.iata : null,
+      city: typeof record.city === "string" ? record.city : null,
+      name: String(record.name || record.city || record.code || "Airport"),
+      category: typeof record.category === "string" ? record.category : null,
+      base: Boolean(record.base),
+      suitableAlternate: Boolean(record.suitableAlternate),
+      taxiInMinutes: Number(record.taxiInMinutes || 0) || 0,
+      taxiOutMinutes: Number(record.taxiOutMinutes || 0) || 0,
+      airportBriefingUrl: typeof record.airportBriefingUrl === "string" ? record.airportBriefingUrl : null,
+      preferredAlternates: Array.isArray(record.preferredAlternates) ? (record.preferredAlternates as string[]) : [],
+      countryName: typeof record.countryName === "string" ? record.countryName : null,
+      countryIso2: typeof record.countryIso2 === "string" ? record.countryIso2 : null,
+      latitude: Number(record.latitude || 0) || null,
+      longitude: Number(record.longitude || 0) || null,
+    };
+  });
+};
+
 export function PilotAirports() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [airports, setAirports] = useState<DashboardAirport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -61,14 +94,8 @@ export function PilotAirports() {
 
       try {
         const nextAirports = await fetchDashboardSessionCache(pilotAirportsCache, async () => {
-          const response = await fetch("/api/vamsys/dashboard/airports", {
-            credentials: "include",
-          });
-          const payload = (await response.json().catch(() => null)) as AirportsResponse | null;
-          if (!response.ok) {
-            throw new Error(String(payload?.error || "Failed to load airports"));
-          }
-          return Array.isArray(payload?.airports) ? payload.airports : [];
+          const payload = await fetchDashboardBootstrap();
+          return normalizeAirports(payload?.airports);
         });
         if (!active) {
           return;
@@ -78,7 +105,7 @@ export function PilotAirports() {
       } catch (error) {
         console.error("Failed to load dashboard airports", error);
         if (active) {
-          const cached = getDashboardSessionCache(pilotAirportsCache);
+          const cached = getDashboardSessionCache(pilotAirportsCache) || normalizeAirports(getCachedDashboardBootstrap()?.airports);
           if (cached) {
             setAirports(cached);
             setSelectedAirportId(cached[0]?.id || null);
@@ -136,187 +163,148 @@ export function PilotAirports() {
     [filteredAirports, selectedAirportId]
   );
 
-  const mapAirports = useMemo(() => {
-    if (!selectedAirport || !selectedAirport.latitude || !selectedAirport.longitude) {
-      return [];
-    }
-
-    return [
-      {
-        icao: selectedAirport.icao || selectedAirport.code,
-        code: selectedAirport.code,
-        name: selectedAirport.name,
-        lat: selectedAirport.latitude,
-        lon: selectedAirport.longitude,
-      },
-    ];
-  }, [selectedAirport]);
+  const mapAirports = useMemo(() =>
+    filteredAirports
+      .filter((a) => a.latitude && a.longitude)
+      .map((a) => ({
+        icao: a.icao || a.code,
+        iata: a.iata || undefined,
+        code: a.code,
+        name: a.name,
+        city: a.city || undefined,
+        country: a.countryName || undefined,
+        lat: a.latitude!,
+        lon: a.longitude!,
+      })),
+    [filteredAirports]
+  );
 
   const baseCount = airports.filter((airport) => airport.base).length;
   const alternateCount = airports.filter((airport) => airport.suitableAlternate).length;
 
+  const handleMapMarkerClick = (code: string) => {
+    const airport = airports.find((a) => (a.icao || a.code) === code || a.code === code);
+    if (airport) setSelectedAirportId(airport.id);
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-[#1d1d1f]">{t("dashboard.airports.title")}</h1>
           <p className="text-sm text-gray-500">{t("dashboard.airports.subtitle")}</p>
         </div>
-        <div className="grid gap-3 md:grid-cols-3 xl:min-w-[760px]">
-          <div className="relative md:col-span-2">
-            <Search className="absolute left-3 top-3.5 h-4 w-4 text-gray-400" />
-            <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("dashboard.airports.searchPlaceholder")} className="pl-9" />
-          </div>
-          <Select value={countryFilter} onValueChange={setCountryFilter}>
-            <SelectTrigger><SelectValue placeholder={t("dashboard.airports.country")} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("dashboard.airports.allCountries")}</SelectItem>
-              {countryOptions.map((country) => <SelectItem key={country} value={country}>{country}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <Select value={baseFilter} onValueChange={setBaseFilter}>
-            <SelectTrigger><SelectValue placeholder={t("dashboard.airports.airportType")} /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("dashboard.airports.allAirports")}</SelectItem>
-              <SelectItem value="base">{t("dashboard.airports.baseOnly")}</SelectItem>
-              <SelectItem value="alternate">{t("dashboard.airports.alternates")}</SelectItem>
-              <SelectItem value="regular">{t("dashboard.airports.regular")}</SelectItem>
-            </SelectContent>
-          </Select>
+        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
+          <span>{airports.length} {t("dashboard.airports.stats.airports") || "аэропортов"}</span>
+          <span>·</span>
+          <span>{baseCount} {t("dashboard.airports.stats.base") || "баз"}</span>
+          <span>·</span>
+          <span>{countryOptions.length} {t("dashboard.airports.stats.countries") || "стран"}</span>
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{t("dashboard.airports.stats.airports")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{airports.length}</div></CardContent></Card>
-        <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{t("dashboard.airports.stats.base")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{baseCount}</div></CardContent></Card>
-        <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{t("dashboard.airports.stats.alternates")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{alternateCount}</div></CardContent></Card>
-        <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{t("dashboard.airports.stats.countries")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{countryOptions.length}</div></CardContent></Card>
+      {/* Filters */}
+      <div className="flex flex-wrap gap-2">
+        <div className="relative">
+          <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("dashboard.airports.searchPlaceholder")} className="pl-9 w-56" />
+        </div>
+        <Select value={countryFilter} onValueChange={setCountryFilter}>
+          <SelectTrigger className="w-44"><SelectValue placeholder={t("dashboard.airports.country")} /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("dashboard.airports.allCountries")}</SelectItem>
+            {countryOptions.map((country) => <SelectItem key={country} value={country}>{country}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={baseFilter} onValueChange={setBaseFilter}>
+          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("dashboard.airports.allAirports")}</SelectItem>
+            <SelectItem value="base">{t("dashboard.airports.baseOnly")}</SelectItem>
+            <SelectItem value="alternate">{t("dashboard.airports.alternates")}</SelectItem>
+            <SelectItem value="regular">{t("dashboard.airports.regular")}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {isLoading ? (
         <Card className="border-none shadow-sm"><CardContent className="p-8 text-center text-gray-500">{t("dashboard.airports.loading")}</CardContent></Card>
       ) : hasError ? (
         <Card className="border-none shadow-sm"><CardContent className="p-8 text-center text-red-600">{t("dashboard.airports.error")}</CardContent></Card>
-      ) : filteredAirports.length === 0 ? (
-        <Card className="border-none shadow-sm"><CardContent className="p-8 text-center text-gray-500">{t("dashboard.airports.empty")}</CardContent></Card>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[360px_minmax(0,1fr)]">
-          <Card className="border-none shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">{t("dashboard.airports.listTitle")}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3 max-h-[720px] overflow-y-auto pr-2">
-              {filteredAirports.map((airport) => {
-                const active = selectedAirport?.id === airport.id;
-                const cityLabel = String(airport.city || airport.name || airport.code || "").trim();
-                return (
-                  <button
-                    key={airport.id}
-                    type="button"
-                    onClick={() => setSelectedAirportId(airport.id)}
-                    className={`w-full rounded-xl border px-4 py-3 text-left transition-colors ${active ? "border-red-200 bg-red-50" : "border-gray-200 bg-white hover:border-red-100 hover:bg-gray-50"}`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 font-medium text-gray-900">
-                          <CountryFlag iso2={airport.countryIso2} countryName={airport.countryName} className="h-4 w-6" fallbackText={airport.code.slice(0, 2)} />
-                          <span className="truncate">{cityLabel}</span>
-                        </div>
-                        <div className="mt-1 text-sm text-gray-600">{airport.name} ({airport.icao || airport.code})</div>
-                        <div className="mt-1 text-xs text-gray-500">{airport.countryName || t("dashboard.airports.countryUnknown")}</div>
-                      </div>
-                      <div className="flex flex-col items-end gap-2">
-                        {airport.base ? <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">{t("dashboard.airports.base")}</Badge> : null}
-                        {airport.suitableAlternate ? <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">{t("dashboard.airports.alternate")}</Badge> : null}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })}
-            </CardContent>
-          </Card>
+        <>
+          {/* Big interactive map */}
+          <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm" style={{ height: 520 }}>
+            <FlightMap
+              route={null}
+              airports={mapAirports}
+              selectedAirportCode={selectedAirport ? (selectedAirport.icao || selectedAirport.code) : null}
+              onAirportSelect={handleMapMarkerClick}
+            />
+          </div>
 
-          <div className="space-y-6">
+          {/* Selected airport detail panel */}
+          {selectedAirport ? (
             <Card className="border-none shadow-sm">
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("dashboard.airports.detailsTitle")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                {selectedAirport ? (
-                  <>
-                    <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                      <div>
-                        <div className="flex items-center gap-3">
-                          <CountryFlag iso2={selectedAirport.countryIso2} countryName={selectedAirport.countryName} className="h-6 w-9" fallbackText={selectedAirport.code.slice(0, 2)} />
-                          <h2 className="text-2xl font-semibold text-gray-900">{selectedAirport.city || selectedAirport.name}</h2>
-                        </div>
-                        <div className="mt-1 text-sm text-gray-500">{selectedAirport.name} ({selectedAirport.icao || selectedAirport.code})</div>
-                        <div className="mt-1 text-xs text-gray-500">{selectedAirport.countryName || t("dashboard.airports.countryUnknown")}</div>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {selectedAirport.category ? <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{selectedAirport.category}</Badge> : null}
+              <CardContent className="p-5">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-4 min-w-0">
+                    <CountryFlag iso2={selectedAirport.countryIso2} countryName={selectedAirport.countryName} className="h-8 w-12 mt-1 shrink-0" fallbackText={selectedAirport.code.slice(0, 2)} />
+                    <div className="min-w-0">
+                      <h2 className="text-xl font-semibold text-gray-900">{selectedAirport.city || selectedAirport.name}</h2>
+                      <div className="text-sm text-gray-500">{selectedAirport.name}</div>
+                      <div className="text-xs text-gray-400">{selectedAirport.countryName}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700 font-mono">ICAO: {selectedAirport.icao || selectedAirport.code}</Badge>
+                        {selectedAirport.iata ? <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700 font-mono">IATA: {selectedAirport.iata}</Badge> : null}
                         {selectedAirport.base ? <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">{t("dashboard.airports.base")}</Badge> : null}
-                        {selectedAirport.suitableAlternate ? <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">{t("dashboard.airports.suitableAlternate")}</Badge> : null}
+                        {selectedAirport.suitableAlternate ? <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">{t("dashboard.airports.alternate")}</Badge> : null}
+                        {selectedAirport.category ? <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{selectedAirport.category}</Badge> : null}
                       </div>
                     </div>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    {selectedAirport.airportBriefingUrl ? (
+                      <a href={selectedAirport.airportBriefingUrl} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100">
+                        <ExternalLink className="h-4 w-4" />
+                        {t("dashboard.airports.openBriefing")}
+                      </a>
+                    ) : null}
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedAirportId(null)}><X className="h-4 w-4" /></Button>
+                  </div>
+                </div>
 
-                    <div className="grid gap-4 md:grid-cols-4">
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"><div className="text-xs uppercase tracking-wide text-gray-500">ICAO</div><div className="mt-1 text-lg font-semibold text-gray-900">{selectedAirport.icao || "-"}</div></div>
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"><div className="text-xs uppercase tracking-wide text-gray-500">IATA</div><div className="mt-1 text-lg font-semibold text-gray-900">{selectedAirport.iata || "-"}</div></div>
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"><div className="text-xs uppercase tracking-wide text-gray-500">{t("dashboard.airports.taxiOut")}</div><div className="mt-1 text-lg font-semibold text-gray-900">{selectedAirport.taxiOutMinutes || 0} min</div></div>
-                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-4 py-3"><div className="text-xs uppercase tracking-wide text-gray-500">{t("dashboard.airports.taxiIn")}</div><div className="mt-1 text-lg font-semibold text-gray-900">{selectedAirport.taxiInMinutes || 0} min</div></div>
+                <div className="mt-4 flex flex-wrap gap-4 text-sm">
+                  {selectedAirport.taxiOutMinutes ? (
+                    <div className="flex items-center gap-1 text-gray-500">
+                      <MapPin className="h-3.5 w-3.5" />
+                      {t("dashboard.airports.taxiOut")}: <span className="font-medium text-gray-900">{selectedAirport.taxiOutMinutes} min</span>
                     </div>
-
-                    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-                      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
-                        {mapAirports.length > 0 ? (
-                          <FlightMap route={null} airports={mapAirports} />
-                        ) : (
-                          <div className="flex h-[400px] items-center justify-center text-sm text-gray-500">{t("dashboard.airports.coordinatesUnavailable")}</div>
-                        )}
-                      </div>
-
-                      <div className="space-y-4">
-                        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                          <div className="flex items-center gap-2 text-sm font-medium text-gray-900"><MapPin className="h-4 w-4 text-red-600" />{t("dashboard.airports.location")}</div>
-                          <div className="mt-2 text-sm text-gray-600">{selectedAirport.countryName || t("dashboard.airports.countryUnknown")}</div>
-                          <div className="mt-1 text-xs text-gray-500">{selectedAirport.latitude || "-"}, {selectedAirport.longitude || "-"}</div>
-                        </div>
-
-                        {selectedAirport.airportBriefingUrl ? (
-                          <a
-                            href={selectedAirport.airportBriefingUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 transition-colors hover:bg-red-100"
-                          >
-                            <ExternalLink className="h-4 w-4" />
-                            {t("dashboard.airports.openBriefing")}
-                          </a>
-                        ) : null}
-
-                        <div className="rounded-2xl border border-gray-200 bg-white p-4">
-                          <div className="text-sm font-medium text-gray-900">{t("dashboard.airports.preferredAlternates")}</div>
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {(Array.isArray(selectedAirport.preferredAlternates) ? selectedAirport.preferredAlternates : []).length > 0 ? (
-                              selectedAirport.preferredAlternates?.map((item) => (
-                                <Badge key={item} variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{item}</Badge>
-                              ))
-                            ) : (
-                              <div className="text-sm text-gray-500">{t("dashboard.airports.noAlternates")}</div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                  ) : null}
+                  {selectedAirport.taxiInMinutes ? (
+                    <div className="flex items-center gap-1 text-gray-500">
+                      <MapPin className="h-3.5 w-3.5" />
+                      {t("dashboard.airports.taxiIn")}: <span className="font-medium text-gray-900">{selectedAirport.taxiInMinutes} min</span>
                     </div>
-                  </>
-                ) : (
-                  <div className="rounded-lg border border-dashed border-gray-200 px-4 py-8 text-center text-sm text-gray-500">{t("dashboard.airports.selectAirport")}</div>
-                )}
+                  ) : null}
+                  {(selectedAirport.preferredAlternates || []).length > 0 ? (
+                    <div className="flex items-center gap-2 text-gray-500">
+                      {t("dashboard.airports.preferredAlternates")}:
+                      {selectedAirport.preferredAlternates?.map((alt) => (
+                        <Badge key={alt} variant="outline" className="border-gray-200 bg-gray-50 text-gray-700 font-mono">{alt}</Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
-          </div>
-        </div>
+          ) : (
+            <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center text-sm text-gray-400">
+              {t("dashboard.airports.selectAirport") || "Нажмите на маркер на карте для просмотра информации об аэропорте"}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

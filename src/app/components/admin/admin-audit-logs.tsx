@@ -53,6 +53,7 @@ export function AdminAuditLogs() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [entityFilter, setEntityFilter] = useState<string>("all");
+  const [showViews, setShowViews] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +94,9 @@ export function AdminAuditLogs() {
   const filteredEntries = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return entries.filter((entry) => {
+      if (!showViews && String(entry?.method || "").toUpperCase() === "GET") {
+        return false;
+      }
       if (entityFilter !== "all" && String(entry?.target?.type || "") !== entityFilter) {
         return false;
       }
@@ -114,7 +118,7 @@ export function AdminAuditLogs() {
 
       return haystack.includes(normalizedQuery);
     });
-  }, [entries, entityFilter, query]);
+  }, [entries, entityFilter, showViews, query]);
 
   const entityCounts = useMemo(() => {
     return entries.reduce<Record<string, number>>((accumulator, entry) => {
@@ -160,6 +164,15 @@ export function AdminAuditLogs() {
                 {label}
               </Button>
             ))}
+            <Button
+              type="button"
+              variant={showViews ? "default" : "outline"}
+              onClick={() => setShowViews((v) => !v)}
+              className="gap-2"
+            >
+              <Activity className="h-4 w-4" />
+              {tr("Просмотры", "Views")}
+            </Button>
           </div>
         </CardContent>
       </Card>

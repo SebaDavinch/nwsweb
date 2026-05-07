@@ -48,6 +48,7 @@ import {
 } from "../ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
+import { useLanguage } from "../../context/language-context";
 
 interface DocumentItem {
   id: string;
@@ -81,16 +82,12 @@ type ContentEditResult = {
   selectionEnd: number;
 };
 
-const FORMAT_OPTIONS: Array<{ value: DocumentContentFormat; label: string; description: string }> = [
-  { value: "markdown", label: "Markdown", description: "Best for structured rules and long-form docs." },
-  { value: "html", label: "HTML", description: "Advanced layout with sanitized HTML rendering." },
-  { value: "plain", label: "Plain text", description: "Raw text with preserved line breaks." },
-];
+const FORMAT_VALUES: DocumentContentFormat[] = ["markdown", "html", "plain"];
 
 const createEmptyForm = (): DocumentFormState => ({
   title: "",
   slug: "",
-  category: "General",
+  category: "Общее",
   description: "",
   content: "",
   contentFormat: "markdown",
@@ -109,7 +106,7 @@ const normalizeFormat = (value: unknown): DocumentContentFormat => {
 const buildFormState = (item?: DocumentItem | null): DocumentFormState => ({
   title: String(item?.title || ""),
   slug: String(item?.slug || ""),
-  category: String(item?.category || "General"),
+  category: String(item?.category || "Общее"),
   description: String(item?.description || ""),
   content: String(item?.content || ""),
   contentFormat: normalizeFormat(item?.contentFormat),
@@ -118,6 +115,8 @@ const buildFormState = (item?: DocumentItem | null): DocumentFormState => ({
 });
 
 export function AdminDocuments() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [items, setItems] = useState<DocumentItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -130,12 +129,42 @@ export function AdminDocuments() {
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
+  const formatOptions: Array<{ value: DocumentContentFormat; label: string; description: string }> = useMemo(
+    () => [
+      {
+        value: "markdown",
+        label: "Markdown",
+        description: tr(
+          "Лучше всего подходит для структурированных правил и длинных документов.",
+          "Best for structured rules and long documents."
+        ),
+      },
+      {
+        value: "html",
+        label: "HTML",
+        description: tr(
+          "Расширенная вёрстка с безопасным рендерингом HTML.",
+          "Advanced layout with safe HTML rendering."
+        ),
+      },
+      {
+        value: "plain",
+        label: tr("Простой текст", "Plain text"),
+        description: tr(
+          "Обычный текст с сохранением переносов строк.",
+          "Plain text that preserves line breaks."
+        ),
+      },
+    ],
+    [language]
+  );
+
   const loadItems = async () => {
     setIsLoading(true);
     try {
       const response = await fetch("/api/admin/content/documents", { credentials: "include" });
       if (!response.ok) {
-        throw new Error("Failed to load documents");
+        throw new Error(tr("Не удалось загрузить документы", "Failed to load documents"));
       }
 
       const payload = await response.json();
@@ -267,23 +296,23 @@ export function AdminDocuments() {
   };
 
   const markdownToolbar = [
-    { label: "Bold", icon: Bold, action: () => wrapSelection("**", "**", "bold text") },
-    { label: "Italic", icon: Italic, action: () => wrapSelection("*", "*", "italic text") },
-    { label: "Heading", icon: Heading2, action: () => insertBlock("## Section title", 3) },
-    { label: "Bullets", icon: List, action: () => prefixSelectedLines("- ", "List item") },
-    { label: "Numbers", icon: ListOrdered, action: () => prefixSelectedLines("1. ", "List item") },
-    { label: "Quote", icon: Quote, action: () => prefixSelectedLines("> ", "Quoted text") },
-    { label: "Code", icon: Code2, action: () => wrapSelection("```\n", "\n```", "code") },
-    { label: "Link", icon: Link2, action: () => wrapSelection("[", "](https://example.com)", "link text") },
+    { label: tr("Жирный", "Bold"), icon: Bold, action: () => wrapSelection("**", "**", tr("жирный текст", "bold text")) },
+    { label: tr("Курсив", "Italic"), icon: Italic, action: () => wrapSelection("*", "*", tr("курсив", "italic")) },
+    { label: tr("Заголовок", "Heading"), icon: Heading2, action: () => insertBlock(`## ${tr("Заголовок раздела", "Section heading")}`, 3) },
+    { label: tr("Список", "List"), icon: List, action: () => prefixSelectedLines("- ", tr("Пункт списка", "List item")) },
+    { label: tr("Нумерация", "Numbered"), icon: ListOrdered, action: () => prefixSelectedLines("1. ", tr("Пункт списка", "List item")) },
+    { label: tr("Цитата", "Quote"), icon: Quote, action: () => prefixSelectedLines("> ", tr("Текст цитаты", "Quote text")) },
+    { label: tr("Код", "Code"), icon: Code2, action: () => wrapSelection("```\n", "\n```", tr("код", "code")) },
+    { label: tr("Ссылка", "Link"), icon: Link2, action: () => wrapSelection("[", "](https://example.com)", tr("текст ссылки", "link text")) },
   ];
 
   const htmlToolbar = [
-    { label: "H2", icon: Heading2, action: () => wrapSelection("<h2>", "</h2>", "Section title") },
-    { label: "Paragraph", icon: Pencil, action: () => wrapSelection("<p>", "</p>", "Paragraph") },
-    { label: "Bullets", icon: List, action: () => insertBlock("<ul>\n  <li>Item</li>\n</ul>", 11) },
-    { label: "Quote", icon: Quote, action: () => wrapSelection("<blockquote>", "</blockquote>", "Quoted text") },
-    { label: "Code", icon: Code2, action: () => wrapSelection("<pre><code>", "</code></pre>", "code") },
-    { label: "Link", icon: Link2, action: () => wrapSelection("<a href=\"https://example.com\">", "</a>", "link text") },
+    { label: "H2", icon: Heading2, action: () => wrapSelection("<h2>", "</h2>", tr("Заголовок раздела", "Section heading")) },
+    { label: tr("Абзац", "Paragraph"), icon: Pencil, action: () => wrapSelection("<p>", "</p>", tr("Абзац", "Paragraph")) },
+    { label: tr("Список", "List"), icon: List, action: () => insertBlock(`<ul>\n  <li>${tr("Пункт", "Item")}</li>\n</ul>`, 11) },
+    { label: tr("Цитата", "Quote"), icon: Quote, action: () => wrapSelection("<blockquote>", "</blockquote>", tr("Текст цитаты", "Quote text")) },
+    { label: tr("Код", "Code"), icon: Code2, action: () => wrapSelection("<pre><code>", "</code></pre>", tr("код", "code")) },
+    { label: tr("Ссылка", "Link"), icon: Link2, action: () => wrapSelection("<a href=\"https://example.com\">", "</a>", tr("текст ссылки", "link text")) },
   ];
 
   const activeToolbar =
@@ -318,7 +347,7 @@ export function AdminDocuments() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to save document");
+        throw new Error(tr("Не удалось сохранить документ", "Failed to save document"));
       }
 
       await loadItems();
@@ -332,7 +361,7 @@ export function AdminDocuments() {
   };
 
   const handleDelete = async (item: DocumentItem) => {
-    if (!window.confirm(`Delete document "${item.title}"?`)) {
+    if (!window.confirm(tr(`Удалить документ «${item.title}»?`, `Delete document "${item.title}"?`))) {
       return;
     }
 
@@ -342,12 +371,12 @@ export function AdminDocuments() {
         credentials: "include",
       });
       if (!response.ok) {
-        throw new Error("Failed to delete document");
+        throw new Error(tr("Не удалось удалить документ", "Failed to delete document"));
       }
 
       await loadItems();
     } catch (error) {
-      console.error("Failed to delete document", error);
+      console.error("Не удалось удалить документ", error);
     }
   };
 
@@ -355,12 +384,12 @@ export function AdminDocuments() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Documents</h2>
-          <p className="text-sm text-gray-500">Rich editor, preview and publishing controls for VAC policies and guides.</p>
+          <h2 className="text-2xl font-bold text-gray-900">{tr("Документы", "Documents")}</h2>
+          <p className="text-sm text-gray-500">{tr("Полноценный редактор, превью и управление публикацией для VAC-политик и гайдов.", "Full editor, preview, and publishing controls for VAC policies and guides.")}</p>
         </div>
         <Button className="bg-[#E31E24] text-white hover:bg-[#c41a20]" onClick={openCreateDialog}>
           <Plus className="h-4 w-4" />
-          New document
+          {tr("Новый документ", "New document")}
         </Button>
       </div>
 
@@ -371,7 +400,7 @@ export function AdminDocuments() {
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <Input
                 className="pl-9"
-                placeholder="Search documents..."
+                placeholder={tr("Поиск документов...", "Search documents...")}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
@@ -379,10 +408,10 @@ export function AdminDocuments() {
             <div className="flex flex-col gap-3 sm:flex-row">
               <Select value={categoryFilter} onValueChange={setCategoryFilter}>
                 <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Category" />
+                  <SelectValue placeholder={tr("Категория", "Category")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
+                  <SelectItem value="all">{tr("Все категории", "All categories")}</SelectItem>
                   {categories.map((category) => (
                     <SelectItem key={category} value={category}>
                       {category}
@@ -392,12 +421,12 @@ export function AdminDocuments() {
               </Select>
               <Select value={visibilityFilter} onValueChange={setVisibilityFilter}>
                 <SelectTrigger className="w-full sm:w-40">
-                  <SelectValue placeholder="Status" />
+                  <SelectValue placeholder={tr("Статус", "Status")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                  <SelectItem value="draft">Draft</SelectItem>
+                  <SelectItem value="all">{tr("Все статусы", "All statuses")}</SelectItem>
+                  <SelectItem value="published">{tr("Опубликовано", "Published")}</SelectItem>
+                  <SelectItem value="draft">{tr("Черновик", "Draft")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -407,25 +436,25 @@ export function AdminDocuments() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Document</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Format</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Updated</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{tr("Документ", "Document")}</TableHead>
+                  <TableHead>{tr("Категория", "Category")}</TableHead>
+                  <TableHead>{tr("Формат", "Format")}</TableHead>
+                  <TableHead>{tr("Статус", "Status")}</TableHead>
+                  <TableHead>{tr("Обновлено", "Updated")}</TableHead>
+                  <TableHead className="text-right">{tr("Действия", "Actions")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
                     <TableCell colSpan={6} className="py-10 text-center text-gray-500">
-                      Loading...
+                      {tr("Загрузка...", "Loading...")}
                     </TableCell>
                   </TableRow>
                 ) : filteredItems.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={6} className="py-10 text-center text-gray-500">
-                      No documents found.
+                      {tr("Документы не найдены.", "No documents found.")}
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -435,10 +464,10 @@ export function AdminDocuments() {
                         <div className="space-y-1">
                           <div className="font-medium text-gray-900">{item.title}</div>
                           <div className="text-xs text-gray-500">/{item.slug}</div>
-                          <div className="line-clamp-2 max-w-xl text-sm text-gray-500">{item.description || "No description"}</div>
+                          <div className="line-clamp-2 max-w-xl text-sm text-gray-500">{item.description || tr("Без описания", "No description")}</div>
                         </div>
                       </TableCell>
-                      <TableCell>{item.category || "General"}</TableCell>
+                      <TableCell>{item.category || tr("Общее", "General")}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">
                           {normalizeFormat(item.contentFormat)}
@@ -449,7 +478,7 @@ export function AdminDocuments() {
                           variant="outline"
                           className={item.published ? "border-green-200 bg-green-50 text-green-700" : "border-amber-200 bg-amber-50 text-amber-700"}
                         >
-                          {item.published ? "Published" : "Draft"}
+                          {item.published ? tr("Опубликовано", "Published") : tr("Черновик", "Draft")}
                         </Badge>
                       </TableCell>
                       <TableCell>{String(item.updatedAt || "—").slice(0, 16).replace("T", " ")}</TableCell>
@@ -457,11 +486,11 @@ export function AdminDocuments() {
                         <div className="flex justify-end gap-2">
                           <Button variant="outline" size="sm" onClick={() => openEditDialog(item)}>
                             <Pencil className="h-4 w-4" />
-                            Edit
+                            {tr("Изменить", "Edit")}
                           </Button>
                           <Button variant="destructive" size="sm" onClick={() => handleDelete(item)}>
                             <Trash2 className="h-4 w-4" />
-                            Delete
+                            {tr("Удалить", "Delete")}
                           </Button>
                         </div>
                       </TableCell>
@@ -477,15 +506,15 @@ export function AdminDocuments() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-6xl">
           <DialogHeader>
-            <DialogTitle>{editingItem ? `Edit ${editingItem.title}` : "Create document"}</DialogTitle>
+            <DialogTitle>{editingItem ? tr(`Изменить: ${editingItem.title}`, `Edit: ${editingItem.title}`) : tr("Создать документ", "Create document")}</DialogTitle>
           </DialogHeader>
 
           <div className="grid gap-4 py-2 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-2 xl:col-span-2">
-              <Label htmlFor="document-title">Title</Label>
+              <Label htmlFor="document-title">{tr("Заголовок", "Title")}</Label>
               <Input
                 id="document-title"
-                placeholder="Document title"
+                placeholder={tr("Заголовок документа", "Document title")}
                 value={formData.title}
                 onChange={(event) => updateFormValue("title", event.target.value)}
               />
@@ -500,16 +529,16 @@ export function AdminDocuments() {
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="document-category">Category</Label>
+              <Label htmlFor="document-category">{tr("Категория", "Category")}</Label>
               <Input
                 id="document-category"
-                placeholder="Rules"
+                placeholder={tr("Правила", "Rules")}
                 value={formData.category}
                 onChange={(event) => updateFormValue("category", event.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="document-order">Order</Label>
+              <Label htmlFor="document-order">{tr("Порядок", "Order")}</Label>
               <Input
                 id="document-order"
                 type="number"
@@ -518,16 +547,16 @@ export function AdminDocuments() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Format</Label>
+              <Label>{tr("Формат", "Format")}</Label>
               <Select
                 value={formData.contentFormat}
                 onValueChange={(value) => updateFormValue("contentFormat", normalizeFormat(value))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Format" />
+                  <SelectValue placeholder={tr("Формат", "Format")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {FORMAT_OPTIONS.map((option) => (
+                  {formatOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -536,7 +565,7 @@ export function AdminDocuments() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Published</Label>
+              <Label>{tr("Опубликовано", "Published")}</Label>
               <div className="flex h-10 items-center rounded-md border border-gray-200 px-3">
                 <Checkbox
                   id="document-published"
@@ -544,15 +573,15 @@ export function AdminDocuments() {
                   onCheckedChange={(checked) => updateFormValue("published", Boolean(checked))}
                 />
                 <Label htmlFor="document-published" className="ml-3 text-sm text-gray-700">
-                  Visible on the public website
+                  {tr("Видно на публичном сайте", "Visible on public site")}
                 </Label>
               </div>
             </div>
             <div className="space-y-2 md:col-span-2 xl:col-span-4">
-              <Label htmlFor="document-description">Description</Label>
+              <Label htmlFor="document-description">{tr("Описание", "Description")}</Label>
               <Textarea
                 id="document-description"
-                placeholder="Short summary for cards and previews"
+                placeholder={tr("Краткое описание для карточек и превью", "Short description for cards and previews")}
                 className="min-h-20"
                 value={formData.description}
                 onChange={(event) => updateFormValue("description", event.target.value)}
@@ -563,9 +592,9 @@ export function AdminDocuments() {
           <div className="space-y-4 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
-                <div className="text-sm font-medium text-gray-900">Document editor</div>
+                <div className="text-sm font-medium text-gray-900">{tr("Редактор документа", "Document editor")}</div>
                 <p className="text-xs text-gray-500">
-                  {FORMAT_OPTIONS.find((option) => option.value === formData.contentFormat)?.description}
+                  {formatOptions.find((option) => option.value === formData.contentFormat)?.description}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -580,7 +609,7 @@ export function AdminDocuments() {
                 })}
                 {formData.contentFormat === "plain" ? (
                   <Badge variant="outline" className="border-gray-200 bg-white text-gray-600">
-                    Plain text keeps line breaks only
+                    {tr("Простой текст сохраняет только переносы строк", "Plain text preserves only line breaks")}
                   </Badge>
                 ) : null}
               </div>
@@ -590,22 +619,22 @@ export function AdminDocuments() {
               <TabsList>
                 <TabsTrigger value="write">
                   <FileText className="h-4 w-4" />
-                  Write
+                  {tr("Редактор", "Editor")}
                 </TabsTrigger>
                 <TabsTrigger value="preview">
                   <Eye className="h-4 w-4" />
-                  Preview
+                  {tr("Предпросмотр", "Preview")}
                 </TabsTrigger>
                 <TabsTrigger value="split">
                   <Split className="h-4 w-4" />
-                  Split
+                  {tr("Сплит", "Split")}
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="write" className="mt-4">
                 <Textarea
                   ref={textareaRef}
-                  placeholder={formData.contentFormat === "html" ? "<h2>Document content</h2>" : "# Document content"}
+                  placeholder={formData.contentFormat === "html" ? `<h2>${tr("Содержимое документа", "Document content")}</h2>` : `# ${tr("Содержимое документа", "Document content")}`}
                   className="min-h-[420px] bg-white font-mono text-sm"
                   value={formData.content}
                   onChange={(event) => updateFormValue("content", event.target.value)}
@@ -617,7 +646,7 @@ export function AdminDocuments() {
                   <DocumentRenderer
                     content={formData.content}
                     format={formData.contentFormat}
-                    emptyMessage="Start typing to preview the document."
+                    emptyMessage={tr("Начните ввод, чтобы увидеть предпросмотр документа.", "Start typing to see a document preview.")}
                   />
                 </ScrollArea>
               </TabsContent>
@@ -626,7 +655,7 @@ export function AdminDocuments() {
                 <div className="grid gap-4 xl:grid-cols-2">
                   <Textarea
                     ref={textareaRef}
-                    placeholder={formData.contentFormat === "html" ? "<h2>Document content</h2>" : "# Document content"}
+                    placeholder={formData.contentFormat === "html" ? `<h2>${tr("Содержимое документа", "Document content")}</h2>` : `# ${tr("Содержимое документа", "Document content")}`}
                     className="min-h-[420px] bg-white font-mono text-sm"
                     value={formData.content}
                     onChange={(event) => updateFormValue("content", event.target.value)}
@@ -635,7 +664,7 @@ export function AdminDocuments() {
                     <DocumentRenderer
                       content={formData.content}
                       format={formData.contentFormat}
-                      emptyMessage="Start typing to preview the document."
+                      emptyMessage={tr("Начните ввод, чтобы увидеть предпросмотр документа.", "Start typing to see a document preview.")}
                     />
                   </ScrollArea>
                 </div>
@@ -645,10 +674,14 @@ export function AdminDocuments() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
+              {tr("Отмена", "Cancel")}
             </Button>
             <Button className="bg-[#E31E24] text-white hover:bg-[#c41a20]" onClick={handleSave} disabled={isSaving}>
-              {isSaving ? "Saving..." : editingItem ? "Save changes" : "Create document"}
+              {isSaving
+                ? tr("Сохранение...", "Saving...")
+                : editingItem
+                  ? tr("Сохранить изменения", "Save changes")
+                  : tr("Создать документ", "Create document")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -7,6 +7,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { emitSiteDesignUpdated, DEFAULT_SITE_DESIGN, type SiteDesignSettings } from "../../hooks/use-site-design";
+import { useLanguage } from "../../context/language-context";
 
 interface SystemStatus {
   vamsys?: {
@@ -23,6 +24,8 @@ interface SystemStatus {
 }
 
 export function AdminSettings() {
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [status, setStatus] = useState<SystemStatus>({});
   const [design, setDesign] = useState<SiteDesignSettings>(DEFAULT_SITE_DESIGN);
   const [isSaving, setIsSaving] = useState(false);
@@ -72,7 +75,7 @@ export function AdminSettings() {
       variant="outline"
       className={ok ? "border-green-200 bg-green-50 text-green-700" : "border-red-200 bg-red-50 text-red-700"}
     >
-      {ok ? "OK" : "Missing"}
+      {ok ? tr("ОК", "OK") : tr("Отсутствует", "Missing")}
     </Badge>
   );
 
@@ -109,7 +112,7 @@ export function AdminSettings() {
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(String(payload?.error || "Failed to save site design"));
+        throw new Error(String(payload?.error || tr("Не удалось сохранить дизайн сайта", "Failed to save site design")));
       }
 
       const nextDesign = {
@@ -118,10 +121,10 @@ export function AdminSettings() {
       };
       setDesign(nextDesign);
       emitSiteDesignUpdated(nextDesign);
-      toast.success("Site design saved");
+      toast.success(tr("Дизайн сайта сохранен", "Site design saved"));
     } catch (error) {
       console.error("Failed to save site design", error);
-      toast.error(String(error || "Failed to save site design"));
+      toast.error(String(error || tr("Не удалось сохранить дизайн сайта", "Failed to save site design")));
     } finally {
       setIsSaving(false);
     }
@@ -147,12 +150,12 @@ export function AdminSettings() {
     <div className="space-y-6">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">System Settings</h2>
-          <p className="text-sm text-gray-500">Environment health plus site branding controls</p>
+          <h2 className="text-2xl font-bold text-gray-800">{tr("Системные настройки", "System Settings")}</h2>
+          <p className="text-sm text-gray-500">{tr("Состояние окружения и управление брендингом сайта", "Environment health plus site branding controls")}</p>
         </div>
         <Button variant="outline" onClick={() => refreshSettings()} disabled={isRefreshing}>
           <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-          Refresh
+          {tr("Обновить", "Refresh")}
         </Button>
       </div>
 
@@ -162,58 +165,55 @@ export function AdminSettings() {
             <div className="mb-5 flex items-center gap-3">
               <Palette className="h-5 w-5 text-gray-500" />
               <div>
-                <h3 className="text-lg font-semibold text-gray-900">Site design</h3>
-                <p className="text-sm text-gray-500">Manage the visible logos and brand colors for public and admin surfaces.</p>
+                <h3 className="text-lg font-semibold text-gray-900">{tr("Дизайн сайта", "Site design")}</h3>
+                <p className="text-sm text-gray-500">{tr("Управляйте логотипами и фирменными цветами для публичного сайта и админки.", "Manage the visible logos and brand colors for public and admin surfaces.")}</p>
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>Site title</Label>
+                  <Label>{tr("Название сайта", "Site title")}</Label>
                   <Input value={design.siteTitle} onChange={(event) => setDesign((current) => ({ ...current, siteTitle: event.target.value }))} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Tagline</Label>
+                  <Label>{tr("Подзаголовок", "Tagline")}</Label>
                   <Input value={design.tagline} onChange={(event) => setDesign((current) => ({ ...current, tagline: event.target.value }))} />
                 </div>
                 <div className="space-y-2 md:col-span-2">
-                  <Label>Banner generator URL</Label>
-                  <Input
-                    value={design.bannerGeneratorUrl}
-                    placeholder="https://banner-tool.example.com/create"
-                    onChange={(event) => setDesign((current) => ({ ...current, bannerGeneratorUrl: event.target.value }))}
-                  />
-                  <p className="text-xs text-gray-500">
-                    Optional external generator URL. Activity editor will append title, category, type, tag, summary, author, date and target as query params.
-                  </p>
+                  <Label>{tr("Рабочий процесс баннеров", "Banner workflow")}</Label>
+                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
+                    {tr("Генератор баннеров теперь встроен в админку и работает по маршруту ", "The banner generator is now embedded into admin and is available at ")}
+                    <span className="font-mono">/admin/banner-generator</span>
+                    {tr(". Редактор активностей открывает его с уже заполненными полями, а сохранение складывает готовый PNG в локальные ассеты сайта через API.", ". The activities editor opens it with prefilled fields, and save stores the final PNG in local site assets via API.")}
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Primary color</Label>
+                  <Label>{tr("Основной цвет", "Primary color")}</Label>
                   <Input type="color" value={design.primaryColor} onChange={(event) => setDesign((current) => ({ ...current, primaryColor: event.target.value }))} className="h-11" />
                 </div>
                 <div className="space-y-2">
-                  <Label>Accent color</Label>
+                  <Label>{tr("Акцентный цвет", "Accent color")}</Label>
                   <Input type="color" value={design.accentColor} onChange={(event) => setDesign((current) => ({ ...current, accentColor: event.target.value }))} className="h-11" />
                 </div>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 {([
-                  ["headerLogoDataUrl", "Header logo"],
-                  ["footerLogoDataUrl", "Footer logo"],
-                  ["loginLogoDataUrl", "Login logo"],
-                  ["adminLogoDataUrl", "Admin logo"],
+                  ["headerLogoDataUrl", tr("Логотип шапки", "Header logo")],
+                  ["footerLogoDataUrl", tr("Логотип подвала", "Footer logo")],
+                  ["loginLogoDataUrl", tr("Логотип входа", "Login logo")],
+                  ["adminLogoDataUrl", tr("Логотип админки", "Admin logo")],
                 ] as const).map(([key, label]) => (
                   <div key={key} className="space-y-2 rounded-xl border border-gray-200 p-4">
                     <Label>{label}</Label>
                     <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-gray-300 px-4 py-6 text-sm text-gray-500 hover:border-gray-400 hover:bg-gray-50">
                       <ImageUp className="h-4 w-4" />
-                      Upload image
+                      {tr("Загрузить изображение", "Upload image")}
                       <input type="file" accept="image/*" className="hidden" onChange={(event) => handleFileUpload(event, key)} />
                     </label>
                     <div className="rounded-lg bg-gray-50 p-3 text-center">
-                      {design[key] ? <img src={design[key]} alt={label} className="mx-auto max-h-16 w-auto object-contain" /> : <span className="text-xs text-gray-400">Using default asset</span>}
+                      {design[key] ? <img src={design[key]} alt={label} className="mx-auto max-h-16 w-auto object-contain" /> : <span className="text-xs text-gray-400">{tr("Используется ассет по умолчанию", "Using default asset")}</span>}
                     </div>
                   </div>
                 ))}
@@ -222,7 +222,7 @@ export function AdminSettings() {
               <div className="flex justify-end">
                 <Button onClick={saveDesign} disabled={isSaving}>
                   <Save className="mr-2 h-4 w-4" />
-                  Save design
+                  {tr("Сохранить дизайн", "Save design")}
                 </Button>
               </div>
             </div>
@@ -233,8 +233,8 @@ export function AdminSettings() {
           <Card className="border-none shadow-sm">
             <CardContent className="p-6">
               <div className="mb-5">
-                <h3 className="text-lg font-semibold text-gray-900">Preview</h3>
-                <p className="text-sm text-gray-500">Quick brand preview for logos and main palette.</p>
+                <h3 className="text-lg font-semibold text-gray-900">{tr("Предпросмотр", "Preview")}</h3>
+                <p className="text-sm text-gray-500">{tr("Быстрый предпросмотр логотипов и основной цветовой палитры.", "Quick brand preview for logos and main palette.")}</p>
               </div>
               <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
                 <div className="flex items-center justify-between px-5 py-4 text-white" style={{ backgroundColor: design.accentColor }}>
@@ -250,8 +250,8 @@ export function AdminSettings() {
                 <div className="space-y-4 p-5">
                   <div className="h-2 rounded-full" style={{ backgroundColor: design.primaryColor }} />
                   <div className="flex gap-3">
-                    <div className="rounded-lg px-4 py-2 text-white" style={{ backgroundColor: design.primaryColor }}>Primary</div>
-                    <div className="rounded-lg border px-4 py-2" style={{ borderColor: design.primaryColor, color: design.primaryColor }}>Outline</div>
+                    <div className="rounded-lg px-4 py-2 text-white" style={{ backgroundColor: design.primaryColor }}>{tr("Основной", "Primary")}</div>
+                    <div className="rounded-lg border px-4 py-2" style={{ borderColor: design.primaryColor, color: design.primaryColor }}>{tr("Контур", "Outline")}</div>
                   </div>
                 </div>
               </div>
@@ -262,19 +262,19 @@ export function AdminSettings() {
             <CardContent className="p-6">
               <div className="space-y-4">
                 <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                  <span className="text-gray-700">vAMSYS credentials configured</span>
+                  <span className="text-gray-700">{tr("Учетные данные vAMSYS настроены", "vAMSYS credentials configured")}</span>
                   {healthBadge(Boolean(status.vamsys?.configured))}
                 </div>
                 <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                  <span className="text-gray-700">vAMSYS reachable</span>
+                  <span className="text-gray-700">{tr("vAMSYS доступен", "vAMSYS reachable")}</span>
                   {healthBadge(Boolean(status.vamsys?.reachable))}
                 </div>
                 <div className="flex items-center justify-between border-b border-gray-100 pb-3">
-                  <span className="text-gray-700">Discord publish configured</span>
+                  <span className="text-gray-700">{tr("Публикация в Discord настроена", "Discord publish configured")}</span>
                   {healthBadge(Boolean(status.discord?.configured))}
                 </div>
                 <div className="flex items-center justify-between">
-                  <span className="text-gray-700">Server port</span>
+                  <span className="text-gray-700">{tr("Порт сервера", "Server port")}</span>
                   <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">
                     {status.server?.port || 8787}
                   </Badge>

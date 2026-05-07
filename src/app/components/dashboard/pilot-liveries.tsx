@@ -5,6 +5,7 @@ import { Badge } from "../ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { createDashboardSessionCache, fetchDashboardSessionCache, getDashboardSessionCache } from "./dashboard-session-cache";
+import { fetchDashboardBootstrap, getCachedDashboardBootstrap } from "./dashboard-bootstrap-cache";
 
 interface FleetResource {
   label: string;
@@ -54,6 +55,34 @@ interface FlatLivery {
 
 const pilotLiveriesCache = createDashboardSessionCache<FleetGroup[]>("nws.dashboard.pilotLiveries.v1", 10 * 60 * 1000);
 
+const normalizeFleetGroups = (value: unknown): FleetGroup[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.map((fleet, fleetIndex) => {
+    const record = (fleet && typeof fleet === "object" ? fleet : {}) as Record<string, unknown>;
+    const aircraft = Array.isArray(record.aircraft) ? record.aircraft : [];
+    const liveries = Array.isArray(record.liveries) ? record.liveries : [];
+
+    return {
+      id: String(record.id || `fleet-${fleetIndex + 1}`),
+      name: String(record.name || record.code || `Fleet ${fleetIndex + 1}`),
+      code: String(record.code || ""),
+      aircraft: aircraft.map((item, aircraftIndex) => {
+        const aircraftRecord = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        return {
+          id: String(aircraftRecord.id || `aircraft-${fleetIndex + 1}-${aircraftIndex + 1}`),
+          model: String(aircraftRecord.model || "Aircraft"),
+          registration: String(aircraftRecord.registration || ""),
+          liveries: Array.isArray(aircraftRecord.liveries) ? (aircraftRecord.liveries as FleetResource[]) : [],
+        };
+      }),
+      liveries: liveries.map((item) => item as FleetLivery),
+    };
+  });
+};
+
 const normalizeStatusLabel = (value?: string | null) => {
   const status = String(value || "pending").trim().toLowerCase();
   if (status === "approved") {
@@ -97,14 +126,8 @@ export function PilotLiveries() {
 
       try {
         const nextFleets = await fetchDashboardSessionCache(pilotLiveriesCache, async () => {
-          const response = await fetch("/api/vamsys/dashboard/fleet", {
-            credentials: "include",
-          });
-          const payload = (await response.json().catch(() => null)) as FleetResponse | null;
-          if (!response.ok) {
-            throw new Error(String(payload?.error || "Failed to load liveries"));
-          }
-          return Array.isArray(payload?.fleets) ? payload.fleets : [];
+          const payload = await fetchDashboardBootstrap();
+          return normalizeFleetGroups(payload?.fleets);
         });
 
         if (!active) {
@@ -118,7 +141,7 @@ export function PilotLiveries() {
           return;
         }
 
-        const cached = getDashboardSessionCache(pilotLiveriesCache);
+        const cached = getDashboardSessionCache(pilotLiveriesCache) || normalizeFleetGroups(getCachedDashboardBootstrap()?.fleets);
         if (cached) {
           setFleets(cached);
         } else {

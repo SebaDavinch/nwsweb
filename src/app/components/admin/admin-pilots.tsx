@@ -3,7 +3,8 @@ import { Search } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
-import { useNavigate } from "react-router";
+import { useAdminNav } from "./admin-nav-context";
+import { fetchAdminBootstrap, getCachedAdminBootstrap } from "./admin-bootstrap-cache";
 import {
   Select,
   SelectContent,
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { useLanguage } from "../../context/language-context";
 
 interface PilotRow {
   id: number | null;
@@ -45,8 +47,12 @@ const normalizePilotRow = (value: unknown): PilotRow => {
 };
 
 export function AdminPilots() {
-  const navigate = useNavigate();
-  const [pilots, setPilots] = useState<PilotRow[]>([]);
+  const { navigateTo } = useAdminNav();
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+  const initialBootstrap = getCachedAdminBootstrap();
+  const [pilots, setPilots] = useState<PilotRow[]>(() => Array.isArray(initialBootstrap?.pilots) ? initialBootstrap.pilots.map(normalizePilotRow) : []);
+  const [isLoading, setIsLoading] = useState(!Array.isArray(initialBootstrap?.pilots));
   const [search, setSearch] = useState("");
   const [rankFilter, setRankFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -57,20 +63,19 @@ export function AdminPilots() {
     let active = true;
 
     const loadPilots = async () => {
+      setIsLoading(true);
       try {
-        const response = await fetch("/api/admin/pilots", {
-          credentials: "include",
-        });
-        if (!response.ok) {
-          return;
-        }
-        const payload = await response.json();
+        const payload = await fetchAdminBootstrap();
         const list = Array.isArray(payload?.pilots) ? payload.pilots : [];
         if (active) {
           setPilots(list.map(normalizePilotRow));
         }
       } catch (error) {
         console.error("Failed to load pilots", error);
+      } finally {
+        if (active) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -156,17 +161,17 @@ export function AdminPilots() {
       return;
     }
 
-    navigate(`/admin/pilots/${pilot.id}`);
+    navigateTo("pilot-profile", pilot.id);
   };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-800">Pilot Roster</h2>
-          <p className="text-sm text-gray-500">Click any pilot to open the full profile, recent flights and booking history.</p>
+          <h2 className="text-2xl font-bold text-gray-800">{tr("Список пилотов", "Pilot List")}</h2>
+          <p className="text-sm text-gray-500">{tr("Нажмите на пилота, чтобы открыть профиль, последние рейсы и историю бронирований.", "Click on a pilot to open their profile, recent flights, and booking history.")}</p>
         </div>
-        <div className="text-sm text-gray-500">{filtered.length} pilots</div>
+        <div className="text-sm text-gray-500">{filtered.length} {tr("пилотов", "pilots")}</div>
       </div>
 
       <Card className="border-none shadow-sm">
@@ -174,15 +179,15 @@ export function AdminPilots() {
           <div className="flex flex-col gap-3 md:flex-row">
             <div className="relative w-full md:w-96">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search pilots..." className="pl-9" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr("Поиск пилотов...", "Search pilots...")} className="pl-9" />
             </div>
 
             <Select value={rankFilter} onValueChange={setRankFilter}>
               <SelectTrigger className="w-full md:w-56">
-                <SelectValue placeholder="All ranks" />
+                <SelectValue placeholder={tr("Все ранги", "All ranks")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All ranks</SelectItem>
+                <SelectItem value="all">{tr("Все ранги", "All ranks")}</SelectItem>
                 {uniqueRanks.map((rank) => (
                   <SelectItem key={rank} value={rank}>
                     {rank}
@@ -193,10 +198,10 @@ export function AdminPilots() {
 
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full md:w-40">
-                <SelectValue placeholder="All statuses" />
+                <SelectValue placeholder={tr("Все статусы", "All statuses")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="all">{tr("Все статусы", "All statuses")}</SelectItem>
                 {uniqueStatuses.map((status) => (
                   <SelectItem key={status} value={status}>
                     {status}
@@ -207,26 +212,26 @@ export function AdminPilots() {
 
             <Select value={joinedFilter} onValueChange={setJoinedFilter}>
               <SelectTrigger className="w-full md:w-48">
-                <SelectValue placeholder="Joined: any time" />
+                <SelectValue placeholder={tr("Дата вступления", "Join date")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Joined: any time</SelectItem>
-                <SelectItem value="last30">Joined: last 30 days</SelectItem>
-                <SelectItem value="last90">Joined: last 90 days</SelectItem>
-                <SelectItem value="thisYear">Joined: this year</SelectItem>
+                <SelectItem value="all">{tr("За всё время", "All time")}</SelectItem>
+                <SelectItem value="last30">{tr("За последние 30 дней", "Last 30 days")}</SelectItem>
+                <SelectItem value="last90">{tr("За последние 90 дней", "Last 90 days")}</SelectItem>
+                <SelectItem value="thisYear">{tr("В этом году", "This year")}</SelectItem>
               </SelectContent>
             </Select>
 
             <Select value={sortBy} onValueChange={setSortBy}>
               <SelectTrigger className="w-full md:w-52">
-                <SelectValue placeholder="Sort by" />
+                <SelectValue placeholder={tr("Сортировка", "Sort by")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="joined_desc">Sort: Joined newest</SelectItem>
-                <SelectItem value="joined_asc">Sort: Joined oldest</SelectItem>
-                <SelectItem value="name_asc">Sort: Name A-Z</SelectItem>
-                <SelectItem value="hours_desc">Sort: Hours high-low</SelectItem>
-                <SelectItem value="flights_desc">Sort: Flights high-low</SelectItem>
+                <SelectItem value="joined_desc">{tr("Сначала новые", "Newest first")}</SelectItem>
+                <SelectItem value="joined_asc">{tr("Сначала старые", "Oldest first")}</SelectItem>
+                <SelectItem value="name_asc">{tr("Имя A-Z", "Name A-Z")}</SelectItem>
+                <SelectItem value="hours_desc">{tr("Часы по убыванию", "Hours descending")}</SelectItem>
+                <SelectItem value="flights_desc">{tr("Рейсы по убыванию", "Flights descending")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -235,17 +240,23 @@ export function AdminPilots() {
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-gray-500 font-medium">
                 <tr>
-                  <th className="px-4 py-3">Pilot</th>
+                  <th className="px-4 py-3">{tr("Пилот", "Pilot")}</th>
                   <th className="px-4 py-3">VA ID</th>
-                  <th className="px-4 py-3">Rank</th>
-                  <th className="px-4 py-3">Hours</th>
-                  <th className="px-4 py-3">Flights</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Joined</th>
+                  <th className="px-4 py-3">{tr("Ранг", "Rank")}</th>
+                  <th className="px-4 py-3">{tr("Часы", "Hours")}</th>
+                  <th className="px-4 py-3">{tr("Рейсы", "Flights")}</th>
+                  <th className="px-4 py-3">{tr("Статус", "Status")}</th>
+                  <th className="px-4 py-3">{tr("Вступил", "Joined")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {filtered.map((pilot) => (
+                {isLoading ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                      {tr("Загрузка пилотов...", "Loading pilots...")}
+                    </td>
+                  </tr>
+                ) : filtered.map((pilot) => (
                   <tr
                     key={`${pilot.id ?? "x"}-${pilot.username}`}
                     className={`transition-colors ${pilot.id ? "cursor-pointer hover:bg-gray-50" : "opacity-80"}`}
@@ -276,10 +287,10 @@ export function AdminPilots() {
                     <td className="px-4 py-3 text-gray-700">{pilot.joinedAt ? pilot.joinedAt.slice(0, 10) : "—"}</td>
                   </tr>
                 ))}
-                {filtered.length === 0 && (
+                {!isLoading && filtered.length === 0 && (
                   <tr>
                     <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
-                      No pilots found.
+                      {tr("Пилоты не найдены.", "No pilots found.")}
                     </td>
                   </tr>
                 )}

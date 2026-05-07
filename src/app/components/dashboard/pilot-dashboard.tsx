@@ -1,11 +1,12 @@
 import { useAuth } from "../../context/auth-context";
 import { useLanguage } from "../../context/language-context";
-import { Navigate, Link, useLocation, useNavigate } from "react-router";
+import { Navigate, Link, useLocation, useNavigate, useParams } from "react-router";
 import { useEffect, useState } from "react";
 import {
   Plane,
   MapPin,
   Building2,
+  ImagePlus,
   Palette,
   Award,
   LogOut,
@@ -22,6 +23,10 @@ import {
   ShieldAlert,
   Loader2,
   ChevronDown,
+  Coins,
+  BookOpen,
+  BarChart2,
+  Trophy,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -41,6 +46,11 @@ import { PilotLiveries } from "./pilot-liveries";
 import { PilotAirports } from "./pilot-airports";
 import { PilotPirepDetail } from "./pilot-pirep-detail";
 import { PilotAllFlights } from "./pilot-all-flights";
+import { PilotSocialGallery } from "./pilot-social-gallery";
+import { PilotBalance } from "./pilot-balance";
+import { PilotPassport } from "./pilot-passport";
+import { PilotStats } from "./pilot-stats";
+import { PilotLeaderboard } from "./pilot-leaderboard";
 
 const normalizeDashboardTab = (value: string) => {
   if (value === "claims") {
@@ -50,11 +60,48 @@ const normalizeDashboardTab = (value: string) => {
   return value;
 };
 
+const parseDashboardDate = (value: string) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  const dottedDateMatch = normalized.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (dottedDateMatch) {
+    const [, day, month, year] = dottedDateMatch;
+    const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  const isoDateMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|T)/);
+  if (isoDateMatch) {
+    const [, year, month, day] = isoDateMatch;
+    const parsed = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+    return Number.isFinite(parsed.getTime()) ? parsed : null;
+  }
+
+  const parsed = new Date(normalized);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const formatDashboardDate = (value: string) => {
+  const parsed = parseDashboardDate(value);
+  if (!parsed) {
+    return "—";
+  }
+
+  const day = String(parsed.getUTCDate()).padStart(2, "0");
+  const month = String(parsed.getUTCMonth() + 1).padStart(2, "0");
+  const year = String(parsed.getUTCFullYear());
+  return `${day}.${month}.${year}`;
+};
+
 export function PilotDashboard() {
   const { isAuthenticated, isAuthLoading, pilot, isAdmin, logout } = useAuth();
   const { t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
+  const { countryIso2 } = useParams();
   const [activeTab, setActiveTab] = useState("home");
   const [selectedPirepId, setSelectedPirepId] = useState<number | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -144,6 +191,13 @@ export function PilotDashboard() {
         pages?: string[];
       }>;
     };
+    staffRoles?: Array<{
+      id?: string;
+      role?: string;
+      division?: string;
+      handle?: string | null;
+      color?: string | null;
+    }>;
   } | null>(null);
   const [activityProgressWidget, setActivityProgressWidget] = useState<{
     items: Array<{
@@ -253,13 +307,20 @@ export function PilotDashboard() {
       return;
     }
 
+    const normalizedCountryIso2 = String(countryIso2 || "").trim().toUpperCase();
+    if (normalizedCountryIso2) {
+      setActiveTab("passport");
+      setSelectedPirepId(null);
+      return;
+    }
+
     const params = new URLSearchParams(location.search);
     const requestedTab = String(params.get("tab") || "").trim();
     const requestedPirepId = Number(params.get("id") || "0") || null;
     const discordState = String(params.get("discord") || "").trim();
 
     const normalizedRequestedTab = normalizeDashboardTab(requestedTab);
-    const allowedTabs = new Set(["home", "bookings", "all-flights", "manual-pirep", "notams", "badges", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "pirep", "settings"]);
+    const allowedTabs = new Set(["home", "bookings", "all-flights", "manual-pirep", "notams", "badges", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "gallery", "pirep", "passport", "balance", "stats", "leaderboard", "settings"]);
     if (normalizedRequestedTab && allowedTabs.has(normalizedRequestedTab)) {
       setActiveTab(normalizedRequestedTab);
       setSelectedPirepId(normalizedRequestedTab === "pirep" ? requestedPirepId : null);
@@ -270,7 +331,7 @@ export function PilotDashboard() {
       setActiveTab("settings");
       setSelectedPirepId(null);
     }
-  }, [isAuthLoading, isAuthenticated, pilot, location.search]);
+  }, [countryIso2, isAuthLoading, isAuthenticated, pilot, location.search]);
 
   if (isAuthLoading) {
     return <div className="min-h-[50vh] flex items-center justify-center">Loading...</div>;
@@ -295,9 +356,7 @@ export function PilotDashboard() {
   const totalFlights = Number(dashboardHome?.stats?.totalFlights ?? pilot.totalFlights ?? 0) || 0;
   const avgLandingRate = Number(dashboardHome?.stats?.avgLandingRate);
   const memberSinceValue = String(dashboardHome?.stats?.memberSince || pilot.joinDate || "");
-  const memberSinceYear = Number.isFinite(new Date(memberSinceValue).getTime())
-    ? new Date(memberSinceValue).getFullYear()
-    : new Date().getFullYear();
+  const memberSinceDisplay = formatDashboardDate(memberSinceValue);
   const rankName = String(dashboardHome?.rank?.name || pilot.rank || "Member");
   const regularRankName = String(dashboardHome?.rank?.regularName || rankName || pilot.rank || "Member");
   const honoraryRankName = String(dashboardHome?.rank?.honoraryName || pilot.honoraryRank || "").trim();
@@ -334,6 +393,9 @@ export function PilotDashboard() {
   const dashboardAlerts = Array.isArray(dashboardHome?.alerts?.items)
     ? dashboardHome.alerts.items
     : [];
+  const staffRoles = Array.isArray(dashboardHome?.staffRoles)
+    ? dashboardHome.staffRoles.filter((role) => String(role?.role || "").trim().length > 0)
+    : [];
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
   const openDashboardTab = (tabId: string) => {
@@ -350,17 +412,22 @@ export function PilotDashboard() {
 
   const navItems = [
     { id: "home", label: t("dashboard.tabs.overview"), icon: Home },
-    { id: "bookings", label: "Bookings", icon: Plane },
+    { id: "bookings", label: t("dashboard.tabs.bookings"), icon: Plane },
+    { id: "recent", label: t("dashboard.tabs.recentFlights"), icon: History },
     { id: "all-flights", label: t("dashboard.tabs.allFlights"), icon: MapPin },
     { id: "manual-pirep", label: t("dashboard.tabs.claims"), icon: ClipboardCheck },
     { id: "notams", label: t("dashboard.tabs.notams"), icon: ShieldAlert },
     { id: "badges", label: t("dashboard.tabs.badges"), icon: Award },
     { id: "simbrief", label: t("dashboard.simbrief"), icon: Cloud },
     { id: "where2fly", label: t("dashboard.tabs.where2fly"), icon: Navigation },
-    { id: "fleet", label: "Fleet", icon: Plane },
+    { id: "fleet", label: t("dashboard.tabs.fleet"), icon: Plane },
     { id: "liveries", label: t("dashboard.tabs.liveries"), icon: Palette },
-    { id: "airports", label: "Airports", icon: Building2 },
-    { id: "recent", label: t("dashboard.tabs.recentFlights"), icon: History },
+    { id: "airports", label: t("dashboard.tabs.airports"), icon: Building2 },
+    { id: "gallery", label: "Галерея", icon: ImagePlus },
+    { id: "stats", label: "Статистика", icon: BarChart2 },
+    { id: "leaderboard", label: t("dashboard.tabs.leaderboard"), icon: Trophy },
+    { id: "passport", label: "Паспорт пилота", icon: BookOpen },
+    { id: "balance", label: "Баланс", icon: Coins },
     { id: "documents", label: t("nav.documents"), icon: FileText },
     { id: "settings", label: t("dashboard.settings"), icon: Settings },
   ];
@@ -414,6 +481,24 @@ export function PilotDashboard() {
               <div className="text-xs text-gray-400 flex items-center gap-1">
                 <span className="text-[#E31E24]">{pilot.rank}</span>
               </div>
+              {staffRoles.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {staffRoles.map((role, index) => (
+                    <span
+                      key={`${role.id || role.role || "staff-role"}-${index}`}
+                      className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                      style={{
+                        color: role.color || "#f5f5f5",
+                        borderColor: role.color || "rgba(255,255,255,0.18)",
+                        backgroundColor: "rgba(255,255,255,0.05)",
+                      }}
+                    >
+                      <span>{role.role}</span>
+                      {role.handle ? <span className="text-white/55">@{role.handle}</span> : null}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -581,7 +666,7 @@ export function PilotDashboard() {
                     <CardContent className="p-6">
                       <div className="text-gray-500 text-sm mb-1">{t("dashboard.stats.memberSince")}</div>
                       <div className="text-2xl font-bold text-[#1d1d1f]">
-                        {memberSinceYear}
+                        {memberSinceDisplay}
                       </div>
                     </CardContent>
                   </Card>
@@ -693,8 +778,8 @@ export function PilotDashboard() {
                         className="p-6 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow text-left flex items-start justify-between group"
                       >
                         <div>
-                          <div className="font-bold text-lg mb-1">Fleet</div>
-                          <div className="text-sm text-gray-500">Inspect aircraft, links, and resource packs.</div>
+                          <div className="font-bold text-lg mb-1">{t("dashboard.fleet.title")}</div>
+                          <div className="text-sm text-gray-500">{t("dashboard.fleet.subtitle")}</div>
                         </div>
                         <Plane className="w-6 h-6 text-[#E31E24] group-hover:scale-110 transition-transform" />
                       </button>
@@ -704,8 +789,8 @@ export function PilotDashboard() {
                         className="p-6 bg-white rounded-xl shadow-sm hover:shadow-md transition-shadow text-left flex items-start justify-between group"
                       >
                         <div>
-                          <div className="font-bold text-lg mb-1">Airports</div>
-                          <div className="text-sm text-gray-500">Browse airport info, briefing links, and alternates.</div>
+                          <div className="font-bold text-lg mb-1">{t("dashboard.airports.title")}</div>
+                          <div className="text-sm text-gray-500">{t("dashboard.airports.subtitle")}</div>
                         </div>
                         <Building2 className="w-6 h-6 text-[#E31E24] group-hover:scale-110 transition-transform" />
                       </button>
@@ -1010,6 +1095,12 @@ export function PilotDashboard() {
               </div>
             )}
 
+            {activeTab === "gallery" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotSocialGallery />
+              </div>
+            )}
+
             {activeTab === "recent" && (
               <div className="animate-in fade-in duration-500">
                 <h1 className="text-2xl font-bold text-[#1d1d1f] mb-6">{t("dashboard.tabs.recentFlights")}</h1>
@@ -1020,6 +1111,34 @@ export function PilotDashboard() {
             {activeTab === "pirep" && (
               <div className="animate-in fade-in duration-500">
                 <PilotPirepDetail pirepId={selectedPirepId} onBack={() => openDashboardTab("recent")} />
+              </div>
+            )}
+
+            {activeTab === "stats" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotStats />
+              </div>
+            )}
+
+            {activeTab === "leaderboard" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotLeaderboard />
+              </div>
+            )}
+
+            {activeTab === "passport" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotPassport
+                  countryRouteIso2={String(countryIso2 || "").trim() || null}
+                  onOpenCountry={(iso2) => navigate(`/dashboard/passport/${iso2}`)}
+                  onBackToPassport={() => navigate("/dashboard?tab=passport")}
+                />
+              </div>
+            )}
+
+            {activeTab === "balance" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotBalance />
               </div>
             )}
 

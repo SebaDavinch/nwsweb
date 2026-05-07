@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useAdminNav } from "./admin-nav-context";
+import { useLanguage } from "../../context/language-context";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -33,6 +35,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Textarea } from "../ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { getCachedAdminBootstrap } from "./admin-bootstrap-cache";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -183,11 +186,15 @@ const fmtDate = (iso: string | null | undefined) => {
 // ─── PIREP List ───────────────────────────────────────────────────────────────
 
 export function AdminPireps() {
+  const { navigateTo } = useAdminNav();
   const navigate = useNavigate();
-  const [pireps, setPireps] = useState<PirepListItem[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+  const initialBootstrap = getCachedAdminBootstrap();
+  const [pireps, setPireps] = useState<PirepListItem[]>(() => Array.isArray(initialBootstrap?.pireps?.pireps) ? (initialBootstrap.pireps?.pireps as PirepListItem[]) : []);
+  const [isLoading, setIsLoading] = useState(!Array.isArray(initialBootstrap?.pireps?.pireps));
   const [prevCursors, setPrevCursors] = useState<string[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(() => String(initialBootstrap?.pireps?.meta?.next_cursor || "").trim() || null);
   const [currentCursor, setCurrentCursor] = useState<string>("");
 
   // Filters
@@ -197,9 +204,18 @@ export function AdminPireps() {
   const [filterType, setFilterType] = useState("__all__");
   const [pendingSearch, setPendingSearch] = useState("");
 
-  const loadPireps = useCallback(async (cursor = "") => {
+  const loadPireps = useCallback(async (cursor = "", force = false) => {
     setIsLoading(true);
     try {
+      if (!force && !cursor && filterStatus === "__all__" && filterNeedReply === "__all__" && filterType === "__all__" && !filterSearch) {
+        const cachedBootstrap = getCachedAdminBootstrap();
+        if (Array.isArray(cachedBootstrap?.pireps?.pireps)) {
+          setPireps(cachedBootstrap.pireps.pireps as PirepListItem[]);
+          setNextCursor(String(cachedBootstrap?.pireps?.meta?.next_cursor || "").trim() || null);
+          return;
+        }
+      }
+
       const params = new URLSearchParams();
       params.set("page[size]", "25");
       params.set("sort", "-id");
@@ -220,11 +236,11 @@ export function AdminPireps() {
       setPireps(data.pireps || []);
       setNextCursor(data.meta?.next_cursor || null);
     } catch {
-      toast.error("Не удалось загрузить PIREP");
+      toast.error(tr("Не удалось загрузить PIREP", "Failed to load PIREPs"));
     } finally {
       setIsLoading(false);
     }
-  }, [filterStatus, filterNeedReply, filterType, filterSearch]);
+  }, [filterStatus, filterNeedReply, filterType, filterSearch, tr]);
 
   useEffect(() => {
     setCurrentCursor("");
@@ -255,10 +271,10 @@ export function AdminPireps() {
   return (
     <div className="space-y-4 p-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">PIREP Management</h1>
-        <Button size="sm" variant="outline" onClick={() => void loadPireps(currentCursor)} disabled={isLoading}>
+        <h1 className="text-xl font-semibold">{tr("Управление PIREP", "PIREP Management")}</h1>
+        <Button size="sm" variant="outline" onClick={() => void loadPireps(currentCursor, true)} disabled={isLoading}>
           <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
-          Обновить
+          {tr("Обновить", "Refresh")}
         </Button>
       </div>
 
@@ -266,7 +282,7 @@ export function AdminPireps() {
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex gap-2">
           <Input
-            placeholder="Callsign или Pilot ID…"
+            placeholder={tr("Позывной или Pilot ID…", "Callsign or Pilot ID…")}
             className="h-8 w-48 text-sm"
             value={pendingSearch}
             onChange={(e) => setPendingSearch(e.target.value)}
@@ -278,37 +294,37 @@ export function AdminPireps() {
         </div>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
           <SelectTrigger className="h-8 w-40 text-sm">
-            <SelectValue placeholder="Статус" />
+            <SelectValue placeholder={tr("Статус", "Status")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">Все статусы</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="accepted">Accepted</SelectItem>
-            <SelectItem value="auto_accepted">Auto accepted</SelectItem>
-            <SelectItem value="rejected">Rejected</SelectItem>
-            <SelectItem value="invalidated">Invalidated</SelectItem>
-            <SelectItem value="manual">Manual</SelectItem>
-            <SelectItem value="complete">Complete</SelectItem>
+            <SelectItem value="__all__">{tr("Все статусы", "All statuses")}</SelectItem>
+            <SelectItem value="pending">{tr("На проверке", "Pending")}</SelectItem>
+            <SelectItem value="accepted">{tr("Принят", "Accepted")}</SelectItem>
+            <SelectItem value="auto_accepted">{tr("Автопринят", "Auto-accepted")}</SelectItem>
+            <SelectItem value="rejected">{tr("Отклонён", "Rejected")}</SelectItem>
+            <SelectItem value="invalidated">{tr("Аннулирован", "Invalidated")}</SelectItem>
+            <SelectItem value="manual">{tr("Ручной", "Manual")}</SelectItem>
+            <SelectItem value="complete">{tr("Завершён", "Complete")}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterType} onValueChange={setFilterType}>
           <SelectTrigger className="h-8 w-36 text-sm">
-            <SelectValue placeholder="Тип" />
+            <SelectValue placeholder={tr("Тип", "Type")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">Все типы</SelectItem>
-            <SelectItem value="regular">Regular</SelectItem>
-            <SelectItem value="claim">Claim</SelectItem>
+            <SelectItem value="__all__">{tr("Все типы", "All types")}</SelectItem>
+            <SelectItem value="regular">{tr("Обычный", "Regular")}</SelectItem>
+            <SelectItem value="claim">{tr("Клейм", "Claim")}</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterNeedReply} onValueChange={setFilterNeedReply}>
           <SelectTrigger className="h-8 w-44 text-sm">
-            <SelectValue placeholder="Need reply" />
+            <SelectValue placeholder={tr("Требует ответа", "Needs reply")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__all__">Все</SelectItem>
-            <SelectItem value="true">Требует ответа</SelectItem>
-            <SelectItem value="false">Не требует</SelectItem>
+            <SelectItem value="__all__">{tr("Все", "All")}</SelectItem>
+            <SelectItem value="true">{tr("Требует ответа", "Needs reply")}</SelectItem>
+            <SelectItem value="false">{tr("Не требует", "No reply needed")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -319,13 +335,13 @@ export function AdminPireps() {
           <thead>
             <tr className="border-b bg-muted/30 text-left text-xs font-medium text-muted-foreground">
               <th className="px-3 py-2">ID</th>
-              <th className="px-3 py-2">Pilot</th>
-              <th className="px-3 py-2">Рейс</th>
-              <th className="px-3 py-2">Маршрут</th>
-              <th className="px-3 py-2">Статус</th>
-              <th className="px-3 py-2">Посадка</th>
-              <th className="px-3 py-2">Очки</th>
-              <th className="px-3 py-2">Дата</th>
+              <th className="px-3 py-2">{tr("Пилот", "Pilot")}</th>
+              <th className="px-3 py-2">{tr("Рейс", "Flight")}</th>
+              <th className="px-3 py-2">{tr("Маршрут", "Route")}</th>
+              <th className="px-3 py-2">{tr("Статус", "Status")}</th>
+              <th className="px-3 py-2">{tr("Посадка", "Landing")}</th>
+              <th className="px-3 py-2">{tr("Очки", "Points")}</th>
+              <th className="px-3 py-2">{tr("Дата", "Date")}</th>
               <th className="px-3 py-2"></th>
             </tr>
           </thead>
@@ -338,17 +354,17 @@ export function AdminPireps() {
               </tr>
             ) : pireps.length === 0 ? (
               <tr>
-                <td colSpan={9} className="py-8 text-center text-muted-foreground">PIREP не найдены</td>
+                <td colSpan={9} className="py-8 text-center text-muted-foreground">{tr("PIREP не найдены", "No PIREPs found")}</td>
               </tr>
             ) : pireps.map((p) => (
               <tr
                 key={p.id}
                 className="border-b hover:bg-muted/20 cursor-pointer"
-                onClick={() => navigate(`/admin/pireps/${p.id}`)}
+                onClick={() => navigateTo("pirep-detail", p.id)}
               >
                 <td className="px-3 py-2 font-mono text-xs text-muted-foreground">#{p.id}</td>
                 <td className="px-3 py-2">
-                  <div className="font-medium">{p.callsign || `Pilot ${p.pilot_id || "?"}`}</div>
+                  <div className="font-medium">{p.callsign || `${tr("Пилот", "Pilot")} ${p.pilot_id || "?"}`}</div>
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">{p.flight_number || "—"}</td>
                 <td className="px-3 py-2 text-xs">
@@ -362,7 +378,7 @@ export function AdminPireps() {
                       {p.status || "—"}
                     </Badge>
                     {p.need_reply && <Bell className="h-3 w-3 text-orange-500" />}
-                    {p.type === "claim" && <Badge variant="outline" className="text-xs">Claim</Badge>}
+                    {p.type === "claim" && <Badge variant="outline" className="text-xs">{tr("Клейм", "Claim")}</Badge>}
                   </div>
                 </td>
                 <td className="px-3 py-2 text-xs">
@@ -378,9 +394,9 @@ export function AdminPireps() {
                     size="sm"
                     variant="ghost"
                     className="h-6 text-xs"
-                    onClick={(e) => { e.stopPropagation(); navigate(`/admin/pireps/${p.id}`); }}
+                    onClick={(e) => { e.stopPropagation(); navigateTo("pirep-detail", p.id); }}
                   >
-                    Открыть
+                    {tr("Открыть", "Open")}
                   </Button>
                 </td>
               </tr>
@@ -391,14 +407,14 @@ export function AdminPireps() {
 
       {/* Pagination */}
       <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <span>{pireps.length} записей</span>
+        <span>{pireps.length} {tr("записей", "records")}</span>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" onClick={handlePrevPage} disabled={prevCursors.length === 0 || isLoading}>
             <ChevronLeft className="h-4 w-4" />
-            Назад
+            {tr("Назад", "Back")}
           </Button>
           <Button size="sm" variant="outline" onClick={handleNextPage} disabled={!nextCursor || isLoading}>
-            Вперед
+            {tr("Вперед", "Next")}
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
@@ -409,13 +425,17 @@ export function AdminPireps() {
 
 // ─── PIREP Detail ─────────────────────────────────────────────────────────────
 
-export function AdminPirepDetail() {
-  const { id } = useParams<{ id: string }>();
+export function AdminPirepDetail({ pirepId: pirepIdProp }: { pirepId?: number }) {
+  const { id: paramId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const { navigateTo } = useAdminNav();
   const navigate = useNavigate();
-  const pirepId = Number(id || 0) || 0;
+  const { language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+  const pirepId = pirepIdProp || Number(paramId || searchParams.get("id") || 0) || 0;
 
   const [pirep, setPirep] = useState<PirepDetail | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(pirepId > 0);
   const [isBusy, setIsBusy] = useState(false);
 
   // Tabs data
@@ -460,11 +480,11 @@ export function AdminPirepDetail() {
       setEditBlockLen(String(p.block_length ?? ""));
       setEditFlightLen(String(p.flight_length ?? ""));
     } catch {
-      toast.error("Не удалось загрузить PIREP");
+      toast.error(tr("Не удалось загрузить PIREP", "Failed to load PIREP"));
     } finally {
       setIsLoading(false);
     }
-  }, [pirepId]);
+  }, [pirepId, tr]);
 
   const loadPositionReports = useCallback(async () => {
     setIsPosLoading(true);
@@ -473,11 +493,11 @@ export function AdminPirepDetail() {
       const data = await resp.json() as { positionReports?: PirepPositionReport[] };
       setPositionReports(data.positionReports || []);
     } catch {
-      toast.error("Не удалось загрузить position reports");
+      toast.error(tr("Не удалось загрузить position reports", "Failed to load position reports"));
     } finally {
       setIsPosLoading(false);
     }
-  }, [pirepId]);
+  }, [pirepId, tr]);
 
   const loadTouchdowns = useCallback(async () => {
     setIsTdLoading(true);
@@ -486,11 +506,11 @@ export function AdminPirepDetail() {
       const data = await resp.json() as { touchdowns?: PirepTouchdown[] };
       setTouchdowns(data.touchdowns || []);
     } catch {
-      toast.error("Не удалось загрузить touchdowns");
+      toast.error(tr("Не удалось загрузить touchdowns", "Failed to load touchdowns"));
     } finally {
       setIsTdLoading(false);
     }
-  }, [pirepId]);
+  }, [pirepId, tr]);
 
   useEffect(() => {
     if (pirepId > 0) {
@@ -516,41 +536,41 @@ export function AdminPirepDetail() {
   };
 
   const handleAccept = async () => {
-    if (!confirm("Принять PIREP?")) return;
+    if (!confirm(tr("Принять PIREP?", "Accept PIREP?"))) return;
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/accept`, "POST");
-      toast.success("PIREP принят");
+      toast.success(tr("PIREP принят", "PIREP accepted"));
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleReject = async () => {
-    if (!rejectReason.trim() && !confirm("Отклонить без причины?")) return;
+    if (!rejectReason.trim() && !confirm(tr("Отклонить без причины?", "Reject without a reason?"))) return;
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/reject`, "POST", rejectReason ? { reason: rejectReason } : undefined);
-      toast.success("PIREP отклонён");
+      toast.success(tr("PIREP отклонён", "PIREP rejected"));
       setRejectDialogOpen(false);
       setRejectReason("");
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleInvalidate = async () => {
-    if (!confirm("Аннулировать PIREP? Это действие нельзя отменить.")) return;
+    if (!confirm(tr("Аннулировать PIREP? Это действие нельзя отменить.", "Invalidate PIREP? This action cannot be undone."))) return;
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/invalidate`, "POST");
-      toast.success("PIREP аннулирован");
+      toast.success(tr("PIREP аннулирован", "PIREP invalidated"));
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleRejectClaim = async () => {
-    if (!confirm("Отклонить claim?")) return;
+    if (!confirm(tr("Отклонить клейм?", "Reject claim?"))) return;
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/reject-claim`, "POST");
-      toast.success("Claim отклонён");
+      toast.success(tr("Клейм отклонён", "Claim rejected"));
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleAcceptClaim = async () => {
@@ -558,70 +578,70 @@ export function AdminPirepDetail() {
     const minutes = Number(claimMinutes);
     const points = Number(claimPoints);
     if (!Number.isFinite(hours) || !Number.isFinite(minutes) || !Number.isFinite(points)) {
-      toast.error("Укажите корректные значения hours/minutes/points");
+      toast.error(tr("Укажите корректные значения часов, минут и очков", "Enter valid values for hours, minutes, and points"));
       return;
     }
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/accept-claim`, "POST", { hours, minutes, points });
-      toast.success("Claim принят");
+      toast.success(tr("Клейм принят", "Claim accepted"));
       setClaimDialogOpen(false);
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleReprocess = async () => {
-    if (!confirm("Запустить переобработку PIREP?")) return;
+    if (!confirm(tr("Запустить переобработку PIREP?", "Start PIREP reprocessing?"))) return;
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/reprocess`, "POST");
-      toast.success("Переобработка запущена");
+      toast.success(tr("Переобработка запущена", "Reprocessing started"));
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleNeedReply = async (value: boolean) => {
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/need-reply`, "PUT", { need_reply: value });
-      toast.success(value ? "Отмечен для ответа" : "Пометка снята");
+      toast.success(value ? tr("Отмечен для ответа", "Marked for reply") : tr("Пометка снята", "Mark removed"));
       setPirep((prev) => prev ? { ...prev, need_reply: value } : prev);
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleSavePoints = async () => {
     const val = Number(editPoints);
-    if (!Number.isFinite(val)) { toast.error("Укажите число"); return; }
+    if (!Number.isFinite(val)) { toast.error(tr("Укажите число", "Enter a number")); return; }
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/points`, "PUT", { points: val });
-      toast.success("Очки обновлены");
+      toast.success(tr("Очки обновлены", "Points updated"));
       setPirep((prev) => prev ? { ...prev, points: val } : prev);
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleSaveBonus = async () => {
     const val = Number(editBonus);
-    if (!Number.isFinite(val)) { toast.error("Укажите число"); return; }
+    if (!Number.isFinite(val)) { toast.error(tr("Укажите число", "Enter a number")); return; }
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/bonus-points`, "PUT", { points: val });
-      toast.success("Бонусные очки обновлены");
+      toast.success(tr("Бонусные очки обновлены", "Bonus points updated"));
       setPirep((prev) => prev ? { ...prev, bonus_sum: val } : prev);
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleSaveNote = async () => {
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/internal-note`, "PUT", { note: editNote });
-      toast.success("Заметка сохранена");
+      toast.success(tr("Заметка сохранена", "Note saved"));
       setPirep((prev) => prev ? { ...prev, internal_note: editNote } : prev);
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleSaveTimes = async () => {
     const block = Number(editBlockLen);
     const flight = Number(editFlightLen);
-    if (!Number.isFinite(block) || !Number.isFinite(flight)) { toast.error("Укажите корректные значения в секундах"); return; }
+    if (!Number.isFinite(block) || !Number.isFinite(flight)) { toast.error(tr("Укажите корректные значения в секундах", "Enter valid values in seconds")); return; }
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/times`, "PUT", { block_length: block, flight_length: flight });
-      toast.success("Времена обновлены");
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+      toast.success(tr("Времена обновлены", "Times updated"));
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleAddComment = async () => {
@@ -636,40 +656,40 @@ export function AdminPirepDetail() {
       const data = await resp.json() as { ok?: boolean; error?: string };
       if (!resp.ok || data.ok === false) throw new Error(data.error || `HTTP ${resp.status}`);
       setNewComment("");
-      toast.success("Комментарий добавлен");
+      toast.success(tr("Комментарий добавлен", "Comment added"));
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); } finally {
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); } finally {
       setIsAddingComment(false);
     }
   };
 
   const handleDeleteComment = async (commentId: number) => {
-    if (!confirm("Удалить комментарий?")) return;
+    if (!confirm(tr("Удалить комментарий?", "Delete comment?"))) return;
     try {
       const resp = await fetch(`/api/admin/pireps/${pirepId}/comments/${commentId}`, { method: "DELETE" });
       const data = await resp.json() as { ok?: boolean; error?: string };
       if (!resp.ok || data.ok === false) throw new Error(data.error || `HTTP ${resp.status}`);
-      toast.success("Комментарий удалён");
+      toast.success(tr("Комментарий удалён", "Comment deleted"));
       void loadPirep();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const handleSelectLanding = async (index: number) => {
-    if (!confirm(`Выбрать посадку #${index} как основную?`)) return;
+    if (!confirm(tr(`Выбрать посадку #${index} как основную?`, `Set landing #${index} as primary?`))) return;
     try {
       await apiAction(`/api/admin/pireps/${pirepId}/select-landing`, "POST", { touchdown_index: index });
-      toast.success("Посадка выбрана");
+      toast.success(tr("Посадка выбрана", "Landing selected"));
       void loadPirep();
       void loadTouchdowns();
-    } catch (e) { toast.error(String((e as Error).message || "Ошибка")); }
+    } catch (e) { toast.error(String((e as Error).message || tr("Ошибка", "Error"))); }
   };
 
   const pilotLabel = useMemo(() => {
     if (!pirep) return "";
     if (pirep.pilot?.name) return `${pirep.pilot.name} (${pirep.pilot.username || pirep.pilot_id || ""})`;
     if (pirep.callsign) return pirep.callsign;
-    return `Pilot #${pirep.pilot_id || "?"}`;
-  }, [pirep]);
+    return `${tr("Пилот", "Pilot")} #${pirep.pilot_id || "?"}`;
+  }, [pirep, tr]);
 
   const depAirport = useMemo(() => (pirep?.departure_airport?.icao || String(pirep?.departure_airport_id || "")), [pirep]);
   const arrAirport = useMemo(() => (pirep?.arrival_airport?.icao || String(pirep?.arrival_airport_id || "")), [pirep]);
@@ -687,7 +707,7 @@ export function AdminPirepDetail() {
   if (!pirep) {
     return (
       <div className="p-6 text-center text-muted-foreground">
-        PIREP не найден. <Button variant="link" onClick={() => navigate("/admin/pireps")}>Вернуться</Button>
+        {tr("PIREP не найден.", "PIREP not found.")} <Button variant="link" onClick={() => navigateTo("pireps")}>{tr("Вернуться к списку", "Back to list")}</Button>
       </div>
     );
   }
@@ -696,18 +716,18 @@ export function AdminPirepDetail() {
     <div className="space-y-4 p-4">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/admin/pireps")}>
+        <Button variant="ghost" size="sm" onClick={() => navigateTo("pireps")}>
           <ArrowLeft className="h-4 w-4 mr-1" />
-          PIREPs
+          {tr("К списку", "Back to list")}
         </Button>
         <div className="flex-1">
           <h1 className="text-xl font-semibold flex items-center gap-2">
             PIREP #{pirep.id}
             <Badge variant={STATUS_VARIANT[pirep.status || ""] ?? "outline"} className="capitalize">
-              {pirep.status || "unknown"}
+              {pirep.status || tr("неизвестно", "unknown")}
             </Badge>
-            {pirep.need_reply && <Badge variant="outline" className="border-orange-400 text-orange-600 gap-1"><Bell className="h-3 w-3" />Need reply</Badge>}
-            {isClaim && <Badge variant="outline">Claim</Badge>}
+            {pirep.need_reply && <Badge variant="outline" className="border-orange-400 text-orange-600 gap-1"><Bell className="h-3 w-3" />{tr("Требует ответа", "Needs reply")}</Badge>}
+            {isClaim && <Badge variant="outline">{tr("Клейм", "Claim")}</Badge>}
           </h1>
           <div className="text-sm text-muted-foreground">{pilotLabel} · {pirep.flight_number || "—"} · {depAirport} → {arrAirport}</div>
         </div>
@@ -721,34 +741,34 @@ export function AdminPirepDetail() {
         {!isClaim && (
           <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={handleAccept} disabled={isBusy}>
             <CheckCircle className="h-4 w-4 mr-1" />
-            Принять
+            {tr("Принять", "Accept")}
           </Button>
         )}
         {isClaim && (
           <Button size="sm" className="bg-green-600 hover:bg-green-700 text-white" onClick={() => setClaimDialogOpen(true)} disabled={isBusy}>
             <CheckCircle className="h-4 w-4 mr-1" />
-            Принять claim
+            {tr("Принять клейм", "Accept claim")}
           </Button>
         )}
         {!isClaim && (
           <Button size="sm" variant="destructive" onClick={() => setRejectDialogOpen(true)} disabled={isBusy}>
             <XCircle className="h-4 w-4 mr-1" />
-            Отклонить
+            {tr("Отклонить", "Reject")}
           </Button>
         )}
         {isClaim && (
           <Button size="sm" variant="destructive" onClick={handleRejectClaim} disabled={isBusy}>
             <XCircle className="h-4 w-4 mr-1" />
-            Отклонить claim
+            {tr("Отклонить клейм", "Reject claim")}
           </Button>
         )}
         <Button size="sm" variant="outline" className="border-red-300 text-red-600 hover:bg-red-50" onClick={handleInvalidate} disabled={isBusy}>
           <AlertTriangle className="h-4 w-4 mr-1" />
-          Аннулировать
+          {tr("Аннулировать", "Invalidate")}
         </Button>
         <Button size="sm" variant="outline" onClick={handleReprocess} disabled={isBusy}>
           <RefreshCw className="h-4 w-4 mr-1" />
-          Переобработать
+          {tr("Переобработать", "Reprocess")}
         </Button>
         <Button
           size="sm"
@@ -758,22 +778,22 @@ export function AdminPirepDetail() {
           className={pirep.need_reply ? "bg-orange-500 hover:bg-orange-600 text-white" : ""}
         >
           {pirep.need_reply ? <BellOff className="h-4 w-4 mr-1" /> : <Bell className="h-4 w-4 mr-1" />}
-          {pirep.need_reply ? "Снять need reply" : "Требует ответа"}
+          {pirep.need_reply ? tr("Снять отметку", "Remove mark") : tr("Требует ответа", "Needs reply")}
         </Button>
       </div>
 
       {/* Tabs */}
       <Tabs defaultValue="overview">
         <TabsList className="flex-wrap">
-          <TabsTrigger value="overview">Обзор</TabsTrigger>
-          <TabsTrigger value="comments">Комментарии ({(pirep.comments || []).length})</TabsTrigger>
-          <TabsTrigger value="edit">Редактирование</TabsTrigger>
-          <TabsTrigger value="touchdowns">Посадки ({touchdowns.length})</TabsTrigger>
+          <TabsTrigger value="overview">{tr("Обзор", "Overview")}</TabsTrigger>
+          <TabsTrigger value="comments">{tr("Комментарии", "Comments")} ({(pirep.comments || []).length})</TabsTrigger>
+          <TabsTrigger value="edit">{tr("Редактирование", "Edit")}</TabsTrigger>
+          <TabsTrigger value="touchdowns">{tr("Посадки", "Touchdowns")} ({touchdowns.length})</TabsTrigger>
           <TabsTrigger value="positions" onClick={() => { if (positionReports.length === 0) void loadPositionReports(); }}>
-            Position Reports
+            {tr("Позиционные отчёты", "Position Reports")}
           </TabsTrigger>
           {(pirep.staff_actions?.length ?? 0) > 0 && (
-            <TabsTrigger value="actions">Staff Actions</TabsTrigger>
+            <TabsTrigger value="actions">{tr("Действия персонала", "Staff Actions")}</TabsTrigger>
           )}
         </TabsList>
 
@@ -781,44 +801,44 @@ export function AdminPirepDetail() {
         <TabsContent value="overview" className="space-y-4 pt-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Рейс</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Рейс", "Flight")}</CardTitle></CardHeader>
               <CardContent className="space-y-1 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Номер</span><span className="font-medium">{pirep.flight_number || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Callsign</span><span className="font-medium">{pirep.callsign || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Отправление</span><span className="font-medium">{pirep.departure_airport?.icao || depAirport || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Прибытие</span><span className="font-medium">{pirep.arrival_airport?.icao || arrAirport || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Сеть</span><span className="font-medium">{pirep.network || "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Тип</span><span className="font-medium capitalize">{pirep.type || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Номер", "Number")}</span><span className="font-medium">{pirep.flight_number || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Позывной", "Callsign")}</span><span className="font-medium">{pirep.callsign || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Отправление", "Departure")}</span><span className="font-medium">{pirep.departure_airport?.icao || depAirport || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Прибытие", "Arrival")}</span><span className="font-medium">{pirep.arrival_airport?.icao || arrAirport || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Сеть", "Network")}</span><span className="font-medium">{pirep.network || "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Тип", "Type")}</span><span className="font-medium capitalize">{pirep.type || "—"}</span></div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Статистика</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Статистика", "Statistics")}</CardTitle></CardHeader>
               <CardContent className="space-y-1 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Посадка</span><span className="font-medium">{pirep.landing_rate != null ? `${pirep.landing_rate} fpm` : "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Посадка", "Landing")}</span><span className="font-medium">{pirep.landing_rate != null ? `${pirep.landing_rate} fpm` : "—"}</span></div>
                 <div className="flex justify-between"><span className="text-muted-foreground">G-force</span><span className="font-medium">{pirep.landing_g != null ? pirep.landing_g : "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Дистанция</span><span className="font-medium">{pirep.flight_distance != null ? `${pirep.flight_distance} nm` : "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Время полёта</span><span className="font-medium">{fmtSeconds(pirep.flight_length)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Block time</span><span className="font-medium">{fmtSeconds(pirep.block_length)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Топливо</span><span className="font-medium">{pirep.fuel_used != null ? `${pirep.fuel_used} kg` : "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Дистанция", "Distance")}</span><span className="font-medium">{pirep.flight_distance != null ? `${pirep.flight_distance} nm` : "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Время полёта", "Flight time")}</span><span className="font-medium">{fmtSeconds(pirep.flight_length)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Блочное время", "Block time")}</span><span className="font-medium">{fmtSeconds(pirep.block_length)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Топливо", "Fuel")}</span><span className="font-medium">{pirep.fuel_used != null ? `${pirep.fuel_used} kg` : "—"}</span></div>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Очки и время</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Очки и время", "Points & Times")}</CardTitle></CardHeader>
               <CardContent className="space-y-1 text-sm">
-                <div className="flex justify-between"><span className="text-muted-foreground">Очки</span><span className="font-medium">{pirep.points ?? "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Бонус</span><span className="font-medium text-green-600">{pirep.bonus_sum != null ? `+${pirep.bonus_sum}` : "—"}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Off blocks</span><span className="font-medium">{fmtDate(pirep.off_blocks_time)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Departure</span><span className="font-medium">{fmtDate(pirep.departure_time)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">Landing</span><span className="font-medium">{fmtDate(pirep.landing_time)}</span></div>
-                <div className="flex justify-between"><span className="text-muted-foreground">On blocks</span><span className="font-medium">{fmtDate(pirep.on_blocks_time)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Очки", "Points")}</span><span className="font-medium">{pirep.points ?? "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Бонус", "Bonus")}</span><span className="font-medium text-green-600">{pirep.bonus_sum != null ? `+${pirep.bonus_sum}` : "—"}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Выход из стоянки", "Off blocks")}</span><span className="font-medium">{fmtDate(pirep.off_blocks_time)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Взлёт", "Takeoff")}</span><span className="font-medium">{fmtDate(pirep.departure_time)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Посадка", "Landing")}</span><span className="font-medium">{fmtDate(pirep.landing_time)}</span></div>
+                <div className="flex justify-between"><span className="text-muted-foreground">{tr("Постановка на стоянку", "On blocks")}</span><span className="font-medium">{fmtDate(pirep.on_blocks_time)}</span></div>
               </CardContent>
             </Card>
 
             {pirep.aircraft && (
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Воздушное судно</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Воздушное судно", "Aircraft")}</CardTitle></CardHeader>
                 <CardContent className="text-sm">
                   <div>{pirep.aircraft.name || "—"}</div>
                   <div className="text-muted-foreground">{pirep.aircraft.registration || ""}</div>
@@ -828,10 +848,10 @@ export function AdminPirepDetail() {
 
             {pirep.claim && (
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm">Claim</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Клейм", "Claim")}</CardTitle></CardHeader>
                 <CardContent className="text-sm space-y-1">
-                  <div className="flex justify-between"><span className="text-muted-foreground">Статус</span><span className="capitalize font-medium">{pirep.claim.status}</span></div>
-                  <div className="flex justify-between"><span className="text-muted-foreground">Рейс</span><span className="font-medium">{pirep.claim.flight_number || "—"}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">{tr("Статус", "Status")}</span><span className="capitalize font-medium">{pirep.claim.status}</span></div>
+                  <div className="flex justify-between"><span className="text-muted-foreground">{tr("Рейс", "Flight")}</span><span className="font-medium">{pirep.claim.flight_number || "—"}</span></div>
                   {pirep.claim.message && <div className="text-muted-foreground italic text-xs mt-1">{pirep.claim.message}</div>}
                 </CardContent>
               </Card>
@@ -839,7 +859,7 @@ export function AdminPirepDetail() {
 
             {pirep.internal_note && (
               <Card className="border-yellow-200 bg-yellow-50">
-                <CardHeader className="pb-2"><CardTitle className="text-sm text-yellow-800">Внутренняя заметка</CardTitle></CardHeader>
+                <CardHeader className="pb-2"><CardTitle className="text-sm text-yellow-800">{tr("Внутренняя заметка", "Internal Note")}</CardTitle></CardHeader>
                 <CardContent className="text-sm text-yellow-900">{pirep.internal_note}</CardContent>
               </Card>
             )}
@@ -850,13 +870,13 @@ export function AdminPirepDetail() {
         <TabsContent value="comments" className="space-y-3 pt-2">
           <div className="space-y-2">
             {(pirep.comments || []).length === 0 && (
-              <div className="text-sm text-muted-foreground py-4 text-center">Комментариев нет</div>
+              <div className="text-sm text-muted-foreground py-4 text-center">{tr("Комментариев нет", "No comments")}</div>
             )}
             {(pirep.comments || []).map((c) => (
               <div key={c.id} className="flex items-start gap-3 rounded-md border p-3 text-sm">
                 <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground flex-shrink-0" />
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-xs text-muted-foreground">{c.hide_name ? "Анонимно" : (c.commenter_name || `#${c.commenter_id || "?"}`)} · {fmtDate(c.created_at)}</div>
+                  <div className="font-medium text-xs text-muted-foreground">{c.hide_name ? tr("Анонимно", "Anonymous") : (c.commenter_name || `#${c.commenter_id || "?"}`)} · {fmtDate(c.created_at)}</div>
                   <div className="mt-0.5 break-words">{c.comment || c.content || ""}</div>
                 </div>
                 <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-red-500 hover:text-red-700" onClick={() => void handleDeleteComment(c.id)}>
@@ -867,7 +887,7 @@ export function AdminPirepDetail() {
           </div>
           <div className="flex gap-2">
             <Textarea
-              placeholder="Добавить комментарий…"
+              placeholder={tr("Добавить комментарий…", "Add a comment…")}
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               className="min-h-[80px] text-sm"
@@ -882,17 +902,17 @@ export function AdminPirepDetail() {
         <TabsContent value="edit" className="space-y-4 pt-2">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Очки</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Очки", "Points")}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Основные очки</Label>
+                  <Label className="text-xs">{tr("Основные очки", "Base points")}</Label>
                   <div className="flex gap-2">
                     <Input type="number" value={editPoints} onChange={(e) => setEditPoints(e.target.value)} className="h-8 text-sm" />
                     <Button size="sm" variant="outline" onClick={handleSavePoints} disabled={isBusy}><Check className="h-4 w-4" /></Button>
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Бонусные очки</Label>
+                  <Label className="text-xs">{tr("Бонусные очки", "Bonus points")}</Label>
                   <div className="flex gap-2">
                     <Input type="number" value={editBonus} onChange={(e) => setEditBonus(e.target.value)} className="h-8 text-sm" />
                     <Button size="sm" variant="outline" onClick={handleSaveBonus} disabled={isBusy}><Check className="h-4 w-4" /></Button>
@@ -902,18 +922,18 @@ export function AdminPirepDetail() {
             </Card>
 
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm">Времена (секунды)</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">{tr("Времена (секунды)", "Times (seconds)")}</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 <div className="space-y-1">
-                  <Label className="text-xs">Block time (сек)</Label>
+                  <Label className="text-xs">{tr("Block time (сек)", "Block time (sec)")}</Label>
                   <Input type="number" value={editBlockLen} onChange={(e) => setEditBlockLen(e.target.value)} className="h-8 text-sm" />
                 </div>
                 <div className="space-y-1">
-                  <Label className="text-xs">Flight time (сек)</Label>
+                  <Label className="text-xs">{tr("Flight time (сек)", "Flight time (sec)")}</Label>
                   <Input type="number" value={editFlightLen} onChange={(e) => setEditFlightLen(e.target.value)} className="h-8 text-sm" />
                 </div>
                 <Button size="sm" onClick={handleSaveTimes} disabled={isBusy}>
-                  <Check className="h-4 w-4 mr-1" />Сохранить времена
+                  <Check className="h-4 w-4 mr-1" />{tr("Сохранить времена", "Save times")}
                 </Button>
               </CardContent>
             </Card>
@@ -925,7 +945,7 @@ export function AdminPirepDetail() {
                   value={editNote}
                   onChange={(e) => setEditNote(e.target.value)}
                   className="min-h-[80px] text-sm"
-                  placeholder="Внутренняя заметка для персонала…"
+                  placeholder={tr("Внутренняя заметка для персонала…", "Internal staff note…")}
                 />
                 <Button size="sm" onClick={handleSaveNote} disabled={isBusy}>
                   <Check className="h-4 w-4 mr-1" />Сохранить заметку
@@ -1010,7 +1030,7 @@ export function AdminPirepDetail() {
             {(pirep.staff_actions || []).map((a, i) => (
               <div key={a.id ?? i} className="rounded-md border p-3 text-sm">
                 <div className="flex justify-between text-xs text-muted-foreground mb-0.5">
-                  <span>{a.action_type || "action"}</span>
+                  <span>{a.action_type || tr("действие", "action")}</span>
                   <span>{fmtDate(a.created_at)}</span>
                 </div>
                 <div>{a.action_text || ""}</div>
@@ -1027,7 +1047,7 @@ export function AdminPirepDetail() {
           <div className="space-y-3">
             <Label>Причина отклонения (необязательно)</Label>
             <Textarea
-              placeholder="Укажите причину…"
+              placeholder={tr("Укажите причину…", "Enter reason…")}
               value={rejectReason}
               onChange={(e) => setRejectReason(e.target.value)}
               className="min-h-[100px]"
@@ -1046,7 +1066,7 @@ export function AdminPirepDetail() {
       {/* Accept Claim Dialog */}
       <Dialog open={claimDialogOpen} onOpenChange={setClaimDialogOpen}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Принять claim PIREP #{pirep.id}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Принять клейм PIREP #{pirep.id}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-3 gap-2">
               <div><Label className="text-xs">Часы</Label><Input type="number" min="0" max="24" value={claimHours} onChange={(e) => setClaimHours(e.target.value)} /></div>

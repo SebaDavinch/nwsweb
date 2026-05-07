@@ -49,20 +49,21 @@ const formatDateTime = (value?: string | null) => {
   });
 };
 
-const stringifyDetails = (value: unknown) => {
-  if (value == null) {
-    return "";
+const stringifyDetails = (value: unknown): string => {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) {
+    try {
+      const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, v]) => v != null && v !== "")
+        .map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+        .join(" · ");
+      return entries || JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
   }
-
-  if (typeof value === "string") {
-    return value;
-  }
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
+  return String(value);
 };
 
 export function AdminAuthLogs() {
@@ -88,7 +89,7 @@ export function AdminAuthLogs() {
         });
         const payload = await response.json().catch(() => null);
         if (!response.ok) {
-          throw new Error(String(payload?.error || "Failed to load auth logs"));
+          throw new Error(String(payload?.error || tr("Не удалось загрузить журнал авторизации", "Failed to load auth logs")));
         }
         if (active) {
           setEntries(Array.isArray(payload?.entries) ? payload.entries : []);
@@ -96,7 +97,7 @@ export function AdminAuthLogs() {
       } catch (nextError) {
         if (active) {
           setEntries([]);
-          setError(String(nextError instanceof Error ? nextError.message : "Failed to load auth logs"));
+          setError(String(nextError instanceof Error ? nextError.message : tr("Не удалось загрузить журнал авторизации", "Failed to load auth logs")));
         }
       } finally {
         if (active) {
@@ -231,7 +232,7 @@ export function AdminAuthLogs() {
       {isLoading ? (
         <div className="flex min-h-[320px] items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-500">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-          {tr("Загрузка auth log...", "Loading auth log...")}
+          {tr("Загрузка журнала авторизации...", "Loading auth log...")}
         </div>
       ) : error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-red-700">{error}</div>
@@ -244,8 +245,8 @@ export function AdminAuthLogs() {
           {filteredEntries.map((entry) => {
             const isSuccess = String(entry?.outcome || "").toLowerCase() === "success";
             return (
-              <Card key={entry.id} className="border-none shadow-sm">
-                <CardContent className="space-y-3 p-5">
+              <Card key={entry.id} className="border-none shadow-sm overflow-hidden">
+                <CardContent className="space-y-3 p-5 min-w-0">
                   <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -272,16 +273,16 @@ export function AdminAuthLogs() {
                     <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
                       <div className="text-xs uppercase tracking-wide text-gray-400">{tr("Пользователь", "User")}</div>
                       <div className="mt-1 font-medium text-gray-900">{entry.actor?.display || "—"}</div>
-                      <div className="text-xs text-gray-500">{entry.actor?.role || entry.actor?.provider || "—"}</div>
+                      <div className="text-xs text-gray-500">{entry.actor?.role || entry.actor?.provider || tr("н/д", "n/a")}</div>
                     </div>
                     <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
                       <div className="text-xs uppercase tracking-wide text-gray-400">IP</div>
                       <div className="mt-1 break-all font-medium text-gray-900">{entry.request?.ip || "—"}</div>
                       <div className="text-xs text-gray-500">{entry.request?.path || "—"}</div>
                     </div>
-                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                    <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 overflow-hidden min-w-0">
                       <div className="text-xs uppercase tracking-wide text-gray-400">{tr("Детали", "Details")}</div>
-                      <div className="mt-1 line-clamp-3 break-all text-gray-700">{stringifyDetails(entry.details) || "—"}</div>
+                      <div className="mt-1 line-clamp-3 break-all text-gray-700 max-w-full overflow-hidden">{stringifyDetails(entry.details) || "—"}</div>
                     </div>
                   </div>
                 </CardContent>
