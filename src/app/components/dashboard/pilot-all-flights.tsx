@@ -71,6 +71,31 @@ interface PilotAllFlightsProps {
 const getRouteLabel = (route: RouteOption) =>
   `${route.flightNumber || route.callsign || `Route ${route.id}`} · ${route.fromCode || "—"} → ${route.toCode || "—"}`;
 
+const ICAO_COUNTRY: Record<string, string> = {
+  UR: "ru", UW: "ru", UU: "ru", UK: "ru", US: "ru", UA: "ua",
+  LT: "tr", LG: "gr", LF: "fr", ED: "de", EG: "gb", LE: "es",
+  LI: "it", EH: "nl", LO: "at", LP: "pt", LK: "cz",
+  EP: "pl", EY: "lt", EV: "lv", EE: "ee", UB: "az", UT: "uz",
+  UC: "kg",
+};
+
+const icaoFlag = (icao?: string | null) => {
+  const n = String(icao || "").trim().toUpperCase();
+  if (!n) return "";
+  return ICAO_COUNTRY[n] || ICAO_COUNTRY[n.slice(0, 2)] || "";
+};
+
+const icaoCity = (name?: string | null, icao?: string | null) => {
+  const raw = String(name || "").trim();
+  if (!raw) return String(icao || "").trim().toUpperCase();
+  return raw
+    .replace(/\s*\([A-Z]{4}\)\s*/g, " ")
+    .replace(/\binternational\s+airport\b/gi, "")
+    .replace(/\bairport\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || String(icao || "").trim().toUpperCase();
+};
+
 const formatRouteDuration = (value?: string | null) => {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -116,6 +141,27 @@ const formatRouteDistanceNm = (value?: string | number | null) => {
   return `${Math.round(distanceNm)} nm`;
 };
 
+const toAircraftTypeCode = (model: unknown) => {
+  const value = String(model || "").toUpperCase().trim();
+  if (!value) {
+    return "";
+  }
+
+  if (/737\s*MAX\s*8|B38M/.test(value)) return "B38M";
+  if (/737\s*-?\s*900\s*ER|B739/.test(value)) return "B739";
+  if (/737\s*-?\s*800|B738/.test(value)) return "B738";
+  if (/777\s*-?\s*300\s*ER|B77W/.test(value)) return "B77W";
+  if (/777\s*-?\s*200\s*ER|777\s*-?\s*200|B772/.test(value)) return "B772";
+  if (/A321\s*NEO|A21N/.test(value)) return "A21N";
+  if (/A321\s*-?\s*2?00|A321/.test(value)) return "A321";
+  if (/A330\s*-?\s*200|A332/.test(value)) return "A332";
+  if (/A330\s*-?\s*300|A333/.test(value)) return "A333";
+  if (/ERJ\s*-?\s*190|E190|E19\b/.test(value)) return "E190";
+
+  const rawCode = value.replace(/[^A-Z0-9]/g, "");
+  return rawCode.slice(0, 4);
+};
+
 const getRouteFrequencyLabel = (route: RouteOption, t: (key: string) => string) => {
   const value = String(route.frequency || "").trim().toLowerCase();
   if (!value) {
@@ -147,7 +193,7 @@ const getRouteAircraftTypeLabel = (
     new Set(
       aircraftOptions
         .filter((aircraft) => fleetIds.includes(aircraft.fleetId))
-        .map((aircraft) => String(aircraft.model || "").trim())
+        .map((aircraft) => toAircraftTypeCode(aircraft.model))
         .filter(Boolean)
     )
   );
@@ -655,16 +701,15 @@ export function PilotAllFlights({ onOpenBookings }: PilotAllFlightsProps) {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-sm text-gray-900">{route.flightNumber || route.callsign || `#${route.id}`}</span>
+                        <span className="font-bold text-sm text-gray-900">{route.flightNumber || route.callsign || `#${route.id}`}{route.callsign && route.flightNumber && route.callsign !== route.flightNumber ? <span className="ml-1 font-normal text-gray-400">/ {route.callsign}</span> : null}</span>
                         <span className="text-[10px] text-gray-400">{getRouteFrequencyLabel(route, t)}</span>
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-gray-600 mt-0.5">
-                        <span className="font-medium">{route.fromCode || "—"}</span>
-                        <ArrowRight className="h-3 w-3 text-gray-400" />
-                        <span className="font-medium">{route.toCode || "—"}</span>
-                      </div>
-                      <div className="text-[11px] text-gray-400 truncate mt-0.5">
-                        {(route.fromName || "") + (route.toName ? ` · ${route.toName}` : "")}
+                      <div className="flex items-center gap-1 text-xs text-gray-600 mt-0.5 flex-wrap">
+                        {icaoFlag(route.fromCode) ? <img src={`https://flagcdn.com/${icaoFlag(route.fromCode)}.svg`} alt="" className="h-2.5 w-4 rounded-[2px] object-cover shrink-0" loading="lazy" decoding="async" /> : null}
+                        <span className="font-medium">{icaoCity(route.fromName, route.fromCode)} ({route.fromCode || "—"})</span>
+                        <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />
+                        {icaoFlag(route.toCode) ? <img src={`https://flagcdn.com/${icaoFlag(route.toCode)}.svg`} alt="" className="h-2.5 w-4 rounded-[2px] object-cover shrink-0" loading="lazy" decoding="async" /> : null}
+                        <span className="font-medium">{icaoCity(route.toName, route.toCode)} ({route.toCode || "—"})</span>
                       </div>
                     </div>
                     <div className="text-right text-[11px] text-gray-400 shrink-0">

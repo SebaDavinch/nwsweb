@@ -144,8 +144,6 @@ interface StaffItem {
   handle?: string | null;
   name: string;
   role: string;
-  rank?: string;
-  division: string;
   color?: string | null;
   status: string;
   email: string;
@@ -213,10 +211,10 @@ export function AdminStaff() {
     <AdminContentManager<StaffItem>
       collection="staff"
       title={tr("Персонал VA", "VA Staff")}
-      subtitle={tr("Поддерживайте состав персонала и подтягивайте актуальные данные из vAMSYS с синхронизированными рангами пилотов.", "Maintain staff roster and pull current VA staff from vAMSYS with synced pilot ranks.")}
+      subtitle={tr("Поддерживайте состав персонала и подтягивайте актуальные данные из vAMSYS.", "Maintain staff roster and pull current VA staff from vAMSYS.")}
       singularLabel={tr("Сотрудник", "Staff Member")}
-      searchKeys={["name", "username", "handle", "role", "rank", "division", "email", "discord", "pilotId"]}
-      filterKeys={["division", "rank", "status", "source"]}
+      searchKeys={["name", "username", "handle", "role", "email", "discord", "pilotId"]}
+      filterKeys={["status", "source"]}
       reloadToken={reloadToken}
       toolbarActions={
         <Button type="button" variant="outline" onClick={handleSync} disabled={isSyncing}>
@@ -228,9 +226,7 @@ export function AdminStaff() {
         { key: "name", label: tr("Имя", "Name") },
         { key: "username", label: tr("Логин", "Username") },
         { key: "handle", label: tr("Хэндл", "Handle") },
-        { key: "role", label: tr("Роль", "Role") },
-        { key: "rank", label: tr("Ранг", "Rank") },
-        { key: "division", label: tr("Отдел", "Division") },
+        { key: "role", label: tr("Должность", "Position") },
         {
           key: "color",
           label: tr("Цвет", "Color"),
@@ -275,7 +271,6 @@ export function AdminStaff() {
               updateFormValue("pilotId", String(pilot.id));
               updateFormValue("username", pilot.username);
               updateFormValue("name", pilot.name);
-              updateFormValue("rank", pilot.rank);
               updateFormValue("email", pilot.email);
             }}
           />
@@ -286,9 +281,7 @@ export function AdminStaff() {
         { key: "username", label: tr("Логин", "Username"), type: "text" },
         { key: "handle", label: tr("Хэндл (@id)", "Handle (@id)"), type: "text" },
         { key: "name", label: tr("Имя", "Name"), type: "text" },
-        { key: "role", label: tr("Роль", "Role"), type: "text" },
-        { key: "rank", label: tr("Ранг", "Rank"), type: "text" },
-        { key: "division", label: tr("Отдел", "Division"), type: "text" },
+        { key: "role", label: tr("Должность", "Position"), type: "text" },
         { key: "color", label: tr("Цвет роли", "Role Color"), type: "text" },
         {
           key: "status",

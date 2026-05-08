@@ -757,17 +757,17 @@ export function AdminQuickAccessPanel() {
         </CardHeader>
         <CardContent className="px-4 pb-4">
           {quickAccess.resolvedItems.length > 0 ? (
-            <div className="flex gap-4 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-200">
+            <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-200">
                 {quickAccess.resolvedItems.map((item, index) => {
                 const Icon = item.icon;
                 return (
                   <div
                     key={item.id}
-                    className={`flex shrink-0 w-52 flex-col rounded-2xl border border-gray-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-md ${compactMode ? "p-3" : "p-4"}`}
+                    className={`flex shrink-0 w-44 flex-col rounded-xl border border-gray-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-md ${compactMode ? "p-2.5" : "p-3"}`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <div className={`rounded-xl p-1.5 ${item.colorClass}`}>
-                        <Icon className="h-4 w-4" />
+                      <div className={`rounded-lg p-1.5 ${item.colorClass}`}>
+                        <Icon className="h-3.5 w-3.5" />
                       </div>
                       <div className="flex items-center gap-1">
                         <Button
@@ -796,9 +796,9 @@ export function AdminQuickAccessPanel() {
                       </div>
                     </div>
                     <QuickAccessLinkWrapper item={item} className="mt-3 flex min-h-0 flex-1 flex-col">
-                      <div className="font-semibold text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
-                      {!compactMode ? <div className="mt-2 text-sm leading-5 text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div> : null}
-                      <div className="mt-auto pt-4 text-xs font-medium uppercase tracking-[0.18em] text-gray-400">
+                      <div className="text-sm font-semibold leading-snug text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
+                      {!compactMode ? <div className="mt-1.5 text-xs leading-4 text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div> : null}
+                      <div className="mt-auto pt-3 text-[10px] font-medium uppercase tracking-[0.18em] text-gray-400">
                         {item.isExternal ? tr("Внешний инструмент", "External tool") : tr("Открыть раздел", "Open section")}
                       </div>
                     </QuickAccessLinkWrapper>

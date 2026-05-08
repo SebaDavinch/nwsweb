@@ -115,6 +115,38 @@ interface DiscordBotSettings {
     pilotDmOnReviewStarted: boolean;
     pilotDmOnStaffComment: boolean;
   };
+  automation: {
+    routes: {
+      flightLogs: {
+        enabled: boolean;
+        channelId: string;
+        webhookUrl: string;
+        pollIntervalMinutes: number;
+      };
+      dailyStats24h: {
+        enabled: boolean;
+        channelId: string;
+        webhookUrl: string;
+        hourUtc: number;
+        minuteUtc: number;
+      };
+      vatrusNews: {
+        enabled: boolean;
+        channelId: string;
+        webhookUrl: string;
+        pollIntervalMinutes: number;
+        sourceUrl: string;
+      };
+    };
+    runtime?: {
+      lastDailyStatsDateUtc?: string;
+      activeFlightKeys?: string[];
+      landedPirepIds?: string[];
+      vatrusSeenArticleIds?: string[];
+      lastFlightPollAt?: string | null;
+      lastVatrusPollAt?: string | null;
+    };
+  };
   templates?: Record<string, NotificationTemplate>;
 }
 
@@ -219,6 +251,31 @@ export function AdminDiscordBot() {
     setSettings((prev) =>
       prev ? { ...prev, pirepAlerts: { ...prev.pirepAlerts, [key]: value } } : prev
     );
+  };
+
+  const updateAutomationRoute = (
+    key: keyof DiscordBotSettings["automation"]["routes"],
+    patch: Partial<DiscordBotSettings["automation"]["routes"][keyof DiscordBotSettings["automation"]["routes"]]>
+  ) => {
+    setSettings((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        automation: {
+          ...prev.automation,
+          routes: {
+            ...prev.automation.routes,
+            [key]: {
+              ...prev.automation.routes[key],
+              ...patch,
+            },
+          },
+        },
+      };
+    });
   };
 
   const updateTemplate = (templateId: string, patch: Partial<NotificationTemplate>) => {
@@ -513,6 +570,161 @@ export function AdminDiscordBot() {
                     />
                   </div>
                 ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">{tr("Webhook automation", "Webhook automation")}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
+                {tr(
+                  "Этот блок управляет серверными webhook-автоматизациями: logs по броням/взлётам/посадкам, сводка VA за последние 24 часа и публикация новых материалов VATRUS из https://vatrus.info/news.",
+                  "This block controls server-side webhook automations: booking/takeoff/landing logs, the last 24 hours VA summary, and new VATRUS posts from https://vatrus.info/news."
+                )}
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-gray-200 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-gray-900">{tr("Flight logs", "Flight logs")}</div>
+                    <div className="text-xs text-gray-500">{tr("Новые бронирования, взлёты и посадки. Здесь задаётся отдельная ссылка webhook именно для логов полётов. Если поле пустое, используется обычная маршрутизация Discord-каналов выше.", "New bookings, takeoffs, and landings. This section uses a separate webhook URL specifically for flight logs. If the field is empty, the standard Discord channel routing above is used.")}</div>
+                  </div>
+                  <Switch
+                    checked={Boolean(settings.automation.routes.flightLogs.enabled)}
+                    onCheckedChange={(checked) => updateAutomationRoute("flightLogs", { enabled: Boolean(checked) })}
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">{tr("Override channel ID", "Override channel ID")}</label>
+                    <Input
+                      value={settings.automation.routes.flightLogs.channelId || ""}
+                      onChange={(event) => updateAutomationRoute("flightLogs", { channelId: event.target.value })}
+                      placeholder={tr("Опционально", "Optional")}
+                    />
+                  </div>
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-medium text-gray-600">{tr("Webhook URL для логов полётов", "Webhook URL for flight logs")}</label>
+                    <Input
+                      value={settings.automation.routes.flightLogs.webhookUrl || ""}
+                      onChange={(event) => updateAutomationRoute("flightLogs", { webhookUrl: event.target.value })}
+                      placeholder="https://discord.com/api/webhooks/..."
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-medium text-gray-600">{tr("Poll interval, minutes", "Poll interval, minutes")}</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={60}
+                    value={String(settings.automation.routes.flightLogs.pollIntervalMinutes ?? 2)}
+                    onChange={(event) => updateAutomationRoute("flightLogs", { pollIntervalMinutes: Math.max(1, Number(event.target.value || 2) || 2) })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-gray-200 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-gray-900">{tr("Daily 24h stats", "Daily 24h stats")}</div>
+                    <div className="text-xs text-gray-500">{tr("Отправляет сводку VA за последние 24 часа в заданное время UTC. Здесь задаётся отдельная ссылка webhook именно для карточки статистики.", "Sends the VA summary for the last 24 hours at the configured UTC time. This section uses a separate webhook URL specifically for the stats card.")}</div>
+                  </div>
+                  <Switch
+                    checked={Boolean(settings.automation.routes.dailyStats24h.enabled)}
+                    onCheckedChange={(checked) => updateAutomationRoute("dailyStats24h", { enabled: Boolean(checked) })}
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">UTC hour</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={String(settings.automation.routes.dailyStats24h.hourUtc ?? 0)}
+                      onChange={(event) => updateAutomationRoute("dailyStats24h", { hourUtc: Math.max(0, Math.min(23, Number(event.target.value || 0) || 0)) })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">UTC minute</label>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={59}
+                      value={String(settings.automation.routes.dailyStats24h.minuteUtc ?? 0)}
+                      onChange={(event) => updateAutomationRoute("dailyStats24h", { minuteUtc: Math.max(0, Math.min(59, Number(event.target.value || 0) || 0)) })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">{tr("Override channel ID", "Override channel ID")}</label>
+                    <Input
+                      value={settings.automation.routes.dailyStats24h.channelId || ""}
+                      onChange={(event) => updateAutomationRoute("dailyStats24h", { channelId: event.target.value })}
+                      placeholder={tr("Опционально", "Optional")}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">{tr("Webhook URL для статистики VA", "Webhook URL for VA stats")}</label>
+                    <Input
+                      value={settings.automation.routes.dailyStats24h.webhookUrl || ""}
+                      onChange={(event) => updateAutomationRoute("dailyStats24h", { webhookUrl: event.target.value })}
+                      placeholder="https://discord.com/api/webhooks/..."
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 rounded-lg border border-gray-200 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-medium text-gray-900">VATRUS news</div>
+                    <div className="text-xs text-gray-500">{tr("Публикует новые материалы и мероприятия VATRUS с указанного source URL.", "Publishes new VATRUS posts and events from the configured source URL.")}</div>
+                  </div>
+                  <Switch
+                    checked={Boolean(settings.automation.routes.vatrusNews.enabled)}
+                    onCheckedChange={(checked) => updateAutomationRoute("vatrusNews", { enabled: Boolean(checked) })}
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="space-y-1 md:col-span-2">
+                    <label className="text-xs font-medium text-gray-600">Source URL</label>
+                    <Input
+                      value={settings.automation.routes.vatrusNews.sourceUrl || "https://vatrus.info/news"}
+                      onChange={(event) => updateAutomationRoute("vatrusNews", { sourceUrl: event.target.value })}
+                      placeholder="https://vatrus.info/news"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">{tr("Override channel ID", "Override channel ID")}</label>
+                    <Input
+                      value={settings.automation.routes.vatrusNews.channelId || ""}
+                      onChange={(event) => updateAutomationRoute("vatrusNews", { channelId: event.target.value })}
+                      placeholder={tr("Опционально", "Optional")}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">{tr("Override webhook URL", "Override webhook URL")}</label>
+                    <Input
+                      value={settings.automation.routes.vatrusNews.webhookUrl || ""}
+                      onChange={(event) => updateAutomationRoute("vatrusNews", { webhookUrl: event.target.value })}
+                      placeholder={tr("Опционально", "Optional")}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-gray-600">{tr("Poll interval, minutes", "Poll interval, minutes")}</label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={180}
+                      value={String(settings.automation.routes.vatrusNews.pollIntervalMinutes ?? 30)}
+                      onChange={(event) => updateAutomationRoute("vatrusNews", { pollIntervalMinutes: Math.max(5, Number(event.target.value || 30) || 30) })}
+                    />
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>
