@@ -9,6 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useLocation, useNavigate } from "react-router";
 import { useLanguage } from "../../context/language-context";
 import { useNotifications } from "../../context/notifications-context";
 import { Badge } from "../ui/badge";
@@ -198,7 +199,10 @@ const persistClaimNotificationState = (value: Record<string, string>) => {
 export function PilotClaims() {
   const { t } = useLanguage();
   const { addNotification } = useNotifications();
+  const location = useLocation();
+  const navigate = useNavigate();
   const claimNotificationStateRef = useRef<Record<string, string>>(loadClaimNotificationState());
+  const consumedBookingPrefillRef = useRef<number | null>(null);
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [bookings, setBookings] = useState<ClaimBooking[]>([]);
   const [statusFilter, setStatusFilter] = useState<ClaimStatusFilter>("all");
@@ -397,6 +401,33 @@ export function PilotClaims() {
       }));
     }
   }, [availableBookings, form.bookingId]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const bookingIdFromUrl = Number(params.get("bookingId") || 0) || 0;
+
+    if (bookingIdFromUrl <= 0 || consumedBookingPrefillRef.current === bookingIdFromUrl || availableBookings.length === 0) {
+      return;
+    }
+
+    const booking = availableBookings.find((item) => item.id === bookingIdFromUrl) || null;
+    if (!booking) {
+      return;
+    }
+
+    const suggestedTimes = buildSuggestedClaimTimes(booking);
+    consumedBookingPrefillRef.current = bookingIdFromUrl;
+
+    setForm((current) => ({
+      ...current,
+      bookingId: String(booking.id),
+      departureTime: suggestedTimes.departureTime,
+      arrivalTime: suggestedTimes.arrivalTime,
+    }));
+
+    params.delete("bookingId");
+    navigate(`${location.pathname}${params.toString() ? `?${params.toString()}` : ""}`, { replace: true });
+  }, [availableBookings, location.pathname, location.search, navigate]);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

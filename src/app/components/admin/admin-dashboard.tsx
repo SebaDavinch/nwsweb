@@ -16,6 +16,13 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import {
   Area,
   AreaChart,
   CartesianGrid,
@@ -217,6 +224,7 @@ export function AdminDashboard() {
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState<ActivityRange>("week");
+  const [isRecentFlightsModalOpen, setIsRecentFlightsModalOpen] = useState(false);
   const [utcNow, setUtcNow] = useState<UtcClockValue>(() => formatUtcClock(new Date()));
   const airac = useMemo(() => getAiracInfo(new Date()), [utcNow]);
 
@@ -279,6 +287,7 @@ export function AdminDashboard() {
   const totalFlightsInRange = activityData.reduce((sum, item) => sum + Number(item.flights || 0), 0);
   const averageFlightsInRange = activityData.length > 0 ? totalFlightsInRange / activityData.length : 0;
   const chartMax = activityData.reduce((max, item) => Math.max(max, Number(item.flights || 0)), 0);
+  const recentFlightsPreview = logs.slice(0, 8);
   const peakBucket = activityData.reduce<ActivityPoint | null>((best, item) => {
     if (!best || Number(item.flights || 0) > Number(best.flights || 0)) {
       return item;
@@ -292,95 +301,85 @@ export function AdminDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <h2 className="text-2xl font-bold text-gray-800">{tr("Обзор панели", "Dashboard Overview")}</h2>
-        <span className="text-sm text-gray-500">{tr("Обновлено только что", "Updated just now")}</span>
+        <div className="flex flex-col items-start gap-2 md:items-end">
+          <span className="text-sm text-gray-500">{tr("Обновлено только что", "Updated just now")}</span>
+          <div className="flex flex-wrap items-stretch gap-2">
+            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">UTC</div>
+              <div className="mt-0.5 text-lg font-bold leading-none text-slate-900 tabular-nums">{utcNow.time}</div>
+              <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-400">{utcNow.date}</div>
+            </div>
+            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">AIRAC {airac.ident}</div>
+              <div className="mt-1 text-xs text-slate-600">{formatAiracDate(airac.start)} – {formatAiracDate(airac.end)}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <AdminQuickAccessPanel />
 
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Card className="shadow-sm hover:shadow-md transition-shadow">
-          <CardContent className="p-6">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-1">{tr("Всего пилотов", "Total pilots")}</p>
-                <h3 className="text-2xl font-bold text-gray-900">{Number(kpi.totalPilots || 0).toLocaleString()}</h3>
+                <p className="text-xs font-medium text-gray-500 mb-1">{tr("Всего пилотов", "Total pilots")}</p>
+                <h3 className="text-xl font-bold text-gray-900">{Number(kpi.totalPilots || 0).toLocaleString()}</h3>
               </div>
-              <div className="p-3 bg-blue-50 text-blue-600 rounded-full">
-                <Users size={24} />
+              <div className="p-2 bg-blue-50 text-blue-600 rounded-full">
+                <Users size={18} />
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm hover:shadow-md transition-shadow">
-          <CardContent className="p-6">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-1">{tr("Активные рейсы", "Active flights")}</p>
-                <h3 className="text-2xl font-bold text-gray-900">{Number(kpi.activeFlights || 0).toLocaleString()}</h3>
+                <p className="text-xs font-medium text-gray-500 mb-1">{tr("Активные рейсы", "Active flights")}</p>
+                <h3 className="text-xl font-bold text-gray-900">{Number(kpi.activeFlights || 0).toLocaleString()}</h3>
               </div>
-              <div className="p-3 bg-green-50 text-green-600 rounded-full">
-                <Plane size={24} />
+              <div className="p-2 bg-green-50 text-green-600 rounded-full">
+                <Plane size={18} />
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm hover:shadow-md transition-shadow">
-          <CardContent className="p-6">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-1">{tr("Всего часов", "Total hours")}</p>
-                <h3 className="text-2xl font-bold text-gray-900">{Number(kpi.totalHours || 0).toLocaleString()}</h3>
+                <p className="text-xs font-medium text-gray-500 mb-1">{tr("Всего часов", "Total hours")}</p>
+                <h3 className="text-xl font-bold text-gray-900">{Number(kpi.totalHours || 0).toLocaleString()}</h3>
               </div>
-              <div className="p-3 bg-purple-50 text-purple-600 rounded-full">
-                <Clock size={24} />
+              <div className="p-2 bg-purple-50 text-purple-600 rounded-full">
+                <Clock size={18} />
               </div>
             </div>
           </CardContent>
         </Card>
 
         <Card className="shadow-sm hover:shadow-md transition-shadow">
-          <CardContent className="p-6">
+          <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-500 mb-1">NOTAM</p>
-                <h3 className="text-2xl font-bold text-gray-900">{Number(kpi.totalNotams || 0).toLocaleString()}</h3>
+                <p className="text-xs font-medium text-gray-500 mb-1">NOTAM</p>
+                <h3 className="text-xl font-bold text-gray-900">{Number(kpi.totalNotams || 0).toLocaleString()}</h3>
               </div>
-              <div className="p-3 bg-orange-50 text-orange-600 rounded-full">
-                <AlertCircle size={24} />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="shadow-sm hover:shadow-md transition-shadow">
-          <CardContent className="p-6">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-gray-500 mb-1">UTC</p>
-                <h3 className="text-2xl font-bold text-gray-900 tabular-nums">{utcNow.time}</h3>
-                <p className="mt-1 text-xs uppercase tracking-[0.18em] text-gray-400">{utcNow.date}</p>
-                <div className="mt-3 pt-3 border-t border-gray-100">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-                    AIRAC {airac.ident}
-                  </p>
-                  <p className="mt-0.5 text-xs text-gray-400">
-                    {formatAiracDate(airac.start)} – {formatAiracDate(airac.end)}
-                  </p>
-                </div>
-              </div>
-              <div className="p-3 bg-slate-100 text-slate-700 rounded-full shrink-0">
-                <Clock size={24} />
+              <div className="p-2 bg-orange-50 text-orange-600 rounded-full">
+                <AlertCircle size={18} />
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="space-y-6">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card className="min-w-0 shadow-sm">
           <CardHeader className="gap-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -420,7 +419,7 @@ export function AdminDashboard() {
           <CardContent>
             <div className="h-[260px] w-full rounded-2xl border border-gray-100 bg-gradient-to-b from-gray-50 to-white p-4 sm:h-[280px]">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={activityData} margin={{ top: 8, right: 8, left: -24, bottom: 0 }}>
+                <AreaChart data={activityData} margin={{ top: 8, right: 0, left: -40, bottom: 0 }}>
                   <defs>
                     <linearGradient id="adminActivityFill" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#E31E24" stopOpacity={0.38} />
@@ -451,70 +450,117 @@ export function AdminDashboard() {
         </Card>
 
         <Card className="min-w-0 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold text-gray-800">{tr("Последняя активность", "Recent Activity")}</CardTitle>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg font-semibold text-gray-800">{tr("Крайние полеты", "Latest flights")}</CardTitle>
+            <p className="text-sm text-gray-500">{tr("Последние 5-10 рейсов с быстрым доступом к PIREP", "Latest 5-10 flights with quick access to PIREP")}</p>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {logs.length > 0 ? (
-                logs.map((log) => {
+          <CardContent className="pt-0">
+            {recentFlightsPreview.length > 0 ? (
+              <div className="space-y-2">
+                {recentFlightsPreview.map((log) => {
                   const StatusIcon = getRecentStatusIcon(log.status);
                   return (
                     <button
                       key={log.id}
                       type="button"
                       onClick={() => navigateTo("pirep-detail", log.id)}
-                      className="flex w-full flex-col gap-3 rounded-2xl border border-transparent pb-4 text-left transition hover:border-red-100 hover:bg-red-50/40 last:pb-0"
+                      className="w-full rounded-xl border border-gray-100 px-3 py-2.5 text-left transition hover:border-red-100 hover:bg-red-50/30"
                     >
-                      <div className="flex items-start gap-3 border-b pb-4 last:border-0 last:pb-0">
-                        <div className={`mt-0.5 rounded-full border p-1.5 ${getRecentStatusClasses(log.status)}`}>
-                          <StatusIcon size={12} />
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate text-sm font-semibold text-gray-900">{log.flightNumber || log.detail}</div>
+                          <div className="mt-0.5 truncate text-xs text-gray-500">{log.departure && log.arrival ? `${log.departure} → ${log.arrival}` : log.user}</div>
                         </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900 truncate">{log.flightNumber || log.detail}</p>
-                              <p className="text-xs text-gray-500 truncate">{log.user}{log.departure && log.arrival ? ` · ${log.departure} → ${log.arrival}` : ""}</p>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-gray-400 whitespace-nowrap">{formatRelativeTime(log.time, language)}</div>
-                              <div className={`mt-1 inline-flex rounded-full border px-2 py-1 text-[11px] font-medium uppercase tracking-wide whitespace-nowrap ${getRecentStatusClasses(log.status)}`}>{getRecentStatusLabel(log.status, language)}</div>
-                            </div>
-                          </div>
-                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 sm:grid-cols-4">
-                            <div className="rounded-xl bg-gray-50 px-2 py-2">
-                              <div className="uppercase tracking-wide text-[10px] text-gray-400">{tr("Полёт", "Flight")}</div>
-                              <div className="mt-1 font-semibold text-gray-800 tabular-nums">{formatDurationHHMM(log.flightLengthSeconds)}</div>
-                            </div>
-                            <div className="rounded-xl bg-gray-50 px-2 py-2">
-                              <div className="uppercase tracking-wide text-[10px] text-gray-400">{tr("Блок", "Block")}</div>
-                              <div className="mt-1 font-semibold text-gray-800 tabular-nums">{formatDurationHHMM(log.blockLengthSeconds)}</div>
-                            </div>
-                            <div className="rounded-xl bg-gray-50 px-2 py-2">
-                              <div className="uppercase tracking-wide text-[10px] text-gray-400">{tr("Посадка UTC", "Landing UTC")}</div>
-                              <div className="mt-1 font-semibold text-gray-800 tabular-nums">{formatUtcTime(log.landedAt)} UTC</div>
-                            </div>
-                            <div className="rounded-xl bg-gray-50 px-2 py-2">
-                              <div className="uppercase tracking-wide text-[10px] text-gray-400">VS / G</div>
-                              <div className="mt-1 font-semibold text-gray-800 tabular-nums">{Number.isFinite(Number(log.landingRate)) ? `${Number(log.landingRate)} fpm` : "--"} · {formatGForce(log.gForce)}</div>
-                            </div>
-                          </div>
-                          <div className="mt-3 flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-gray-400">
-                            <ArrowDownToLine className="h-3.5 w-3.5" />
-                            {tr("Открыть PIREP", "Open PIREP")}
-                          </div>
+                        <div className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getRecentStatusClasses(log.status)}`}>
+                          <StatusIcon className="h-3 w-3" />
+                          {getRecentStatusLabel(log.status, language)}
                         </div>
                       </div>
+                      <div className="mt-2 text-[11px] text-gray-400">{formatRelativeTime(log.time, language)}</div>
                     </button>
                   );
-                })
-              ) : (
-                <div className="text-sm text-gray-500">{tr("Пока нет недавней активности.", "No recent activity yet.")}</div>
-              )}
-            </div>
+                })}
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="mt-2 w-full"
+                  onClick={() => setIsRecentFlightsModalOpen(true)}
+                >
+                  <ArrowDownToLine className="mr-2 h-4 w-4" />
+                  {tr("Посмотреть все", "View all")}
+                </Button>
+              </div>
+            ) : (
+              <div className="text-sm text-gray-500">{tr("Пока нет недавних полетов.", "No recent flights yet.")}</div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={isRecentFlightsModalOpen} onOpenChange={setIsRecentFlightsModalOpen}>
+        <DialogContent className="max-h-[85vh] overflow-hidden sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{tr("Крайние полеты", "Latest flights")}</DialogTitle>
+            <DialogDescription>
+              {tr("Полный список недавних рейсов", "Complete list of recent flights")}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="max-h-[64vh] space-y-3 overflow-y-auto pr-1">
+            {logs.length > 0 ? (
+              logs.map((log) => {
+                const StatusIcon = getRecentStatusIcon(log.status);
+                return (
+                  <button
+                    key={`modal-${log.id}`}
+                    type="button"
+                    onClick={() => {
+                      setIsRecentFlightsModalOpen(false);
+                      navigateTo("pirep-detail", log.id);
+                    }}
+                    className="w-full rounded-2xl border border-gray-100 p-3 text-left transition hover:border-red-100 hover:bg-red-50/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-gray-900">{log.flightNumber || log.detail}</div>
+                        <div className="mt-0.5 truncate text-xs text-gray-500">{log.user}{log.departure && log.arrival ? ` · ${log.departure} → ${log.arrival}` : ""}</div>
+                      </div>
+                      <div className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${getRecentStatusClasses(log.status)}`}>
+                        <StatusIcon className="h-3 w-3" />
+                        {getRecentStatusLabel(log.status, language)}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-500 sm:grid-cols-4">
+                      <div className="rounded-xl bg-gray-50 px-2 py-2">
+                        <div className="uppercase tracking-wide text-[10px] text-gray-400">{tr("Полёт", "Flight")}</div>
+                        <div className="mt-1 font-semibold text-gray-800 tabular-nums">{formatDurationHHMM(log.flightLengthSeconds)}</div>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 px-2 py-2">
+                        <div className="uppercase tracking-wide text-[10px] text-gray-400">{tr("Блок", "Block")}</div>
+                        <div className="mt-1 font-semibold text-gray-800 tabular-nums">{formatDurationHHMM(log.blockLengthSeconds)}</div>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 px-2 py-2">
+                        <div className="uppercase tracking-wide text-[10px] text-gray-400">{tr("Посадка UTC", "Landing UTC")}</div>
+                        <div className="mt-1 font-semibold text-gray-800 tabular-nums">{formatUtcTime(log.landedAt)} UTC</div>
+                      </div>
+                      <div className="rounded-xl bg-gray-50 px-2 py-2">
+                        <div className="uppercase tracking-wide text-[10px] text-gray-400">VS / G</div>
+                        <div className="mt-1 font-semibold text-gray-800 tabular-nums">{Number.isFinite(Number(log.landingRate)) ? `${Number(log.landingRate)} fpm` : "--"} · {formatGForce(log.gForce)}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 text-[11px] text-gray-400">{formatRelativeTime(log.time, language)}</div>
+                  </button>
+                );
+              })
+            ) : (
+              <div className="text-sm text-gray-500">{tr("Пока нет недавней активности.", "No recent activity yet.")}</div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

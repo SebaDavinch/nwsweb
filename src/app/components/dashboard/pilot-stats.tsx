@@ -56,6 +56,11 @@ interface AnalyticsData {
   vsDistribution: VsCategory[];
   eventFlights: { event: number; nonEvent: number };
   landingsByDayNight: { day: number; night: number };
+  favorites?: {
+    aircraft: { type: string; registration: string | null; count: number } | null;
+    route: { route: string; count: number } | null;
+    type: { type: string; count: number } | null;
+  };
 }
 
 const RED = "#E31E24";
@@ -193,9 +198,6 @@ function TopAirportsTable({
                     />
                   )}
                   <span className="text-sm font-mono font-bold text-[#1d1d1f]">{a.icao}</span>
-                  {a.name && (
-                    <span className="text-xs text-gray-400 truncate">{a.name}</span>
-                  )}
                 </div>
                 <div className="h-1 rounded-full bg-gray-100">
                   <div
@@ -210,6 +212,103 @@ function TopAirportsTable({
           {airports.length === 0 && (
             <div className="px-5 py-6 text-sm text-gray-400 text-center">Нет данных</div>
           )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FrequentCitiesBlock({ topDepartures, topArrivals }: { topDepartures: TopAirport[]; topArrivals: TopAirport[] }) {
+  // Merge dep+arr counts into a single map, show combined visits
+  const cityMap = new Map<string, TopAirport & { totalCount: number }>();
+  [...topDepartures, ...topArrivals].forEach((a) => {
+    const existing = cityMap.get(a.icao);
+    if (existing) {
+      existing.totalCount += a.count;
+    } else {
+      cityMap.set(a.icao, { ...a, totalCount: a.count });
+    }
+  });
+  const merged = Array.from(cityMap.values()).sort((a, b) => b.totalCount - a.totalCount).slice(0, 8);
+  const max = merged[0]?.totalCount || 1;
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold text-gray-700">Часто посещаемые города</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0 pb-3">
+        <div className="divide-y divide-gray-50">
+          {merged.map((a, i) => (
+            <div key={a.icao} className="px-5 py-2.5 flex items-center gap-3">
+              <span className="text-xs font-bold text-gray-400 w-5 text-right shrink-0">{i + 1}</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1">
+                  {a.countryIso2 && (
+                    <img
+                      src={`https://flagcdn.com/16x12/${a.countryIso2}.png`}
+                      srcSet={`https://flagcdn.com/32x24/${a.countryIso2}.png 2x`}
+                      width={16}
+                      height={12}
+                      alt={a.countryIso2}
+                      className="shrink-0 rounded-[2px]"
+                    />
+                  )}
+                  <span className="text-sm font-mono font-bold text-[#1d1d1f]">{a.icao}</span>
+                </div>
+                <div className="h-1 rounded-full bg-gray-100">
+                  <div className="h-full rounded-full" style={{ width: `${Math.round((a.totalCount / max) * 100)}%`, backgroundColor: RED }} />
+                </div>
+              </div>
+              <div className="text-sm font-semibold text-[#1d1d1f] shrink-0">{a.totalCount}</div>
+            </div>
+          ))}
+          {merged.length === 0 && (
+            <div className="px-5 py-6 text-sm text-gray-400 text-center">Нет данных</div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function FavoritesBlock({ favorites }: { favorites: AnalyticsData["favorites"] }) {
+  if (!favorites) return null;
+  const items = [
+    favorites.aircraft
+      ? {
+          label: "Любимый самолёт",
+          value: `${favorites.aircraft.type}${favorites.aircraft.registration ? ` ${favorites.aircraft.registration}` : ""}`,
+          count: favorites.aircraft.count,
+        }
+      : null,
+    favorites.route
+      ? { label: "Любимый маршрут", value: favorites.route.route, count: favorites.route.count }
+      : null,
+    favorites.type
+      ? { label: "Любимый тип ВС", value: favorites.type.type, count: favorites.type.count }
+      : null,
+  ].filter(Boolean) as { label: string; value: string; count: number }[];
+
+  if (items.length === 0) return null;
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-semibold text-gray-700">Предпочтения</CardTitle>
+      </CardHeader>
+      <CardContent className="p-0 pb-3">
+        <div className="divide-y divide-gray-50">
+          {items.map((item) => (
+            <div key={item.label} className="group px-5 py-3 flex items-center justify-between gap-3 cursor-default">
+              <div className="min-w-0">
+                <div className="text-xs text-gray-400 font-medium">{item.label}</div>
+                <div className="text-sm font-semibold text-[#1d1d1f] truncate">{item.value}</div>
+              </div>
+              <div className="text-xs text-gray-300 group-hover:text-gray-600 transition-colors shrink-0 tabular-nums">
+                {item.count} рейсов
+              </div>
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>
@@ -334,7 +433,7 @@ export function PilotStats() {
   const {
     summary, monthly, byAircraft, byNetwork, byRouteType, byTimeOfDay,
     byCallsignPrefix, topDepartures, topArrivals, vsDistribution,
-    eventFlights, landingsByDayNight,
+    eventFlights, landingsByDayNight, favorites,
   } = data;
 
   const vsLabel =
@@ -449,8 +548,8 @@ export function PilotStats() {
       {/* Top airports */}
       <Section title="Топ аэропортов">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <TopAirportsTable airports={topDepartures} label="Топ аэропортов отправления" />
-          <TopAirportsTable airports={topArrivals} label="Топ аэропортов прибытия" />
+          <FrequentCitiesBlock topDepartures={topDepartures} topArrivals={topArrivals} />
+          <FavoritesBlock favorites={favorites} />
         </div>
       </Section>
 

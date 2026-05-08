@@ -4,9 +4,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
+import { execFile } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const ROOT_DIR = path.resolve(__dirname, "..");
+const execFileAsync = promisify(execFile);
 
 // Load environment from .env when present and fall back to the local temp env used in this workspace.
 dotenv.config();
@@ -91,6 +95,15 @@ const ADMIN_VAMSYS_HONORARY_RANK_NAMES = String(
   .filter(Boolean);
 const PRESEEDED_STAFF_DISCORD_IDS = ["1397529397665333318"];
 const DIST_DIR = path.resolve(__dirname, "../dist");
+const DISCORD_DAILY_STATS_CARD_SCRIPT = path.resolve(__dirname, "discord-daily-stats-card.py");
+const DISCORD_DAILY_STATS_CARD_BACKGROUND = path.resolve(
+  ROOT_DIR,
+  "src/assets/26e15098031469524c864ad646ad94972bd0af05.png"
+);
+const DISCORD_DAILY_STATS_CARD_LOGO = path.resolve(
+  ROOT_DIR,
+  "src/assets/99be6a8339eae76151119a13613864930c8bf6e7.png"
+);
 
 const logger = {
   info: (...args) => console.log(...args),
@@ -455,6 +468,50 @@ const DEFAULT_DISCORD_BOT_TEMPLATES = {
     description: "{{content}}",
     enabled: true,
   },
+  dailyStats24h: {
+    id: "dailyStats24h",
+    title: "Nordwind VA stats for the last 24 hours",
+    description: "Flights: {{flights}} | Hours: {{hours}} | Pilots: {{pilots}}",
+    enabled: true,
+  },
+  vatrusNews: {
+    id: "vatrusNews",
+    title: "VATRUS: {{title}}",
+    description: "{{content}}",
+    enabled: true,
+  },
+};
+
+const DEFAULT_DISCORD_AUTOMATION_ROUTES = {
+  flightLogs: {
+    enabled: false,
+    channelId: "",
+    webhookUrl: "",
+    pollIntervalMinutes: 2,
+  },
+  dailyStats24h: {
+    enabled: false,
+    channelId: "",
+    webhookUrl: "",
+    hourUtc: 0,
+    minuteUtc: 0,
+  },
+  vatrusNews: {
+    enabled: false,
+    channelId: "",
+    webhookUrl: "",
+    pollIntervalMinutes: 30,
+    sourceUrl: "https://vatrus.info/news",
+  },
+};
+
+const DEFAULT_DISCORD_AUTOMATION_RUNTIME = {
+  lastDailyStatsDateUtc: "",
+  activeFlightKeys: [],
+  landedPirepIds: [],
+  vatrusSeenArticleIds: [],
+  lastFlightPollAt: null,
+  lastVatrusPollAt: null,
 };
 
 const DEFAULT_DISCORD_BOT_SETTINGS = {
@@ -496,6 +553,10 @@ const DEFAULT_DISCORD_BOT_SETTINGS = {
     staffComment: true,
     pilotDmOnReviewStarted: true,
     pilotDmOnStaffComment: true,
+  },
+  automation: {
+    routes: DEFAULT_DISCORD_AUTOMATION_ROUTES,
+    runtime: DEFAULT_DISCORD_AUTOMATION_RUNTIME,
   },
   templates: DEFAULT_DISCORD_BOT_TEMPLATES,
   updatedAt: null,
@@ -1648,6 +1709,34 @@ const readAdminContentStore = () => {
           ...base.discordBotSettings.channels,
           ...(parsed?.discordBotSettings?.channels && typeof parsed.discordBotSettings.channels === "object" ? parsed.discordBotSettings.channels : {}),
         },
+        pirepAlerts: {
+          ...base.discordBotSettings.pirepAlerts,
+          ...(parsed?.discordBotSettings?.pirepAlerts && typeof parsed.discordBotSettings.pirepAlerts === "object" ? parsed.discordBotSettings.pirepAlerts : {}),
+        },
+        automation: {
+          ...base.discordBotSettings.automation,
+          ...(parsed?.discordBotSettings?.automation && typeof parsed.discordBotSettings.automation === "object" ? parsed.discordBotSettings.automation : {}),
+          routes: {
+            ...base.discordBotSettings.automation.routes,
+            ...(parsed?.discordBotSettings?.automation?.routes && typeof parsed.discordBotSettings.automation.routes === "object" ? parsed.discordBotSettings.automation.routes : {}),
+            flightLogs: {
+              ...base.discordBotSettings.automation.routes.flightLogs,
+              ...(parsed?.discordBotSettings?.automation?.routes?.flightLogs && typeof parsed.discordBotSettings.automation.routes.flightLogs === "object" ? parsed.discordBotSettings.automation.routes.flightLogs : {}),
+            },
+            dailyStats24h: {
+              ...base.discordBotSettings.automation.routes.dailyStats24h,
+              ...(parsed?.discordBotSettings?.automation?.routes?.dailyStats24h && typeof parsed.discordBotSettings.automation.routes.dailyStats24h === "object" ? parsed.discordBotSettings.automation.routes.dailyStats24h : {}),
+            },
+            vatrusNews: {
+              ...base.discordBotSettings.automation.routes.vatrusNews,
+              ...(parsed?.discordBotSettings?.automation?.routes?.vatrusNews && typeof parsed.discordBotSettings.automation.routes.vatrusNews === "object" ? parsed.discordBotSettings.automation.routes.vatrusNews : {}),
+            },
+          },
+          runtime: {
+            ...base.discordBotSettings.automation.runtime,
+            ...(parsed?.discordBotSettings?.automation?.runtime && typeof parsed.discordBotSettings.automation.runtime === "object" ? parsed.discordBotSettings.automation.runtime : {}),
+          },
+        },
         templates: {
           ...base.discordBotSettings.templates,
           ...(parsed?.discordBotSettings?.templates && typeof parsed.discordBotSettings.templates === "object" ? parsed.discordBotSettings.templates : {}),
@@ -2694,26 +2783,55 @@ const findExistingStaffEntry = (items = [], { pilotId = null, email = "", userna
 };
 
 const syncAdminStaffCollection = async () => {
-  const [rawPilots, rosterPayload, ranksMap] = await Promise.all([
-    fetchAllPages("/pilots?page[size]=300"),
+  const [rosterPayload, ranksMap] = await Promise.all([
     loadPilotsRoster({ force: true }),
     loadRanksMap(),
   ]);
 
   const existingItems = listManagedAdminCollection("staff");
+  const rosterPilots = (Array.isArray(rosterPayload?.pilots) ? rosterPayload.pilots : [])
+    .filter((pilot) => Number(pilot?.id || 0) > 0);
   const rosterById = new Map(
-    (Array.isArray(rosterPayload?.pilots) ? rosterPayload.pilots : [])
+    rosterPilots
       .map((pilot) => [Number(pilot?.id || 0) || 0, pilot])
       .filter(([id]) => id > 0)
   );
+  const detailedPilots = [];
+  const profileBatchSize = 20;
+
+  for (let index = 0; index < rosterPilots.length; index += profileBatchSize) {
+    const batch = rosterPilots.slice(index, index + profileBatchSize);
+    const detailedBatch = await Promise.all(
+      batch.map(async (rosterPilot) => {
+        const pilotId = Number(rosterPilot?.id || 0) || 0;
+        if (pilotId <= 0) {
+          return null;
+        }
+
+        const profile = await loadPilotProfileById(pilotId, { seedPilot: rosterPilot }).catch(() => null);
+        return {
+          ...rosterPilot,
+          ...(profile && typeof profile === "object" ? profile : {}),
+          id: pilotId,
+          username: String(profile?.username || rosterPilot?.username || "").trim(),
+          name: String(profile?.name || rosterPilot?.name || "").trim(),
+          email: String(profile?.email || rosterPilot?.email || "").trim(),
+          rank: String(profile?.rank || rosterPilot?.rank || "").trim(),
+          rankId: Number(profile?.rankId || rosterPilot?.rankId || 0) || null,
+          status: String(rosterPilot?.status || "active").trim() || "active",
+        };
+      })
+    );
+    detailedPilots.push(...detailedBatch.filter(Boolean));
+  }
 
   const matchedExistingIds = new Set();
   const now = new Date().toISOString();
   let nextOrder =
     existingItems.reduce((maxValue, item) => Math.max(maxValue, normalizeAdminNumber(item?.order, 0)), 0) + 10;
 
-  const syncedItems = (Array.isArray(rawPilots) ? rawPilots : [])
-    .filter((pilot) => pilot && !pilot.deleted_at && isPilotStaff(pilot))
+  const syncedItems = detailedPilots
+    .filter((pilot) => pilot && isPilotStaff(pilot))
     .map((pilot) => {
       const pilotId = Number(pilot?.id || 0) || null;
       const rosterPilot = pilotId ? rosterById.get(pilotId) || null : null;
@@ -3310,6 +3428,30 @@ const getDiscordBotSettingsStore = () => {
       ...defaults.pirepAlerts,
       ...(existing?.pirepAlerts && typeof existing.pirepAlerts === "object" ? existing.pirepAlerts : {}),
     },
+    automation: {
+      ...defaults.automation,
+      ...(existing?.automation && typeof existing.automation === "object" ? existing.automation : {}),
+      routes: {
+        ...defaults.automation.routes,
+        ...(existing?.automation?.routes && typeof existing.automation.routes === "object" ? existing.automation.routes : {}),
+        flightLogs: {
+          ...defaults.automation.routes.flightLogs,
+          ...(existing?.automation?.routes?.flightLogs && typeof existing.automation.routes.flightLogs === "object" ? existing.automation.routes.flightLogs : {}),
+        },
+        dailyStats24h: {
+          ...defaults.automation.routes.dailyStats24h,
+          ...(existing?.automation?.routes?.dailyStats24h && typeof existing.automation.routes.dailyStats24h === "object" ? existing.automation.routes.dailyStats24h : {}),
+        },
+        vatrusNews: {
+          ...defaults.automation.routes.vatrusNews,
+          ...(existing?.automation?.routes?.vatrusNews && typeof existing.automation.routes.vatrusNews === "object" ? existing.automation.routes.vatrusNews : {}),
+        },
+      },
+      runtime: {
+        ...defaults.automation.runtime,
+        ...(existing?.automation?.runtime && typeof existing.automation.runtime === "object" ? existing.automation.runtime : {}),
+      },
+    },
     templates: {
       ...defaults.templates,
       ...(existing?.templates && typeof existing.templates === "object" ? existing.templates : {}),
@@ -3338,6 +3480,30 @@ const upsertDiscordBotSettingsStore = (payload = {}) => {
       pirepAlerts: {
         ...current.pirepAlerts,
         ...(payload?.pirepAlerts && typeof payload.pirepAlerts === "object" ? payload.pirepAlerts : {}),
+      },
+      automation: {
+        ...current.automation,
+        ...(payload?.automation && typeof payload.automation === "object" ? payload.automation : {}),
+        routes: {
+          ...current.automation.routes,
+          ...(payload?.automation?.routes && typeof payload.automation.routes === "object" ? payload.automation.routes : {}),
+          flightLogs: {
+            ...current.automation.routes.flightLogs,
+            ...(payload?.automation?.routes?.flightLogs && typeof payload.automation.routes.flightLogs === "object" ? payload.automation.routes.flightLogs : {}),
+          },
+          dailyStats24h: {
+            ...current.automation.routes.dailyStats24h,
+            ...(payload?.automation?.routes?.dailyStats24h && typeof payload.automation.routes.dailyStats24h === "object" ? payload.automation.routes.dailyStats24h : {}),
+          },
+          vatrusNews: {
+            ...current.automation.routes.vatrusNews,
+            ...(payload?.automation?.routes?.vatrusNews && typeof payload.automation.routes.vatrusNews === "object" ? payload.automation.routes.vatrusNews : {}),
+          },
+        },
+        runtime: {
+          ...current.automation.runtime,
+          ...(payload?.automation?.runtime && typeof payload.automation.runtime === "object" ? payload.automation.runtime : {}),
+        },
       },
       templates: {
         ...current.templates,
@@ -5751,20 +5917,32 @@ const buildAdminRoutePayload = async (payload = {}) => {
   const serviceDays = parseAdminRouteServiceDays(
     payload?.serviceDays ?? payload?.service_days ?? payload?.daysOfOperation ?? payload?.days_of_operation
   );
-  if (serviceDays.length === 0) {
-    throw new Error("At least one service day is required");
-  }
 
-  const departureTime = normalizeAdminRouteTimeValue(
-    payload?.departureTimeUtc ?? payload?.departure_time ?? payload?.departureTime ?? payload?.off_block_time ?? payload?.offBlockTime,
-    "Departure",
-    { required: true }
-  );
-  const arrivalTime = normalizeAdminRouteTimeValue(
-    payload?.arrivalTimeUtc ?? payload?.arrival_time ?? payload?.arrivalTime ?? payload?.on_block_time ?? payload?.onBlockTime,
-    "Arrival",
-    { required: true }
-  );
+  const departureTimeProvided =
+    payload?.departureTimeUtc != null ||
+    payload?.departure_time != null ||
+    payload?.departureTime != null ||
+    payload?.off_block_time != null ||
+    payload?.offBlockTime != null;
+  const arrivalTimeProvided =
+    payload?.arrivalTimeUtc != null ||
+    payload?.arrival_time != null ||
+    payload?.arrivalTime != null ||
+    payload?.on_block_time != null ||
+    payload?.onBlockTime != null;
+
+  const departureTime = departureTimeProvided
+    ? normalizeAdminRouteTimeValue(
+        payload?.departureTimeUtc ?? payload?.departure_time ?? payload?.departureTime ?? payload?.off_block_time ?? payload?.offBlockTime,
+        "Departure"
+      )
+    : null;
+  const arrivalTime = arrivalTimeProvided
+    ? normalizeAdminRouteTimeValue(
+        payload?.arrivalTimeUtc ?? payload?.arrival_time ?? payload?.arrivalTime ?? payload?.on_block_time ?? payload?.onBlockTime,
+        "Arrival"
+      )
+    : null;
 
   const startDate = normalizeAdminRouteDateValue(
     payload?.startDate ?? payload?.start_date ?? payload?.effectiveFrom ?? payload?.effective_from,
@@ -5787,7 +5965,7 @@ const buildAdminRoutePayload = async (payload = {}) => {
     departure_id: departureId,
     arrival_id: arrivalId,
     fleet_ids: fleetIds,
-    service_days: serviceDays,
+    service_days: serviceDays.length > 0 ? serviceDays : null,
     departure_time: departureTime,
     arrival_time: arrivalTime,
     flight_length: String(payload?.duration ?? payload?.flightLength ?? payload?.flight_length ?? "").trim() || null,
@@ -7138,6 +7316,11 @@ const hasConfiguredVamsysAdminAccess = (user = {}) => {
     return true;
   }
 
+  const regularRankId = Number(user?.rank_id || user?.rankId || user?.rank?.id || 0) || 0;
+  if (regularRankId > 0 && ADMIN_VAMSYS_HONORARY_RANK_IDS.includes(regularRankId)) {
+    return true;
+  }
+
   const honoraryRankLabels = [
     user?.honorary_rank?.name,
     user?.honorary_rank?.title,
@@ -7150,11 +7333,39 @@ const hasConfiguredVamsysAdminAccess = (user = {}) => {
     user?.honoraryRankLabel,
   ].filter(Boolean);
 
-  return honoraryRankLabels.some((value) => hasStaffLikeHonoraryRankName(value));
+  const regularRankLabels = [
+    user?.rank?.name,
+    user?.rank?.title,
+    user?.rank?.label,
+    user?.rank?.slug,
+    user?.rank?.code,
+    user?.rank_name,
+    user?.rankName,
+    user?.rank_label,
+    user?.rankLabel,
+    user?.rank,
+  ].filter(Boolean);
+
+  return [...honoraryRankLabels, ...regularRankLabels].some((value) => hasStaffLikeHonoraryRankName(value));
 };
 
 const isVamsysAdmin = (vamsysUser = {}) => {
-  return hasConfiguredVamsysAdminAccess(vamsysUser);
+  if (hasConfiguredVamsysAdminAccess(vamsysUser)) {
+    return true;
+  }
+
+  const linked = findStoredVamsysLink(vamsysUser || {});
+  const linkedDiscordId = String(linked?.discordId || "").trim();
+  if (linkedDiscordId && isDiscordAdmin(linkedDiscordId)) {
+    return true;
+  }
+
+  const directDiscordId = String(readDiscordIdFromPilot(vamsysUser) || "").trim();
+  if (directDiscordId && isDiscordAdmin(directDiscordId)) {
+    return true;
+  }
+
+  return false;
 };
 
 const getAdminRole = (discordId) => {
@@ -11393,9 +11604,17 @@ app.post("/api/pilot/bookings", async (req, res) => {
     ]);
 
     const booking = getPilotApiItem(payload);
+    const enrichedBooking = booking ? enrichPilotApiBooking(booking, references) : null;
+
+    if (enrichedBooking) {
+      void sendDiscordBookingCreatedLog(enrichedBooking).catch((error) => {
+        logger.warn("[discord-automation] booking_created_send_failed", String(error?.message || error));
+      });
+    }
+
     res.status(201).json({
       ok: true,
-      booking: booking ? enrichPilotApiBooking(booking, references) : null,
+      booking: enrichedBooking,
     });
   } catch (error) {
     respondWithPilotApiError(res, error, "Failed to create Pilot API booking");
@@ -12427,6 +12646,42 @@ app.get("/api/pilot/analytics", async (req, res) => {
       return m ? m[1] : null;
     }).filter((r) => r.key !== "null" && r.key !== "Unknown");
 
+    // Favorites
+    // Favorite aircraft: top ICAO type by count, and most used registration for that type
+    const topAircraftRow = byAircraft.find((r) => r.key && r.key !== "Unknown");
+    const favAircraftType = topAircraftRow?.key || null;
+    let favAircraftReg = null;
+    if (favAircraftType) {
+      const regMap = new Map();
+      src.forEach((p) => {
+        const pType = aircraftLabel(p);
+        if (pType !== favAircraftType) return;
+        const reg = String(
+          p?.aircraft_registration || p?.registration ||
+          p?.aircraft?.registration || p?.aircraft?.reg || ""
+        ).trim().toUpperCase();
+        if (!reg || reg === "N/A") return;
+        regMap.set(reg, (regMap.get(reg) || 0) + 1);
+      });
+      const topReg = Array.from(regMap.entries()).sort((a, b) => b[1] - a[1])[0];
+      favAircraftReg = topReg ? topReg[0] : null;
+    }
+
+    // Favorite route: most common dep→arr pair
+    const routeMap = new Map();
+    src.forEach((p) => {
+      const dep = resolvePilotPirepAirportSummary(p, "departure", airportsMap);
+      const arr = resolvePilotPirepAirportSummary(p, "arrival", airportsMap);
+      if (!dep?.icao || !arr?.icao) return;
+      const key = `${dep.icao} - ${arr.icao}`;
+      routeMap.set(key, (routeMap.get(key) || 0) + 1);
+    });
+    const topRoute = Array.from(routeMap.entries()).sort((a, b) => b[1] - a[1])[0];
+    const favRoute = topRoute ? { route: topRoute[0], count: topRoute[1] } : null;
+
+    // Favorite type: same as favAircraftType but from byAircraft
+    const favType = favAircraftType ? { type: favAircraftType, count: topAircraftRow?.count || 0 } : null;
+
     res.json({
       ok: true,
       summary: { totalFlights, totalHours, totalDistance, totalPoints, avgVs },
@@ -12441,6 +12696,11 @@ app.get("/api/pilot/analytics", async (req, res) => {
       vsDistribution: vsCategories.map(({ label, count }) => ({ label, count })),
       eventFlights: { event: eventCount, nonEvent: nonEventCount },
       landingsByDayNight: { day: dayCount, night: nightCount },
+      favorites: {
+        aircraft: favAircraftType ? { type: favAircraftType, registration: favAircraftReg, count: topAircraftRow?.count || 0 } : null,
+        route: favRoute,
+        type: favType,
+      },
     });
   } catch (error) {
     respondWithPilotApiError(res, error, "Failed to load pilot analytics");
@@ -13862,9 +14122,892 @@ const normalizeDiscordEmbedFields = (fields = []) =>
     .filter((field) => field.name && field.value)
     .slice(0, 25);
 
+const sanitizeDiscordAutomationIdList = (values = [], limit = 200) =>
+  Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => String(value || "").trim())
+        .filter(Boolean)
+    )
+  ).slice(0, Math.max(1, Number(limit) || 200));
+
+const DISCORD_AUTOMATION_CHANNEL_FALLBACKS = {
+  flightLogs: "flights",
+  dailyStats24h: "news",
+  vatrusNews: "news",
+};
+
+const getDiscordAutomationRouteSettings = (settings = {}, routeKey = "") => {
+  const defaults = DEFAULT_DISCORD_BOT_SETTINGS.automation.routes;
+  const routes = settings?.automation?.routes && typeof settings.automation.routes === "object"
+    ? settings.automation.routes
+    : {};
+  const route = routes?.[routeKey] && typeof routes[routeKey] === "object" ? routes[routeKey] : {};
+  return {
+    ...(defaults?.[routeKey] && typeof defaults[routeKey] === "object" ? defaults[routeKey] : {}),
+    ...route,
+  };
+};
+
+const getDiscordAutomationRuntime = (settings = {}) => ({
+  ...DEFAULT_DISCORD_BOT_SETTINGS.automation.runtime,
+  ...(settings?.automation?.runtime && typeof settings.automation.runtime === "object" ? settings.automation.runtime : {}),
+  activeFlightKeys: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.activeFlightKeys, 400),
+  landedPirepIds: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.landedPirepIds, 400),
+  vatrusSeenArticleIds: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.vatrusSeenArticleIds, 400),
+});
+
+const updateDiscordAutomationRuntime = (patch = {}) => {
+  const current = getDiscordBotSettingsStore();
+  const runtime = {
+    ...getDiscordAutomationRuntime(current),
+    ...(patch && typeof patch === "object" ? patch : {}),
+  };
+  runtime.activeFlightKeys = sanitizeDiscordAutomationIdList(runtime.activeFlightKeys, 400);
+  runtime.landedPirepIds = sanitizeDiscordAutomationIdList(runtime.landedPirepIds, 400);
+  runtime.vatrusSeenArticleIds = sanitizeDiscordAutomationIdList(runtime.vatrusSeenArticleIds, 400);
+  return upsertDiscordBotSettingsStore({
+    automation: {
+      runtime,
+    },
+  });
+};
+
+const buildDiscordNotificationRequest = ({
+  settings = getDiscordBotSettingsStore(),
+  eventKey,
+  title,
+  description,
+  author,
+  category,
+  color = 0xe31e24,
+  fields = [],
+  variables = {},
+  force = false,
+  content = "",
+  overrideChannelId = "",
+  overrideWebhookUrl = "",
+}) => {
+  if (!force) {
+    if (!settings?.enabled) {
+      return { sent: false, reason: "disabled" };
+    }
+    if (settings?.notifications?.[eventKey] === false) {
+      return { sent: false, reason: "notification_disabled" };
+    }
+  }
+
+  const channelKey = DISCORD_NOTIFICATION_CHANNEL_BY_EVENT[eventKey] || "news";
+  const configuredChannelId = String(overrideChannelId || settings?.channels?.[channelKey] || "").trim();
+  const fallbackChannelId = !overrideChannelId && eventKey === "newsCreated" ? String(DISCORD_NEWS_CHANNEL_ID || "").trim() : "";
+  const channelId = configuredChannelId || fallbackChannelId;
+  const template =
+    settings?.templates?.[eventKey] && typeof settings.templates[eventKey] === "object"
+      ? settings.templates[eventKey]
+      : DEFAULT_DISCORD_BOT_TEMPLATES[eventKey] || null;
+
+  if (template && template.enabled === false && !force) {
+    return { sent: false, reason: "template_disabled" };
+  }
+
+  const mergedVariables = {
+    ...variables,
+    title,
+    content: description,
+    author,
+    category,
+  };
+  const resolvedContent = buildTicketAdminPingContent(eventKey, mergedVariables, content);
+  const resolvedTitle =
+    renderDiscordTemplateString(template?.title || title || "Update", mergedVariables) ||
+    String(title || "Update");
+  const resolvedDescription =
+    renderDiscordTemplateString(template?.description || description || "", mergedVariables) ||
+    String(description || "").trim() ||
+    "No content";
+  const embedFields = normalizeDiscordEmbedFields(fields);
+  if (category) {
+    embedFields.unshift({ name: "Category", value: String(category), inline: true });
+  }
+  if (author) {
+    embedFields.push({ name: "Author", value: String(author), inline: true });
+  }
+
+  return {
+    channelId,
+    webhookUrl: String(overrideWebhookUrl || settings?.webhookUrl || "").trim(),
+    payload: {
+      ...(resolvedContent ? { content: String(resolvedContent) } : {}),
+      allowed_mentions: {
+        parse: [],
+        roles: getManagedDiscordAdminRoleIds(),
+        users: listDiscordTicketAdminMentions()
+          .filter((mention) => /^<@\d+>$/.test(mention))
+          .map((mention) => mention.replace(/[<@>]/g, "")),
+      },
+      embeds: [
+        {
+          title: resolvedTitle.slice(0, 250),
+          description:
+            resolvedDescription.length > 4000
+              ? `${resolvedDescription.slice(0, 3997)}...`
+              : resolvedDescription,
+          color,
+          fields: embedFields.slice(0, 25),
+          timestamp: new Date().toISOString(),
+        },
+      ],
+    },
+  };
+};
+
+const sendDiscordConfiguredNotification = async (options = {}) => {
+  const request = buildDiscordNotificationRequest(options);
+  if (request?.sent === false) {
+    return request;
+  }
+  return sendDiscordPayload(request);
+};
+
+const sendDiscordAutomationEventNotification = async ({
+  settings = getDiscordBotSettingsStore(),
+  routeKey,
+  ...options
+} = {}) => {
+  if (!settings?.enabled) {
+    return { sent: false, reason: "disabled" };
+  }
+
+  const route = getDiscordAutomationRouteSettings(settings, routeKey);
+  if (route?.enabled === false) {
+    return { sent: false, reason: "automation_disabled" };
+  }
+
+  const request = buildDiscordNotificationRequest({
+    settings,
+    ...options,
+    overrideChannelId: String(route?.channelId || "").trim(),
+    overrideWebhookUrl: String(route?.webhookUrl || "").trim(),
+  });
+  if (request?.sent === false) {
+    return request;
+  }
+
+  const fallbackChannelKey = DISCORD_AUTOMATION_CHANNEL_FALLBACKS[routeKey] || "news";
+  request.channelId = String(route?.channelId || settings?.channels?.[fallbackChannelKey] || "").trim();
+  request.webhookUrl = String(route?.webhookUrl || settings?.webhookUrl || "").trim();
+  return sendDiscordPayload(request);
+};
+
+const buildDiscordAutomationPayload = ({ title, description, color = 0xe31e24, fields = [], content = "" }) => ({
+  ...(String(content || "").trim() ? { content: String(content).trim() } : {}),
+  allowed_mentions: { parse: [] },
+  embeds: [
+    {
+      title: String(title || "Update").slice(0, 250),
+      description: String(description || "No content").slice(0, 4000),
+      color,
+      fields: normalizeDiscordEmbedFields(fields),
+      timestamp: new Date().toISOString(),
+    },
+  ],
+});
+
+const sendDiscordAutomationNotification = async ({ routeKey, title, description, color = 0xe31e24, fields = [], content = "" }) => {
+  const settings = getDiscordBotSettingsStore();
+  if (!settings?.enabled) {
+    return { sent: false, reason: "disabled" };
+  }
+
+  const route = getDiscordAutomationRouteSettings(settings, routeKey);
+  if (route?.enabled === false) {
+    return { sent: false, reason: "automation_disabled" };
+  }
+
+  const fallbackChannelKey = DISCORD_AUTOMATION_CHANNEL_FALLBACKS[routeKey] || "news";
+  return sendDiscordPayload({
+    channelId: String(route?.channelId || settings?.channels?.[fallbackChannelKey] || "").trim(),
+    webhookUrl: String(route?.webhookUrl || settings?.webhookUrl || "").trim(),
+    payload: buildDiscordAutomationPayload({ title, description, color, fields, content }),
+  });
+};
+
+const resolveDiscordAutomationTimestamp = (...values) => {
+  for (const value of values) {
+    const timestamp = Date.parse(String(value || ""));
+    if (Number.isFinite(timestamp)) {
+      return timestamp;
+    }
+  }
+  return null;
+};
+
+const resolveDiscordAutomationHours = (pirep = {}) => {
+  const minutes = Number(pirep?.flight_time || 0);
+  const seconds = Number(pirep?.flight_length || 0);
+  if (Number.isFinite(seconds) && seconds > 0 && seconds > minutes * 10) {
+    return seconds / 3600;
+  }
+  return Number.isFinite(minutes) ? minutes / 60 : 0;
+};
+
+const resolveDiscordAutomationRouteLabel = (pirep = {}) => {
+  const departure = String(pirep?.departure_airport?.icao || pirep?.departure_airport?.iata || pirep?.departure_icao || pirep?.departure_iata || "").trim().toUpperCase();
+  const arrival = String(pirep?.arrival_airport?.icao || pirep?.arrival_airport?.iata || pirep?.arrival_icao || pirep?.arrival_iata || "").trim().toUpperCase();
+  return departure || arrival ? `${departure || "---"}-${arrival || "---"}` : "Unknown route";
+};
+
+const formatDiscordUtcDateTime = (value) => {
+  const timestamp = resolveDiscordAutomationTimestamp(value);
+  if (!Number.isFinite(timestamp)) {
+    return "Unknown";
+  }
+  const date = new Date(timestamp);
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return `${day}.${month}.${year} ${hours}:${minutes} UTC`;
+};
+
+const stripVatrusHtml = (value = "") =>
+  String(value || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const parseVatrusNewsFeed = (html = "") => {
+  const source = String(html || "");
+  const articleLinkPattern = /https?:\/\/vatrus\.info\/news\/(\d+)|href=["'](?:https?:\/\/vatrus\.info)?\/news\/(\d+)["']/gi;
+  const positions = [];
+  let match = articleLinkPattern.exec(source);
+
+  while (match) {
+    const articleId = String(match[1] || match[2] || "").trim();
+    if (articleId && !positions.some((entry) => entry.id === articleId)) {
+      positions.push({ id: articleId, start: match.index });
+    }
+    match = articleLinkPattern.exec(source);
+  }
+
+  return positions.map((entry, index) => {
+    const end = positions[index + 1]?.start || source.length;
+    const segment = source.slice(entry.start, end);
+    const titleMatch = segment.match(/<h[1-6][^>]*>\s*([\s\S]*?)<\/h[1-6]>/i);
+    const publishedMatch = stripVatrusHtml(segment).match(/Опубликовано:\s*([0-9.]{10}\s+[0-9:]{5})/i);
+    const eventTimeMatch = stripVatrusHtml(segment).match(/Время проведения:\s*([^\n]+?UTC)/i);
+    const regionMatch = stripVatrusHtml(segment).match(/Регион\s*([^Р]+?)РПИ/i);
+    const airportMatch = stripVatrusHtml(segment).match(/([A-Z]{4})\s+([^О]+?)\s+Опубликовано:/i);
+    const publishedAt = publishedMatch ? publishedMatch[1].trim() : "";
+    const eventTime = eventTimeMatch ? eventTimeMatch[1].trim() : "";
+    const title = stripVatrusHtml(titleMatch?.[1] || "") || `VATRUS article #${entry.id}`;
+    const text = stripVatrusHtml(segment);
+    const summaryStart = eventTime ? text.indexOf(eventTime) + eventTime.length : 0;
+    const summaryEnd = publishedAt ? text.indexOf(`Опубликовано: ${publishedAt}`) : text.length;
+    const rawSummary = summaryEnd > summaryStart ? text.slice(summaryStart, summaryEnd) : text;
+    const summary = rawSummary.replace(/^[-: ]+/, "").trim().slice(0, 500);
+
+    return {
+      id: entry.id,
+      url: `https://vatrus.info/news/${entry.id}`,
+      title,
+      publishedAt,
+      eventTime,
+      region: regionMatch ? regionMatch[1].trim() : "",
+      airport: airportMatch ? `${airportMatch[1].trim()} ${airportMatch[2].trim()}` : "",
+      summary,
+    };
+  }).filter((item) => item.title);
+};
+
+const loadVatrusNewsFeed = async (sourceUrl = "https://vatrus.info/news") => {
+  const response = await fetch(String(sourceUrl || "https://vatrus.info/news"), {
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "NordwindSiteBot/1.0 (+https://nordwindva.example)",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`VATRUS news returned ${response.status}`);
+  }
+  const html = await response.text();
+  return parseVatrusNewsFeed(html);
+};
+
+const resolveDiscordDailyStatsMetricValue = (...values) => {
+  for (const value of values) {
+    const numericValue = Number(value);
+    if (Number.isFinite(numericValue) && numericValue >= 0) {
+      return numericValue;
+    }
+  }
+  return null;
+};
+
+const formatDiscordDailyStatsFlightTime = (hoursValue) => {
+  const totalMinutes = Math.max(0, Math.round((Number(hoursValue) || 0) * 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours > 0 && minutes > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (hours > 0) {
+    return `${hours}h`;
+  }
+  return `${minutes}m`;
+};
+
+const getPythonCommandCandidates = () => {
+  const seen = new Set();
+  const candidates = [
+    process.env.PYTHON_EXECUTABLE,
+    path.resolve(ROOT_DIR, ".venv/Scripts/python.exe"),
+    path.resolve(ROOT_DIR, ".venv/bin/python"),
+    "python3",
+    "python",
+  ].filter(Boolean);
+
+  return candidates.filter((candidate) => {
+    const normalized = String(candidate || "").trim();
+    if (!normalized || seen.has(normalized)) {
+      return false;
+    }
+    seen.add(normalized);
+    return true;
+  });
+};
+
+const loadDiscordDailyStatsBooking = async (bookingId) => {
+  const normalizedBookingId = Number(bookingId || 0) || 0;
+  if (normalizedBookingId <= 0) {
+    return null;
+  }
+
+  const raw = await apiRequest(`/bookings/${encodeURIComponent(String(normalizedBookingId))}`).catch(() => null);
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  if (raw.id && (raw.attributes || raw.relationships)) {
+    return flattenJsonApiNode(raw);
+  }
+  if (raw?.data && raw.data.id && (raw.data.attributes || raw.data.relationships)) {
+    return flattenJsonApiNode(raw.data);
+  }
+  return raw?.data && typeof raw.data === "object" ? raw.data : raw;
+};
+
+const buildDiscordDailyStatsCardPayload = (snapshot = {}) => ({
+  title: "Nordwind VA Daily Summary",
+  subtitle: "Operational totals for the last 24 hours",
+  generatedAt: String(snapshot?.generatedAtLabel || "Unknown").trim() || "Unknown",
+  windowLabel: `${formatDiscordUtcDateTime(snapshot?.windowStart)} - ${formatDiscordUtcDateTime(snapshot?.windowEnd)}`,
+  metrics: [
+    { label: "Pilots", value: String(snapshot?.pilots ?? 0) },
+    { label: "PIREPs", value: String(snapshot?.pireps ?? 0) },
+    { label: "Flights", value: String(snapshot?.flights ?? 0) },
+    { label: "Flight Time", value: String(snapshot?.flightTime || "0m") },
+    { label: "Passengers", value: String(snapshot?.passengers ?? 0) },
+    { label: "Cargo", value: String(snapshot?.cargo ?? 0) },
+  ],
+  backgroundPath: DISCORD_DAILY_STATS_CARD_BACKGROUND,
+  logoPath: DISCORD_DAILY_STATS_CARD_LOGO,
+});
+
+const generateDiscordDailyStatsCard = async (snapshot = {}) => {
+  const payload = buildDiscordDailyStatsCardPayload(snapshot);
+  const outputPath = path.join(
+    os.tmpdir(),
+    `nws-daily-stats-${Date.now()}-${Math.random().toString(16).slice(2)}.png`
+  );
+  const fileNameStamp = String(snapshot?.generatedAt || new Date().toISOString())
+    .replace(/[^0-9]/g, "")
+    .slice(0, 12) || `${Date.now()}`;
+
+  let lastError = null;
+  for (const pythonCommand of getPythonCommandCandidates()) {
+    try {
+      await execFileAsync(
+        pythonCommand,
+        [DISCORD_DAILY_STATS_CARD_SCRIPT, outputPath, JSON.stringify(payload)],
+        {
+          windowsHide: true,
+          timeout: 30000,
+          maxBuffer: 1024 * 1024,
+        }
+      );
+
+      if (fs.existsSync(outputPath)) {
+        const buffer = await fs.promises.readFile(outputPath);
+        await fs.promises.unlink(outputPath).catch(() => null);
+        return {
+          buffer,
+          fileName: `nordwind-daily-stats-${fileNameStamp}.png`,
+        };
+      }
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  await fs.promises.unlink(outputPath).catch(() => null);
+  throw lastError || new Error("Failed to generate daily stats card");
+};
+
+const buildDailyStats24hSnapshot = async () => {
+  const allPireps = await fetchAllPages("/pireps?page[size]=250&sort=-created_at").catch(() => []);
+  const nowMs = Date.now();
+  const windowStartMs = nowMs - 24 * 60 * 60 * 1000;
+  const generatedAt = new Date(nowMs).toISOString();
+  const recentPireps = (Array.isArray(allPireps) ? allPireps : []).filter((pirep) => {
+    const timestamp = resolveDiscordAutomationTimestamp(
+      pirep?.landing_time,
+      pirep?.on_blocks_time,
+      pirep?.created_at,
+      pirep?.submitted_at,
+      pirep?.updated_at
+    );
+    return Number.isFinite(timestamp) && timestamp >= windowStartMs && timestamp <= nowMs;
+  });
+  const completedFlights = recentPireps.filter((item) => isAcceptedPilotPirep(item));
+  const uniquePilotIds = new Set(
+    recentPireps
+      .map((item) => String(item?.pilot_id || item?.user_id || "").trim())
+      .filter(Boolean)
+  );
+  const bookingIds = Array.from(
+    new Set(
+      completedFlights
+        .map((item) => Number(item?.booking_id || 0) || 0)
+        .filter((bookingId) => bookingId > 0)
+    )
+  );
+  const bookingsById = new Map(
+    (await Promise.all(
+      bookingIds.map(async (bookingId) => [bookingId, await loadDiscordDailyStatsBooking(bookingId)])
+    )).filter((entry) => entry[1])
+  );
+  const totalFlightHours = completedFlights.reduce((sum, item) => sum + resolveDiscordAutomationHours(item), 0);
+  const totals = completedFlights.reduce(
+    (sum, item) => {
+      const bookingId = Number(item?.booking_id || 0) || 0;
+      const booking = bookingId > 0 ? bookingsById.get(bookingId) || null : null;
+      const passengers = resolveDiscordDailyStatsMetricValue(
+        item?.passengers,
+        item?.pax,
+        item?.booked_passengers,
+        item?.bookedPassengers,
+        booking?.passengers,
+        booking?.pax,
+        booking?.booked_passengers,
+        booking?.bookedPassengers
+      );
+      const cargo = resolveDiscordDailyStatsMetricValue(
+        item?.cargo,
+        item?.cargo_weight,
+        item?.freight,
+        item?.freight_weight,
+        booking?.cargo,
+        booking?.cargo_weight,
+        booking?.freight,
+        booking?.freight_weight
+      );
+
+      return {
+        passengers: sum.passengers + Math.round(passengers || 0),
+        cargo: sum.cargo + Math.round(cargo || 0),
+      };
+    },
+    { passengers: 0, cargo: 0 }
+  );
+  const windowStart = new Date(windowStartMs).toISOString();
+  const windowEnd = new Date(nowMs).toISOString();
+  const flightTime = formatDiscordDailyStatsFlightTime(totalFlightHours);
+
+  return {
+    pilots: uniquePilotIds.size,
+    pireps: recentPireps.length,
+    flights: completedFlights.length,
+    flightTimeHours: Math.round(totalFlightHours * 10) / 10,
+    flightTime,
+    passengers: totals.passengers,
+    cargo: totals.cargo,
+    generatedAt,
+    generatedAtLabel: formatDiscordUtcDateTime(generatedAt),
+    windowStart,
+    windowEnd,
+  };
+};
+
+const sendDiscordBookingCreatedLog = async (booking = {}) => {
+  const settings = getDiscordBotSettingsStore();
+  const variables = {
+    flightNumber: String(booking?.callsign || booking?.flightNumber || booking?.flight_number || "Booking").trim() || "Booking",
+    pilotName: String(booking?.pilotName || booking?.pilot?.name || booking?.pilot_name || "Pilot").trim() || "Pilot",
+    route: resolveDiscordAutomationRouteLabel({
+      departure_airport: { icao: booking?.departure },
+      arrival_airport: { icao: booking?.arrival },
+      departure_icao: booking?.departure,
+      arrival_icao: booking?.arrival,
+    }),
+    aircraft: String(booking?.aircraftLabel || booking?.aircraft?.name || booking?.aircraft?.type || "Aircraft").trim() || "Aircraft",
+    departure: String(booking?.departure || "").trim().toUpperCase(),
+    arrival: String(booking?.arrival || "").trim().toUpperCase(),
+  };
+
+  return sendDiscordAutomationEventNotification({
+    settings,
+    routeKey: "flightLogs",
+    eventKey: "bookingCreated",
+    title: "Booking created",
+    description: `${variables.pilotName} booked ${variables.route} with ${variables.aircraft}.`,
+    fields: [
+      { name: "Flight", value: variables.flightNumber, inline: true },
+      { name: "Route", value: variables.route, inline: true },
+      { name: "Departure", value: variables.departure || "—", inline: true },
+      { name: "Arrival", value: variables.arrival || "—", inline: true },
+    ],
+    variables,
+  });
+};
+
+const isFlightMapEntryAirborne = (flight = {}) => {
+  const status = String(flight?.currentPhase || flight?.status || "").trim().toLowerCase();
+  if (!status) {
+    return false;
+  }
+  if (/(landed|arrived|completed|cancelled|parked|boarding|scheduled|gate|offline)/.test(status)) {
+    return false;
+  }
+  return /(airborne|depart|takeoff|en route|cruise|climb|descent|approach|taxi out)/.test(status);
+};
+
+const buildFlightLogKey = (value = {}) => {
+  const bookingId = Number(value?.bookingId || value?.booking_id || 0) || 0;
+  const callsign = String(value?.flightNumber || value?.callsign || "").trim().toUpperCase();
+  return bookingId > 0 ? `booking:${bookingId}` : callsign ? `callsign:${callsign}` : "";
+};
+
+const sweepDiscordFlightLogs = async (settings = getDiscordBotSettingsStore()) => {
+  const route = getDiscordAutomationRouteSettings(settings, "flightLogs");
+  if (!route?.enabled) {
+    return;
+  }
+
+  const runtime = getDiscordAutomationRuntime(settings);
+  const now = Date.now();
+  const pollIntervalMs = Math.max(1, Number(route?.pollIntervalMinutes || 2) || 2) * 60 * 1000;
+  const lastPollAt = Number(resolveDiscordAutomationTimestamp(runtime?.lastFlightPollAt) || 0);
+  if (lastPollAt > 0 && now - lastPollAt < pollIntervalMs) {
+    return;
+  }
+
+  const [flightMap, pirepsResponse] = await Promise.all([
+    loadFlightMap().catch(() => ({ flights: [] })),
+    fetchAllPages("/pireps?page[size]=60&sort=-created_at").catch(() => []),
+  ]);
+
+  const activeBefore = new Set(sanitizeDiscordAutomationIdList(runtime?.activeFlightKeys, 400));
+  const activeNow = new Set();
+
+  for (const flight of Array.isArray(flightMap?.flights) ? flightMap.flights : []) {
+    if (!isFlightMapEntryAirborne(flight)) {
+      continue;
+    }
+    const key = buildFlightLogKey(flight);
+    if (!key) {
+      continue;
+    }
+    activeNow.add(key);
+    if (activeBefore.has(key)) {
+      continue;
+    }
+
+    await sendDiscordAutomationEventNotification({
+      settings,
+      routeKey: "flightLogs",
+      eventKey: "flightTakeoff",
+      title: "Flight departed",
+      description: `${String(flight?.pilotName || "Pilot").trim() || "Pilot"} is now airborne from ${String(flight?.departure || "---").trim().toUpperCase()} to ${String(flight?.arrival || "---").trim().toUpperCase()}.`,
+      fields: [
+        { name: "Flight", value: String(flight?.flightNumber || flight?.callsign || "Flight").trim() || "Flight", inline: true },
+        { name: "Route", value: `${String(flight?.departure || "---").trim().toUpperCase()}-${String(flight?.arrival || "---").trim().toUpperCase()}`, inline: true },
+        { name: "Phase", value: String(flight?.currentPhase || flight?.status || "En Route").trim() || "En Route", inline: true },
+      ],
+      variables: {
+        flightNumber: String(flight?.flightNumber || flight?.callsign || "Flight").trim() || "Flight",
+        pilotName: String(flight?.pilotName || "Pilot").trim() || "Pilot",
+        departure: String(flight?.departure || "").trim().toUpperCase(),
+        arrival: String(flight?.arrival || "").trim().toUpperCase(),
+      },
+    }).catch((error) => {
+      logger.warn("[discord-automation] flight_takeoff_send_failed", String(error?.message || error));
+    });
+  }
+
+  const landedSeen = new Set(sanitizeDiscordAutomationIdList(runtime?.landedPirepIds, 400));
+  const recentPireps = Array.isArray(pirepsResponse) ? pirepsResponse.slice(0, 20) : [];
+  for (const pirep of recentPireps) {
+    const pirepId = String(Number(pirep?.id || 0) || "").trim();
+    if (!pirepId || landedSeen.has(pirepId)) {
+      continue;
+    }
+    const landingTimestamp = resolveDiscordAutomationTimestamp(
+      pirep?.landing_time,
+      pirep?.on_blocks_time,
+      pirep?.created_at,
+      pirep?.submitted_at
+    );
+    if (!Number.isFinite(landingTimestamp) || now - landingTimestamp > 6 * 60 * 60 * 1000) {
+      continue;
+    }
+
+    landedSeen.add(pirepId);
+    await sendDiscordAutomationEventNotification({
+      settings,
+      routeKey: "flightLogs",
+      eventKey: "flightLanding",
+      title: "Flight landed",
+      description: `${String(await loadPilotName(pirep?.pilot_id).catch(() => "Pilot") || "Pilot").trim()} landed at ${String(pirep?.arrival_airport?.icao || pirep?.arrival_icao || "---").trim().toUpperCase()} from ${String(pirep?.departure_airport?.icao || pirep?.departure_icao || "---").trim().toUpperCase()}.`,
+      fields: [
+        { name: "Flight", value: String(pirep?.callsign || pirep?.flight_number || "PIREP").trim() || "PIREP", inline: true },
+        { name: "Route", value: resolveDiscordAutomationRouteLabel(pirep), inline: true },
+        { name: "Landing rate", value: Number.isFinite(Number(pirep?.landing_rate)) ? `${Math.round(Number(pirep.landing_rate))} fpm` : "—", inline: true },
+      ],
+      variables: {
+        flightNumber: String(pirep?.callsign || pirep?.flight_number || "PIREP").trim() || "PIREP",
+        departure: String(pirep?.departure_airport?.icao || pirep?.departure_icao || "").trim().toUpperCase(),
+        arrival: String(pirep?.arrival_airport?.icao || pirep?.arrival_icao || "").trim().toUpperCase(),
+      },
+    }).catch((error) => {
+      logger.warn("[discord-automation] flight_landing_send_failed", String(error?.message || error));
+    });
+  }
+
+  updateDiscordAutomationRuntime({
+    activeFlightKeys: Array.from(activeNow),
+    landedPirepIds: Array.from(landedSeen),
+    lastFlightPollAt: new Date(now).toISOString(),
+  });
+};
+
+const sweepDiscordDailyStats24h = async (settings = getDiscordBotSettingsStore()) => {
+  const route = getDiscordAutomationRouteSettings(settings, "dailyStats24h");
+  if (!route?.enabled) {
+    return;
+  }
+
+  const runtime = getDiscordAutomationRuntime(settings);
+  const now = new Date();
+  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const targetMinutes = (Math.max(0, Math.min(23, Number(route?.hourUtc || 0) || 0)) * 60) + Math.max(0, Math.min(59, Number(route?.minuteUtc || 0) || 0));
+  const dateKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`;
+  if (runtime?.lastDailyStatsDateUtc === dateKey) {
+    return;
+  }
+  if (currentMinutes < targetMinutes || currentMinutes >= targetMinutes + 15) {
+    return;
+  }
+
+  let sentSuccessfully = false;
+  try {
+    const snapshot = await buildDailyStats24hSnapshot();
+    const card = await generateDiscordDailyStatsCard(snapshot);
+    const result = await sendDiscordPayload({
+      channelId: String(route?.channelId || settings?.channels?.news || "").trim(),
+      webhookUrl: String(route?.webhookUrl || settings?.webhookUrl || "").trim(),
+      payload: {
+        allowed_mentions: { parse: [] },
+        embeds: [
+          {
+            title: "Nordwind VA stats for the last 24 hours",
+            description: `Generated: ${snapshot.generatedAtLabel}`,
+            color: 0xe31e24,
+            image: { url: `attachment://${card.fileName}` },
+            footer: {
+              text: `Window: ${formatDiscordUtcDateTime(snapshot.windowStart)} - ${formatDiscordUtcDateTime(snapshot.windowEnd)}`,
+            },
+            timestamp: snapshot.generatedAt,
+          },
+        ],
+        files: [
+          {
+            name: card.fileName,
+            description: "Nordwind daily operations summary card",
+            contentType: "image/png",
+            data: card.buffer,
+          },
+        ],
+      },
+    });
+    sentSuccessfully = result?.sent === true;
+  } catch (error) {
+    logger.warn("[discord-automation] daily_stats_send_failed", String(error?.message || error));
+  }
+
+  if (sentSuccessfully) {
+    updateDiscordAutomationRuntime({
+      lastDailyStatsDateUtc: dateKey,
+    });
+  }
+};
+
+const sweepDiscordVatrusNews = async (settings = getDiscordBotSettingsStore()) => {
+  const route = getDiscordAutomationRouteSettings(settings, "vatrusNews");
+  if (!route?.enabled) {
+    return;
+  }
+
+  const runtime = getDiscordAutomationRuntime(settings);
+  const now = Date.now();
+  const pollIntervalMs = Math.max(5, Number(route?.pollIntervalMinutes || 30) || 30) * 60 * 1000;
+  const lastPollAt = Number(resolveDiscordAutomationTimestamp(runtime?.lastVatrusPollAt) || 0);
+  if (lastPollAt > 0 && now - lastPollAt < pollIntervalMs) {
+    return;
+  }
+
+  const articles = await loadVatrusNewsFeed(route?.sourceUrl || "https://vatrus.info/news");
+  const seen = new Set(sanitizeDiscordAutomationIdList(runtime?.vatrusSeenArticleIds, 400));
+  const fresh = articles.filter((article) => article?.id && !seen.has(String(article.id)));
+
+  for (const article of fresh.slice(0, 5).reverse()) {
+    await sendDiscordAutomationNotification({
+      routeKey: "vatrusNews",
+      title: `VATRUS: ${article.title}`,
+      description: article.summary || article.eventTime || article.title,
+      color: 0x1d4ed8,
+      fields: [
+        { name: "Published", value: article.publishedAt || "Unknown", inline: true },
+        { name: "Event time", value: article.eventTime || "—", inline: true },
+        { name: "Region", value: article.region || "—", inline: true },
+        { name: "Airport", value: article.airport || "—", inline: true },
+        { name: "Link", value: article.url, inline: false },
+      ],
+    }).catch((error) => {
+      logger.warn("[discord-automation] vatrus_news_send_failed", String(error?.message || error));
+    });
+    seen.add(String(article.id));
+  }
+
+  updateDiscordAutomationRuntime({
+    vatrusSeenArticleIds: Array.from(seen),
+    lastVatrusPollAt: new Date(now).toISOString(),
+  });
+};
+
+let discordWebhookAutomationTimer = null;
+let discordWebhookAutomationSweepPromise = null;
+
+const sweepDiscordWebhookAutomation = async () => {
+  if (discordWebhookAutomationSweepPromise) {
+    return discordWebhookAutomationSweepPromise;
+  }
+
+  discordWebhookAutomationSweepPromise = (async () => {
+    const settings = getDiscordBotSettingsStore();
+    if (!settings?.enabled) {
+      return;
+    }
+
+    await Promise.allSettled([
+      sweepDiscordFlightLogs(settings),
+      sweepDiscordDailyStats24h(settings),
+      sweepDiscordVatrusNews(settings),
+    ]);
+  })().finally(() => {
+    discordWebhookAutomationSweepPromise = null;
+  });
+
+  return discordWebhookAutomationSweepPromise;
+};
+
+const startDiscordWebhookAutomationScheduler = () => {
+  if (discordWebhookAutomationTimer) {
+    return;
+  }
+
+  void sweepDiscordWebhookAutomation().catch((error) => {
+    logger.warn("[discord-automation] initial_sweep_failed", String(error?.message || error));
+  });
+  discordWebhookAutomationTimer = setInterval(() => {
+    void sweepDiscordWebhookAutomation().catch((error) => {
+      logger.warn("[discord-automation] periodic_sweep_failed", String(error?.message || error));
+    });
+  }, 60 * 1000);
+};
+
 const sendDiscordPayload = async ({ channelId, webhookUrl, payload }) => {
   const normalizedChannelId = String(channelId || "").trim();
   const normalizedWebhookUrl = String(webhookUrl || "").trim();
+  const payloadFiles = Array.isArray(payload?.files)
+    ? payload.files
+        .filter((file) => file && typeof file === "object")
+        .map((file, index) => {
+          const name = String(file?.name || `attachment-${index + 1}.bin`).trim() || `attachment-${index + 1}.bin`;
+          const description = String(file?.description || "").trim();
+          const contentType = String(file?.contentType || "application/octet-stream").trim() || "application/octet-stream";
+          const rawData = file?.data ?? file?.buffer ?? null;
+          const data = Buffer.isBuffer(rawData)
+            ? rawData
+            : rawData instanceof Uint8Array
+              ? Buffer.from(rawData)
+              : typeof rawData === "string"
+                ? Buffer.from(rawData, "base64")
+                : null;
+          if (!data || data.length === 0) {
+            return null;
+          }
+          return { name, description, contentType, data };
+        })
+        .filter(Boolean)
+    : [];
+  const payloadBody = payload && typeof payload === "object"
+    ? {
+        ...payload,
+        ...(payloadFiles.length > 0
+          ? {
+              attachments: payloadFiles.map((file, index) => ({
+                id: index,
+                filename: file.name,
+                ...(file.description ? { description: file.description } : {}),
+              })),
+            }
+          : {}),
+      }
+    : {};
+  delete payloadBody.files;
+  const buildRequestOptions = (includeAuthorization = false) => {
+    if (payloadFiles.length === 0) {
+      return {
+        headers: {
+          ...(includeAuthorization ? { Authorization: `Bot ${DISCORD_BOT_TOKEN}` } : {}),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(payloadBody),
+      };
+    }
+
+    const form = new FormData();
+    form.append("payload_json", JSON.stringify(payloadBody));
+    payloadFiles.forEach((file, index) => {
+      form.append(
+        `files[${index}]`,
+        new Blob([file.data], { type: file.contentType }),
+        file.name
+      );
+    });
+
+    return {
+      headers: includeAuthorization ? { Authorization: `Bot ${DISCORD_BOT_TOKEN}` } : {},
+      body: form,
+    };
+  };
   let lastError = null;
 
   if (normalizedChannelId && DISCORD_BOT_TOKEN) {
@@ -13872,11 +15015,7 @@ const sendDiscordPayload = async ({ channelId, webhookUrl, payload }) => {
       `https://discord.com/api/v10/channels/${encodeURIComponent(normalizedChannelId)}/messages`,
       {
         method: "POST",
-        headers: {
-          Authorization: `Bot ${DISCORD_BOT_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
+        ...buildRequestOptions(true),
       }
     );
 
@@ -13890,10 +15029,7 @@ const sendDiscordPayload = async ({ channelId, webhookUrl, payload }) => {
   if (normalizedWebhookUrl) {
     const response = await fetch(normalizedWebhookUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(payload),
+      ...buildRequestOptions(false),
     });
 
     if (response.ok) {
@@ -13922,78 +15058,17 @@ const sendDiscordBotNotification = async ({
   force = false,
   content = "",
 }) => {
-  const settings = getDiscordBotSettingsStore();
-  if (!force) {
-    if (!settings?.enabled) {
-      return { sent: false, reason: "disabled" };
-    }
-    if (settings?.notifications?.[eventKey] === false) {
-      return { sent: false, reason: "notification_disabled" };
-    }
-  }
-
-  const channelKey = DISCORD_NOTIFICATION_CHANNEL_BY_EVENT[eventKey] || "news";
-  const configuredChannelId = String(settings?.channels?.[channelKey] || "").trim();
-  const fallbackChannelId = eventKey === "newsCreated" ? String(DISCORD_NEWS_CHANNEL_ID || "").trim() : "";
-  const channelId = configuredChannelId || fallbackChannelId;
-  const template =
-    settings?.templates?.[eventKey] && typeof settings.templates[eventKey] === "object"
-      ? settings.templates[eventKey]
-      : DEFAULT_DISCORD_BOT_TEMPLATES[eventKey] || null;
-
-  if (template && template.enabled === false && !force) {
-    return { sent: false, reason: "template_disabled" };
-  }
-
-  const mergedVariables = {
-    ...variables,
+  return sendDiscordConfiguredNotification({
+    eventKey,
     title,
-    content: description,
+    description,
     author,
     category,
-  };
-  const resolvedContent = buildTicketAdminPingContent(eventKey, mergedVariables, content);
-
-  const resolvedTitle =
-    renderDiscordTemplateString(template?.title || title || "Update", mergedVariables) ||
-    String(title || "Update");
-  const resolvedDescription =
-    renderDiscordTemplateString(template?.description || description || "", mergedVariables) ||
-    String(description || "").trim() ||
-    "No content";
-  const embedFields = normalizeDiscordEmbedFields(fields);
-  if (category) {
-    embedFields.unshift({ name: "Category", value: String(category), inline: true });
-  }
-  if (author) {
-    embedFields.push({ name: "Author", value: String(author), inline: true });
-  }
-
-  return sendDiscordPayload({
-    channelId,
-    webhookUrl: settings?.webhookUrl,
-    payload: {
-      ...(resolvedContent ? { content: String(resolvedContent) } : {}),
-      allowed_mentions: {
-        parse: [],
-        roles: getManagedDiscordAdminRoleIds(),
-        users: listDiscordTicketAdminMentions()
-          .filter((mention) => /^<@\d+>$/.test(mention))
-          .map((mention) => mention.replace(/[<@>]/g, "")),
-      },
-      embeds: [
-        {
-          title: resolvedTitle.slice(0, 250),
-          description:
-            resolvedDescription.length > 4000
-              ? `${resolvedDescription.slice(0, 3997)}...`
-              : resolvedDescription,
-          color,
-          fields: embedFields.slice(0, 25),
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    },
+    color,
+    fields,
+    variables,
+    force,
+    content,
   });
 };
 
@@ -14375,6 +15450,45 @@ const fetchAllPages = async (path) => {
   });
 
   return results;
+};
+
+const NOTAMS_API_PATH_CANDIDATES = ["/notams", "/notam"];
+
+const isApiNotFoundError = (error) => /\b404\b/.test(String(error?.message || ""));
+
+const fetchNotamsPages = async () => {
+  let lastError = null;
+
+  for (const basePath of NOTAMS_API_PATH_CANDIDATES) {
+    try {
+      return await fetchAllPages(`${basePath}?page[size]=100`);
+    } catch (error) {
+      lastError = error;
+      if (!isApiNotFoundError(error)) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error("Failed to load NOTAMs");
+};
+
+const requestNotamMutation = async ({ method, id = null, body } = {}) => {
+  let lastError = null;
+
+  for (const basePath of NOTAMS_API_PATH_CANDIDATES) {
+    const path = id ? `${basePath}/${encodeURIComponent(id)}` : basePath;
+    try {
+      return await apiRequest(path, { method, body });
+    } catch (error) {
+      lastError = error;
+      if (!isApiNotFoundError(error)) {
+        break;
+      }
+    }
+  }
+
+  throw lastError || new Error("Failed to process NOTAM request");
 };
 
 const resolveNextPageUrl = (meta = {}, sourcePath = "") => {
@@ -15028,6 +16142,14 @@ const loadPilotProfileById = async (pilotId, { seedPilot = null } = {}) => {
       name: String(node?.name || '').trim(),
       email: String(node?.email || '').trim(),
       rank: String(node?.rank?.name || node?.rank_name || '').trim(),
+      rankId: Number(node?.rank_id || node?.rank?.id || seedPilot?.rankId || 0) || null,
+      honoraryRankId: Number(node?.honorary_rank_id || node?.honoraryRankId || node?.honorary_rank?.id || 0) || null,
+      honoraryRankName: resolveHonoraryRankLabel(node),
+      roles: Array.isArray(node?.roles) ? node.roles : [],
+      staff_roles: Array.isArray(node?.staff_roles) ? node.staff_roles : Array.isArray(node?.staffRoles) ? node.staffRoles : [],
+      groups: Array.isArray(node?.groups) ? node.groups : [],
+      discordId: readDiscordIdFromPilot(node),
+      discordUsername: readDiscordUsernameFromPilot(node),
       hours,
       flights,
       joinedAt: String(node?.created_at || node?.joined_at || '').trim(),
@@ -18565,46 +19687,61 @@ const resolveUpcomingRawDate = (item) =>
 const mapUpcomingItem = (item) => {
   const rawDate = resolveUpcomingRawDate(item);
   const route = item?.route && typeof item.route === "object" ? item.route : {};
-  const aircraftValue =
-    String(item?.aircraft_name || item?.aircraft_type || "").trim() ||
+  const flightNumber =
+    String(item?.flight_number || item?.number || route?.flight_number || route?.number || "").trim() || "";
+  const callsign =
+    String(item?.callsign || route?.callsign || item?.flight_number || route?.flight_number || "").trim() || "";
+  const aircraftType =
+    String(item?.aircraft_type || item?.aircraft_name || route?.aircraft_type || route?.aircraft_name || "").trim() ||
     (typeof item?.aircraft === "string"
       ? String(item.aircraft).trim()
       : String(item?.aircraft?.name || item?.aircraft?.type || "").trim()) ||
     (typeof route?.aircraft === "string"
       ? String(route.aircraft).trim()
       : String(route?.aircraft?.name || route?.aircraft?.type || "").trim());
+  const aircraftRegistration =
+    String(item?.aircraft_registration || item?.registration || item?.aircraft?.registration || route?.aircraft?.registration || "").trim() ||
+    null;
+  const aircraftValue =
+    [aircraftType, aircraftRegistration].filter(Boolean).join(" ").trim() || aircraftType;
+
+  const departureCode =
+    String(
+      item?.departure_icao ||
+        item?.departure ||
+        item?.origin ||
+        item?.from ||
+        route?.departure_icao ||
+        route?.origin_icao ||
+        route?.departure ||
+        route?.origin ||
+        ""
+    ).trim() || "—";
+  const arrivalCode =
+    String(
+      item?.arrival_icao ||
+        item?.arrival ||
+        item?.destination ||
+        item?.to ||
+        route?.arrival_icao ||
+        route?.destination_icao ||
+        route?.arrival ||
+        route?.destination ||
+        ""
+    ).trim() || "—";
 
   return {
     id: Number(item?.id || 0) || Math.floor(Math.random() * 1_000_000_000),
-    flightNumber:
-      String(item?.callsign || item?.flight_number || item?.number || route?.callsign || route?.flight_number || "").trim() ||
-      "—",
-    departure:
-      String(
-        item?.departure_icao ||
-          item?.departure ||
-          item?.origin ||
-          item?.from ||
-          route?.departure_icao ||
-          route?.origin_icao ||
-          route?.departure ||
-          route?.origin ||
-          ""
-      ).trim() || "—",
-    arrival:
-      String(
-        item?.arrival_icao ||
-          item?.arrival ||
-          item?.destination ||
-          item?.to ||
-          route?.arrival_icao ||
-          route?.destination_icao ||
-          route?.arrival ||
-          route?.destination ||
-          ""
-      ).trim() || "—",
+    flightNumber: flightNumber || callsign || "—",
+    callsign: callsign || null,
+    departure: departureCode,
+    arrival: arrivalCode,
+    departureCode,
+    arrivalCode,
     scheduledDate: formatUpcomingDate(rawDate),
     scheduledTime: formatUpcomingTime(rawDate),
+    aircraftType: aircraftType || "—",
+    aircraftRegistration,
     aircraft: aircraftValue || "—",
     rawDate,
   };
@@ -20576,7 +21713,7 @@ app.get("/api/vamsys/notams", async (req, res) => {
 
   try {
     const context = await resolveCurrentPilotContext(req).catch(() => null);
-    const payload = await fetchAllPages("/notams?page[size]=100");
+    const payload = await fetchNotamsPages();
     const notams = (Array.isArray(payload) ? payload : [])
       .map((item) => serializeVamsysNotam(item))
       .map((item) => ({
@@ -20601,9 +21738,9 @@ app.get("/api/vamsys/notams", async (req, res) => {
         unreadMustRead: unread.filter((item) => item.mustRead).length,
       },
     });
-  } catch {
+  } catch (error) {
     res.status(502).json({
-      error: "Failed to load vAMSYS NOTAMs",
+      error: String(error?.message || "Failed to load vAMSYS NOTAMs"),
     });
   }
 });
@@ -21599,8 +22736,7 @@ app.post("/api/telegram-bot/profile", express.json({ limit: "256kb" }), async (r
     }
 
     const pireps = Array.isArray(pirepsRaw) ? pirepsRaw : [];
-    const accepted = pireps.filter((p) => ["accepted", "auto_accepted", "approved"].includes(String(p?.status || "").toLowerCase()));
-    const pirepSource = accepted.length ? accepted : pireps;
+    const pirepSource = pireps.filter((p) => isAcceptedPilotPirep(p));
 
     const vsRates = pirepSource.map((p) => Number(p?.landing_rate || 0)).filter((v) => Number.isFinite(v) && v !== 0);
     const avgVs = vsRates.length > 0 ? Math.round(vsRates.reduce((sum, v) => sum + v, 0) / vsRates.length) : null;
@@ -22287,13 +23423,13 @@ app.get("/api/admin/notams", async (_req, res) => {
   }
 
   try {
-    const payload = await fetchAllPages("/notams?page[size]=100");
+    const payload = await fetchNotamsPages();
     res.json({
       notams: payload,
     });
-  } catch {
+  } catch (error) {
     res.status(502).json({
-      error: "Failed to load NOTAMs",
+      error: String(error?.message || "Failed to load NOTAMs"),
     });
   }
 });
@@ -22305,7 +23441,7 @@ app.post("/api/admin/notams", async (req, res) => {
 
   try {
     const { title, content, type, priority, must_read, tag, url } = req.body || {};
-    const payload = await apiRequest("/notams", {
+    const payload = await requestNotamMutation({
       method: "POST",
       body: {
         title,
@@ -22338,9 +23474,9 @@ app.post("/api/admin/notams", async (req, res) => {
       }).catch(() => {});
     }
     res.json(payload);
-  } catch {
+  } catch (error) {
     res.status(502).json({
-      error: "Failed to create NOTAM",
+      error: String(error?.message || "Failed to create NOTAM"),
     });
   }
 });
@@ -22351,10 +23487,11 @@ app.put("/api/admin/notams/:id", async (req, res) => {
   }
 
   try {
-    const id = encodeURIComponent(req.params.id);
+    const id = req.params.id;
     const { title, content, type, priority, must_read, tag, url } = req.body || {};
-    const payload = await apiRequest(`/notams/${id}`, {
+    const payload = await requestNotamMutation({
       method: "PUT",
+      id,
       body: {
         title,
         content,
@@ -22386,9 +23523,9 @@ app.put("/api/admin/notams/:id", async (req, res) => {
       }).catch(() => {});
     }
     res.json(payload);
-  } catch {
+  } catch (error) {
     res.status(502).json({
-      error: "Failed to update NOTAM",
+      error: String(error?.message || "Failed to update NOTAM"),
     });
   }
 });
@@ -22399,14 +23536,12 @@ app.delete("/api/admin/notams/:id", async (req, res) => {
   }
 
   try {
-    const id = encodeURIComponent(req.params.id);
-    await apiRequest(`/notams/${id}`, {
-      method: "DELETE",
-    });
+    const id = req.params.id;
+    await requestNotamMutation({ method: "DELETE", id });
     res.json({ ok: true });
-  } catch {
+  } catch (error) {
     res.status(502).json({
-      error: "Failed to delete NOTAM",
+      error: String(error?.message || "Failed to delete NOTAM"),
     });
   }
 });
@@ -23903,6 +25038,23 @@ app.post("/api/admin/routes", express.json({ limit: "2mb" }), async (req, res) =
   try {
     const payload = await buildAdminRoutePayload(req.body || {});
     const route = await apiRequest("/routes", { method: "POST", body: payload });
+
+    // Immediately re-read route detail from vAMSYS so auto-filled fields
+    // (route text, flight length, distance, etc.) are returned to the client.
+    const createdRouteId = Number(
+      route?.id ||
+      route?.route?.id ||
+      route?.data?.id ||
+      route?.route_id ||
+      0
+    ) || 0;
+
+    if (createdRouteId > 0) {
+      const syncedRoute = await buildAdminRouteDetail(createdRouteId).catch(() => null);
+      res.status(201).json({ ok: true, route, syncedRoute });
+      return;
+    }
+
     res.status(201).json({ ok: true, route });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
@@ -24988,6 +26140,7 @@ const server = app.listen(PORT, () => {
   console.log(`vAMSYS proxy listening on port ${PORT}`);
   startUnifiedCatalogSyncScheduler();
   startDashboardCatalogNightlyRefreshScheduler();
+  startDiscordWebhookAutomationScheduler();
   // Pre-warm admin bootstrap and overview so first navigation to admin panel is instant
   void loadAdminBootstrapCatalog().catch((err) => {
     console.warn("[admin-bootstrap] initial warmup failed:", String(err));

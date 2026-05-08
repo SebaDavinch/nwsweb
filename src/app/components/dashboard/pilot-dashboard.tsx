@@ -96,6 +96,18 @@ const formatDashboardDate = (value: string) => {
   return `${day}.${month}.${year}`;
 };
 
+const upcomingIcaoToCountryIso2 = (icao?: string | null) => {
+  const normalized = String(icao || "").trim().toUpperCase();
+  if (!normalized || normalized.length < 2) {
+    return null;
+  }
+  const prefix = normalized.slice(0, 2);
+  if (prefix === "UR" || prefix === "UW" || prefix === "UU") {
+    return "ru";
+  }
+  return null;
+};
+
 export function PilotDashboard() {
   const { isAuthenticated, isAuthLoading, pilot, isAdmin, logout } = useAuth();
   const { t } = useLanguage();
@@ -127,6 +139,7 @@ export function PilotDashboard() {
     upcomingFlights?: Array<{
       id: number;
       flightNumber: string;
+      callsign?: string | null;
       departure?: string;
       arrival?: string;
       departureCode?: string;
@@ -134,6 +147,8 @@ export function PilotDashboard() {
       scheduledDate?: string;
       scheduledTime?: string;
       departureTime?: string | null;
+      aircraftType?: string;
+      aircraftRegistration?: string | null;
       aircraft: string;
     }>;
     recentFlightsPreview?: Array<{
@@ -694,15 +709,42 @@ export function PilotDashboard() {
                                   </div>
                                   <div>
                                     <div className="flex items-center gap-2 flex-wrap">
-                                      <div className="font-bold text-lg">{booking.flightNumber}</div>
+                                      <div className="font-bold text-lg">
+                                        {booking.callsign && booking.flightNumber && booking.callsign !== booking.flightNumber
+                                          ? `${booking.flightNumber}/${booking.callsign}`
+                                          : booking.flightNumber}
+                                      </div>
                                       {upcomingBookings.length > 1 && upcomingBookings.indexOf(booking) > 0 ? (
                                         <Badge variant="outline" className="bg-white text-xs text-gray-600">
                                           +{upcomingBookings.indexOf(booking)}
                                         </Badge>
                                       ) : null}
                                     </div>
-                                    <div className="text-sm text-gray-600">
-                                      {booking.departureCode || booking.departure || "—"} <span className="text-gray-400">→</span> {booking.arrivalCode || booking.arrival || "—"}
+                                    <div className="text-sm text-gray-600 flex items-center gap-1.5">
+                                      {upcomingIcaoToCountryIso2(booking.departureCode || booking.departure) ? (
+                                        <img
+                                          src={`https://flagcdn.com/${upcomingIcaoToCountryIso2(booking.departureCode || booking.departure)}.svg`}
+                                          alt=""
+                                          className="h-3 w-4.5 rounded-[2px] object-cover"
+                                          loading="lazy"
+                                          decoding="async"
+                                        />
+                                      ) : null}
+                                      <span>{booking.departureCode || booking.departure || "—"}</span>
+                                      <span className="text-gray-400">→</span>
+                                      {upcomingIcaoToCountryIso2(booking.arrivalCode || booking.arrival) ? (
+                                        <img
+                                          src={`https://flagcdn.com/${upcomingIcaoToCountryIso2(booking.arrivalCode || booking.arrival)}.svg`}
+                                          alt=""
+                                          className="h-3 w-4.5 rounded-[2px] object-cover"
+                                          loading="lazy"
+                                          decoding="async"
+                                        />
+                                      ) : null}
+                                      <span>{booking.arrivalCode || booking.arrival || "—"}</span>
+                                    </div>
+                                    <div className="text-xs text-gray-500 mt-1">
+                                      {[booking.aircraftType || "", booking.aircraftRegistration || ""].filter(Boolean).join(" ") || booking.aircraft || "—"}
                                     </div>
                                     <div className="text-xs text-gray-500 mt-1">
                                       {booking.departureTime
@@ -725,10 +767,10 @@ export function PilotDashboard() {
                                     {t("dashboard.briefing")}
                                   </Button>
                                   <Button 
-                                    onClick={() => openDashboardTab("bookings")}
+                                    onClick={() => navigate(`/dashboard/booking/${booking.id}`)}
                                     className="bg-[#E31E24] hover:bg-[#c41a20] text-white flex-1 sm:flex-none"
                                   >
-                                    Manage booking
+                                    Просмотр букинга
                                   </Button>
                                 </div>
                               </div>
@@ -958,6 +1000,7 @@ export function PilotDashboard() {
                               size="sm"
                               className="h-7 px-2 text-xs text-gray-600"
                               onClick={() => setIsActivityWidgetExpanded((value) => !value)}
+                              aria-expanded={isActivityWidgetExpanded}
                             >
                               {isActivityWidgetExpanded ? "Collapse" : "Expand"}
                               <ChevronDown className={`ml-1 h-3.5 w-3.5 transition-transform ${isActivityWidgetExpanded ? "rotate-180" : "rotate-0"}`} />
@@ -1024,7 +1067,12 @@ export function PilotDashboard() {
                                 </Button>
                               </div>
                             ) : (
-                              <div className="text-sm text-gray-500">{t("dashboard.activities.widget.empty")}</div>
+                              <div className="space-y-3">
+                                <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3 text-sm text-gray-500">{t("dashboard.activities.widget.empty")}</div>
+                                <Button variant="outline" size="sm" onClick={() => navigate("/activities")}>
+                                  {t("dashboard.activities.widget.viewAll")}
+                                </Button>
+                              </div>
                             )}
                           </CardContent>
                         ) : null}

@@ -31,7 +31,6 @@ import {
   Building2,
   CalendarDays,
   Circle,
-  ListChecks,
   ChevronDown,
   ClipboardList,
   FileSearch2,
@@ -134,7 +133,7 @@ export function AdminLayout() {
     settings: true,
   });
   const [submenuOpen, setSubmenuOpen] = useState<Record<string, boolean>>({
-    events: true,
+    events: false,
   });
 
   const tr = useCallback((ru: string, en: string) => (language === "ru" ? ru : en), [language]);
@@ -178,14 +177,13 @@ export function AdminLayout() {
         id: "operations",
         label: tr("Операции", "Operations"),
         items: [
+          { page: "pilots", icon: Users, label: t("admin.nav.pilots") },
+          { page: "bookings", icon: ClipboardList, label: tr("Бронирования", "Bookings") },
           { page: "hubs", icon: MapPinned, label: tr("Хабы", "Hubs") },
           { page: "airports", icon: Building2, label: tr("Аэропорты", "Airports") },
           { page: "fleet", icon: Plane, label: t("admin.nav.fleet") },
           { page: "routes", icon: Route, label: tr("Маршруты", "Routes") },
-          { page: "callsign-checker", icon: ListChecks, label: tr("Проверка каллсайнов", "Callsign Checker") },
-          { page: "bookings", icon: ClipboardList, label: tr("Бронирования", "Bookings") },
           { page: "pireps", icon: FileSearch2, label: "PIREPs" },
-          { page: "pilots", icon: Users, label: t("admin.nav.pilots") },
           {
             page: "events",
             icon: CalendarDays,
@@ -218,13 +216,13 @@ export function AdminLayout() {
         id: "settings",
         label: tr("Настройки", "Settings"),
         items: [
+          { page: "acars", icon: Radio, label: tr("Кэш телеметрии", "Telemetry Cache") },
           { page: "discord-bot", icon: Bot, label: tr("Discord", "Discord") },
           { page: "telegram-bot", icon: Send, label: tr("Telegram", "Telegram") },
           { page: "settings", icon: Settings, label: tr("Настройки", "Settings") },
           { page: "staff", icon: ShieldCheck, label: tr("Персонал", "Staff") },
           { page: "audit-logs", icon: ClipboardList, label: tr("Журнал аудита", "Audit Log") },
           { page: "auth-logs", icon: LogOut, label: tr("Журнал авторизации", "Auth Log") },
-          { page: "acars", icon: Radio, label: tr("Кэш телеметрии", "Telemetry Cache") },
         ],
       },
     ],

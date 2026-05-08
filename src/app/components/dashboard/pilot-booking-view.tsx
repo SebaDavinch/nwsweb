@@ -932,7 +932,7 @@ export function PilotBookingView() {
                         <AlertDialogTrigger asChild>
                           <Button variant="outline" className="w-full justify-start border-orange-200 text-orange-700 hover:bg-orange-50" disabled={isCancelling}>
                             {isCancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                            Отмена + переброня
+                            Отмена + перебронь
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>

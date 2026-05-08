@@ -3,8 +3,8 @@ import { Link } from "react-router";
 import { useLanguage } from "../context/language-context";
 import { Button } from "./ui/button";
 import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
-import vatsimLogo from "@/assets/vatsim-logo.svg";
-import ragLogo from "@/app/components/admin/banner-generator/assets/rag-logo.svg";
+import vatsimLogo from "@/assets/Logo_VATSIM.png";
+import ragLogo from "@/assets/rag-logo-original.png";
 import { useSiteDesign } from "../hooks/use-site-design";
 
 export function Footer() {

@@ -1,7 +1,7 @@
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { useLanguage } from "../../context/language-context";
-import { Download, Edit, Eye, GitCompareArrows, Loader2, Plus, RefreshCw, Rocket, Search, Trash2, Upload, Wand2, X } from "lucide-react";
+import { CalendarClock, Download, Edit, Eye, Funnel, GitCompareArrows, Loader2, MoreHorizontal, Plus, RefreshCw, Rocket, Search, Trash2, Upload, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
@@ -27,6 +27,14 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Switch } from "../ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { fetchAdminBootstrap, getCachedAdminBootstrap } from "./admin-bootstrap-cache";
 import { AdminRoutePreviewMap } from "./admin-route-preview-map";
 
@@ -51,6 +59,14 @@ interface FleetOption {
   code?: string;
   airlineCode?: string;
   aircraftModels: string[];
+  registrations: string[];
+  searchText: string;
+}
+
+interface FleetTypeOption {
+  typeCode: string;
+  fleetIds: string[];
+  fleetNames: string[];
   registrations: string[];
   searchText: string;
 }
@@ -182,7 +198,6 @@ interface RouteCreateFormState {
   hidden: boolean;
 }
 
-type RouteEditorMode = "full" | "turbo";
 
 interface BulkRouteFormState {
   applyHub: boolean;
@@ -234,10 +249,10 @@ const ROUTE_STATUSES = ["active", "seasonal", "paused", "archived"];
 const ROUTE_PRIORITIES = ["normal", "high", "critical"];
 const ROUTE_SECTIONS = [
   { value: "default", label: "Catalog" },
+  { value: "ending-soon", label: "Ending soon" },
   { value: "soon-starting", label: "Soon starting" },
 ];
 const BULK_UNCHANGED = "__unchanged__";
-const ROUTE_EDITOR_MODE_KEY = "admin_routes_editor_mode";
 const ROUTE_DAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const ROUTE_DAY_LABELS: Record<string, string> = {
   mon: "Mon",
@@ -426,6 +441,25 @@ const normalizeRouteDistanceNm = (value?: string | null) => {
   return matched ? matched[0] : normalized;
 };
 
+const toAircraftTypeCode = (value?: string | null) => {
+  const model = String(value || "").trim().toUpperCase();
+  if (!model) return "";
+  if (/737\s*MAX\s*8|B38M/.test(model)) return "B38M";
+  if (/737\s*-?\s*8|B738/.test(model)) return "B738";
+  if (/737\s*-?\s*7|B737/.test(model)) return "B737";
+  if (/777\s*-?\s*300|B77W/.test(model)) return "B77W";
+  if (/777\s*-?\s*200|B772/.test(model)) return "B772";
+  if (/A321\s*NEO|A21N/.test(model)) return "A21N";
+  if (/A321/.test(model)) return "A321";
+  if (/A320\s*NEO|A20N/.test(model)) return "A20N";
+  if (/A320/.test(model)) return "A320";
+  if (/A319/.test(model)) return "A319";
+  if (/A330\s*-?\s*300|A333/.test(model)) return "A333";
+  if (/A330\s*-?\s*200|A332/.test(model)) return "A332";
+  if (/E190|ERJ\s*190/.test(model)) return "E190";
+  return model.replace(/[^A-Z0-9]/g, "").slice(0, 4);
+};
+
 const createRouteEditorFormState = (route?: AdminRouteItem | null): RouteEditorFormState => ({
   hubId: String(route?.meta?.hubId || ""),
   status: String(route?.meta?.status || "active"),
@@ -484,7 +518,7 @@ const createDefaultRouteCreateFormState = (): RouteCreateFormState => ({
   liveTags: "",
   liveHidden: false,
   fleetIds: [],
-  serviceDays: ["mon", "tue", "wed", "thu", "fri"],
+  serviceDays: [],
   hubId: "",
   status: "active",
   priority: "normal",
@@ -652,46 +686,46 @@ const buildRouteMetaPayload = (state: RouteEditorFormState) => ({
 const buildRouteUpdatePayload = (state: RouteLiveFormState) => ({
   flightNumber: state.flightNumber,
   callsign: state.callsign,
-  type: state.type,
-  departureTimeUtc: state.departureTimeUtc,
-  arrivalTimeUtc: state.arrivalTimeUtc,
+  ...(state.type.trim() ? { type: state.type } : {}),
+  ...(state.departureTimeUtc.trim() ? { departureTimeUtc: state.departureTimeUtc } : {}),
+  ...(state.arrivalTimeUtc.trim() ? { arrivalTimeUtc: state.arrivalTimeUtc } : {}),
   startDate: state.startDate,
   endDate: state.endDate,
-  duration: state.duration,
-  distanceNm: state.distanceNm,
+  ...(state.duration.trim() ? { duration: state.duration } : {}),
+  ...(state.distanceNm.trim() ? { distanceNm: state.distanceNm } : {}),
   ...(state.routeText.trim() ? { routeText: state.routeText } : {}),
   remarks: state.routeRemarks,
   routeNotes: state.routeNotes,
-  flightLevel: state.flightLevel,
-  costIndex: state.costIndex,
-  liveTags: state.liveTags,
-  hidden: state.liveHidden,
+  ...(state.flightLevel.trim() ? { flightLevel: state.flightLevel } : {}),
+  ...(state.costIndex.trim() ? { costIndex: state.costIndex } : {}),
+  ...(state.liveTags.trim() ? { liveTags: state.liveTags } : {}),
+  ...(state.liveHidden ? { hidden: true } : {}),
   fleetIds: state.fleetIds,
-  serviceDays: state.serviceDays,
+  ...(state.serviceDays.length > 0 ? { serviceDays: state.serviceDays } : {}),
 });
 
 const buildRouteCreatePayload = (state: RouteCreateFormState) => ({
   flightNumber: state.flightNumber,
   callsign: state.callsign,
-  type: state.type,
+  ...(state.type.trim() ? { type: state.type } : {}),
   departureCode: state.departureCode,
   arrivalCode: state.arrivalCode,
-  departureTimeUtc: state.departureTimeUtc,
-  arrivalTimeUtc: state.arrivalTimeUtc,
+  ...(state.departureTimeUtc.trim() ? { departureTimeUtc: state.departureTimeUtc } : {}),
+  ...(state.arrivalTimeUtc.trim() ? { arrivalTimeUtc: state.arrivalTimeUtc } : {}),
   startDate: state.startDate,
   endDate: state.endDate,
-  duration: state.duration,
-  distanceNm: state.distanceNm,
+  ...(state.duration.trim() ? { duration: state.duration } : {}),
+  ...(state.distanceNm.trim() ? { distanceNm: state.distanceNm } : {}),
   ...(state.routeText.trim() ? { routeText: state.routeText } : {}),
   remarks: state.routeRemarks,
   routeNotes: state.routeNotes,
-  flightLevel: state.flightLevel,
-  costIndex: state.costIndex,
-  fuelPolicy: state.fuelPolicy,
-  liveTags: state.liveTags,
-  hidden: state.liveHidden,
+  ...(state.flightLevel.trim() ? { flightLevel: state.flightLevel } : {}),
+  ...(state.costIndex.trim() ? { costIndex: state.costIndex } : {}),
+  ...(state.fuelPolicy.trim() ? { fuelPolicy: state.fuelPolicy } : {}),
+  ...(state.liveTags.trim() ? { liveTags: state.liveTags } : {}),
+  ...(state.liveHidden ? { hidden: true } : {}),
   fleetIds: state.fleetIds,
-  serviceDays: state.serviceDays,
+  ...(state.serviceDays.length > 0 ? { serviceDays: state.serviceDays } : {}),
 });
 
 const buildCreateRouteMetaPayload = (state: RouteCreateFormState) =>
@@ -795,10 +829,12 @@ export function AdminRoutesManagement() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [sectionFilter, setSectionFilter] = useState("all");
   const [hubFilter, setHubFilter] = useState("all");
+  const [showCompactFilters, setShowCompactFilters] = useState(false);
   const [selectedRouteIds, setSelectedRouteIds] = useState<number[]>([]);
   const [editingRoute, setEditingRoute] = useState<AdminRouteItem | null>(null);
   const [routeDetail, setRouteDetail] = useState<AdminRouteDetail | null>(null);
-  const [editorMode, setEditorMode] = useState<RouteEditorMode>("full");
+  const [showAdvancedEditorFields, setShowAdvancedEditorFields] = useState(false);
+  const [showAdvancedCreateFields, setShowAdvancedCreateFields] = useState(false);
   const [isRouteDetailLoading, setIsRouteDetailLoading] = useState(false);
   const [isSavingRouteMeta, setIsSavingRouteMeta] = useState(false);
   const [isClearingRouteMeta, setIsClearingRouteMeta] = useState(false);
@@ -858,29 +894,10 @@ export function AdminRoutesManagement() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const savedEditorMode = window.localStorage.getItem(ROUTE_EDITOR_MODE_KEY);
-    if (savedEditorMode === "full" || savedEditorMode === "turbo") {
-      setEditorMode(savedEditorMode);
-    }
-  }, []);
-
-  useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const requestedMode = params.get("mode");
     const requestedSection = params.get("section");
 
-    if (requestedMode === "full" || requestedMode === "turbo") {
-      setEditorMode(requestedMode);
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(ROUTE_EDITOR_MODE_KEY, requestedMode);
-      }
-    }
-
-    if (requestedSection === "all" || requestedSection === "default" || requestedSection === "soon-starting") {
+    if (requestedSection === "all" || requestedSection === "default" || requestedSection === "ending-soon" || requestedSection === "soon-starting") {
       setSectionFilter(requestedSection);
     }
   }, [location.search]);
@@ -949,25 +966,64 @@ export function AdminRoutesManagement() {
     [fleets]
   );
 
+  const fleetTypeOptions = useMemo(() => {
+    const map = new Map<string, FleetTypeOption>();
+    fleetOptions.forEach((fleet) => {
+      const models = Array.isArray(fleet.aircraftModels) && fleet.aircraftModels.length > 0
+        ? fleet.aircraftModels
+        : [fleet.code || fleet.name || ""];
+      models.forEach((model) => {
+        const typeCode = toAircraftTypeCode(model);
+        if (!typeCode) return;
+        const current = map.get(typeCode) || {
+          typeCode,
+          fleetIds: [],
+          fleetNames: [],
+          registrations: [],
+          searchText: "",
+        };
+        if (!current.fleetIds.includes(fleet.id)) {
+          current.fleetIds.push(fleet.id);
+        }
+        if (!current.fleetNames.includes(fleet.name)) {
+          current.fleetNames.push(fleet.name);
+        }
+        (fleet.registrations || []).forEach((reg) => {
+          if (!current.registrations.includes(reg)) {
+            current.registrations.push(reg);
+          }
+        });
+        current.searchText = [
+          current.typeCode,
+          ...current.fleetNames,
+          ...current.registrations,
+        ].join(" ").toLowerCase();
+        map.set(typeCode, current);
+      });
+    });
+
+    return Array.from(map.values()).sort((left, right) => left.typeCode.localeCompare(right.typeCode));
+  }, [fleetOptions]);
+
   const createFleetSearchTokens = useMemo(() => normalizeFleetSearchTokens(createFleetSearch), [createFleetSearch]);
 
-  const filteredCreateFleetOptions = useMemo(() => {
+  const filteredCreateFleetTypeOptions = useMemo(() => {
     if (createFleetSearchTokens.length === 0) {
-      return fleetOptions;
+      return fleetTypeOptions;
     }
 
-    return fleetOptions.filter((fleet) => createFleetSearchTokens.every((token) => fleet.searchText.includes(token)));
-  }, [createFleetSearchTokens, fleetOptions]);
+    return fleetTypeOptions.filter((fleetType) => createFleetSearchTokens.every((token) => fleetType.searchText.includes(token)));
+  }, [createFleetSearchTokens, fleetTypeOptions]);
 
   const liveFleetSearchTokens = useMemo(() => normalizeFleetSearchTokens(liveFleetSearch), [liveFleetSearch]);
 
-  const filteredLiveFleetOptions = useMemo(() => {
+  const filteredLiveFleetTypeOptions = useMemo(() => {
     if (liveFleetSearchTokens.length === 0) {
-      return fleetOptions;
+      return fleetTypeOptions;
     }
 
-    return fleetOptions.filter((fleet) => liveFleetSearchTokens.every((token) => fleet.searchText.includes(token)));
-  }, [fleetOptions, liveFleetSearchTokens]);
+    return fleetTypeOptions.filter((fleetType) => liveFleetSearchTokens.every((token) => fleetType.searchText.includes(token)));
+  }, [fleetTypeOptions, liveFleetSearchTokens]);
 
   const airportLookupByCode = useMemo(() => {
     const lookup = new Map<string, AirportItem>();
@@ -1008,6 +1064,22 @@ export function AdminRoutesManagement() {
       .filter((route) => String(route.meta?.section || "default") === "soon-starting")
       .sort((left, right) => String(left.flightNumber || left.id).localeCompare(String(right.flightNumber || right.id)));
   }, [routes]);
+
+  const endingSoonRoutes = useMemo(() => {
+    return routes
+      .filter((route) => String(route.meta?.section || "default") === "ending-soon")
+      .sort((left, right) => String(left.flightNumber || left.id).localeCompare(String(right.flightNumber || right.id)));
+  }, [routes]);
+
+  const hasExtraFiltersActive = useMemo(() => {
+    return airlineFilter !== "all" || statusFilter !== "all" || priorityFilter !== "all" || hubFilter !== "all";
+  }, [airlineFilter, hubFilter, priorityFilter, statusFilter]);
+
+  useEffect(() => {
+    if (hasExtraFiltersActive) {
+      setShowCompactFilters(true);
+    }
+  }, [hasExtraFiltersActive]);
 
   const selectedRoutes = useMemo(() => {
     const selectedSet = new Set(selectedRouteIds);
@@ -1077,6 +1149,7 @@ export function AdminRoutesManagement() {
   const openEditor = (route: AdminRouteItem) => {
     setRouteDetail(route.detail || null);
     setEditingRoute(route);
+    setShowAdvancedEditorFields(false);
     setFormState(createRouteEditorFormState(route));
     setLiveFormState(createRouteLiveFormState(route, route.detail || null));
     setLiveFleetSearch("");
@@ -1084,15 +1157,9 @@ export function AdminRoutesManagement() {
 
   const openCreateDialog = () => {
     setCreateFormState(createDefaultRouteCreateFormState());
+    setShowAdvancedCreateFields(false);
     setCreateFleetSearch("");
     setCreateDialogOpen(true);
-  };
-
-  const handleEditorModeChange = (nextMode: RouteEditorMode) => {
-    setEditorMode(nextMode);
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(ROUTE_EDITOR_MODE_KEY, nextMode);
-    }
   };
 
   const toggleCreateServiceDay = (day: string, checked: boolean) => {
@@ -1104,13 +1171,20 @@ export function AdminRoutesManagement() {
     }));
   };
 
-  const toggleCreateFleet = (fleetId: string, checked: boolean) => {
-    setCreateFormState((current) => ({
-      ...current,
-      fleetIds: checked
-        ? Array.from(new Set([...current.fleetIds, fleetId]))
-        : current.fleetIds.filter((item) => item !== fleetId),
-    }));
+  const toggleCreateFleetType = (typeOption: FleetTypeOption, checked: boolean) => {
+    setCreateFormState((current) => {
+      if (checked) {
+        return {
+          ...current,
+          fleetIds: Array.from(new Set([...current.fleetIds, ...typeOption.fleetIds])),
+        };
+      }
+      const removeSet = new Set(typeOption.fleetIds);
+      return {
+        ...current,
+        fleetIds: current.fleetIds.filter((item) => !removeSet.has(item)),
+      };
+    });
   };
 
   const toggleLiveServiceDay = (day: string, checked: boolean) => {
@@ -1122,13 +1196,20 @@ export function AdminRoutesManagement() {
     }));
   };
 
-  const toggleLiveFleet = (fleetId: string, checked: boolean) => {
-    setLiveFormState((current) => ({
-      ...current,
-      fleetIds: checked
-        ? Array.from(new Set([...current.fleetIds, fleetId]))
-        : current.fleetIds.filter((item) => item !== fleetId),
-    }));
+  const toggleLiveFleetType = (typeOption: FleetTypeOption, checked: boolean) => {
+    setLiveFormState((current) => {
+      if (checked) {
+        return {
+          ...current,
+          fleetIds: Array.from(new Set([...current.fleetIds, ...typeOption.fleetIds])),
+        };
+      }
+      const removeSet = new Set(typeOption.fleetIds);
+      return {
+        ...current,
+        fleetIds: current.fleetIds.filter((item) => !removeSet.has(item)),
+      };
+    });
   };
 
   const createRoute = async () => {
@@ -1568,8 +1649,9 @@ export function AdminRoutesManagement() {
 
       <Card className="overflow-hidden border-none bg-[radial-gradient(circle_at_top_left,_rgba(227,30,36,0.16),_transparent_36%),linear-gradient(135deg,_#fff7f7,_#ffffff_58%,_#f8fafc)] shadow-sm">
         <CardContent className="space-y-5 p-5">
-          <div className="flex flex-col gap-5 2xl:flex-row 2xl:items-start 2xl:justify-between">
-            <div className="space-y-2">
+          <div className="space-y-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="space-y-2">
               <div className="inline-flex items-center rounded-full border border-red-200 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em] text-red-700">
                 Route control
               </div>
@@ -1581,85 +1663,125 @@ export function AdminRoutesManagement() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white/85 p-2 shadow-sm backdrop-blur">
               <Button className="bg-[#E31E24] hover:bg-[#c41a20]" onClick={openCreateDialog}>
                 <Plus className="mr-2 h-4 w-4" />
                 Create route
               </Button>
-              <Button variant="outline" onClick={() => loadData({ silent: true, force: true })} disabled={isLoading || isRefreshing}>
-                <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
-              <Button variant="outline" onClick={() => exportRoutes("filtered")} disabled={filteredRoutes.length === 0}>
-                <Download className="mr-2 h-4 w-4" />
-                Export filtered
-              </Button>
-              <Button variant="outline" onClick={() => exportRoutes("selected")} disabled={selectedRoutes.length === 0}>
-                <Download className="mr-2 h-4 w-4" />
-                Export selected
-              </Button>
-              <Button variant="outline" onClick={() => importInputRef.current?.click()}>
-                <Upload className="mr-2 h-4 w-4" />
-                Import patch
-              </Button>
-              <Button onClick={openBulkDialog} disabled={selectedRouteIds.length === 0}>
-                <Wand2 className="mr-2 h-4 w-4" />
-                Bulk patch
-              </Button>
             </div>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.6fr)_repeat(4,minmax(0,0.78fr))]">
-            <div className="relative w-full">
+          <div className="rounded-2xl border border-white/90 bg-white/80 p-2 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant={sectionFilter === "default" ? "default" : "ghost"} size="sm" onClick={() => setSectionFilter("default")}>
+                Default
+              </Button>
+              <Button variant={sectionFilter === "ending-soon" ? "default" : "ghost"} size="sm" onClick={() => setSectionFilter("ending-soon")}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                Ending soon
+                <Badge variant="secondary" className="ml-2">{endingSoonRoutes.length}</Badge>
+              </Button>
+              <Button variant={sectionFilter === "soon-starting" ? "default" : "ghost"} size="sm" onClick={() => setSectionFilter("soon-starting")}>
+                Starting soon
+                <Badge variant="secondary" className="ml-2">{soonStartingRoutes.length}</Badge>
+              </Button>
+              <Button variant={sectionFilter === "all" ? "default" : "ghost"} size="sm" onClick={() => setSectionFilter("all")}>All</Button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="relative w-full lg:flex-1">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search flight, airline, airport, hub or notes..." className="border-white bg-white pl-9 shadow-sm" />
             </div>
-            <Select value={airlineFilter} onValueChange={setAirlineFilter}>
-              <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Airline" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All airlines</SelectItem>
-                {airlineOptions.map((airlineCode) => <SelectItem key={airlineCode} value={airlineCode}>{airlineCode}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Status" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                {ROUTE_STATUSES.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Priority" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
-                {ROUTE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={sectionFilter} onValueChange={setSectionFilter}>
-              <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Section" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All sections</SelectItem>
-                {ROUTE_SECTIONS.map((section) => <SelectItem key={section.value} value={section.value}>{section.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={hubFilter} onValueChange={setHubFilter}>
-              <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Hub" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All hubs</SelectItem>
-                {hubOptions.map((hub) => <SelectItem key={hub.id} value={hub.id}>{hub.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="icon" onClick={() => loadData({ silent: true, force: true })} disabled={isLoading || isRefreshing}>
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              </Button>
+              <Button variant="outline" size="icon" onClick={openBulkDialog} disabled={selectedRouteIds.length === 0}>
+                <Wand2 className="h-4 w-4" />
+              </Button>
+              <Button variant={showCompactFilters || hasExtraFiltersActive ? "default" : "outline"} size="icon" onClick={() => setShowCompactFilters((current) => !current)}>
+                <Funnel className="h-4 w-4" />
+              </Button>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="icon">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel>Extra actions</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => exportRoutes("filtered")} disabled={filteredRoutes.length === 0}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export filtered
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => exportRoutes("selected")} disabled={selectedRoutes.length === 0}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export selected
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => importInputRef.current?.click()}>
+                    <Upload className="mr-2 h-4 w-4" />
+                    Import patch
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white/70 p-2">
-            <span className="px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500">Airlines</span>
-            <Button variant={airlineFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setAirlineFilter("all")}>All</Button>
-            {airlineOptions.map((airlineCode) => (
-              <Button key={airlineCode} variant={airlineFilter === airlineCode ? "default" : "outline"} size="sm" onClick={() => setAirlineFilter(airlineCode)}>
-                {airlineCode} ({routeCountsByAirline[airlineCode] || 0})
-              </Button>
-            ))}
-          </div>
+          {showCompactFilters || hasExtraFiltersActive ? (
+            <div className="grid gap-3 xl:grid-cols-[minmax(0,1.2fr)_repeat(4,minmax(0,0.8fr))]">
+              <Select value={airlineFilter} onValueChange={setAirlineFilter}>
+                <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Airline" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All airlines</SelectItem>
+                  {airlineOptions.map((airlineCode) => <SelectItem key={airlineCode} value={airlineCode}>{airlineCode}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Status" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  {ROUTE_STATUSES.map((status) => <SelectItem key={status} value={status}>{status}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+                <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Priority" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All priorities</SelectItem>
+                  {ROUTE_PRIORITIES.map((priority) => <SelectItem key={priority} value={priority}>{priority}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={sectionFilter} onValueChange={setSectionFilter}>
+                <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Section" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All sections</SelectItem>
+                  {ROUTE_SECTIONS.map((section) => <SelectItem key={section.value} value={section.value}>{section.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={hubFilter} onValueChange={setHubFilter}>
+                <SelectTrigger className="w-full border-white bg-white shadow-sm"><SelectValue placeholder="Hub" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All hubs</SelectItem>
+                  {hubOptions.map((hub) => <SelectItem key={hub.id} value={hub.id}>{hub.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
+          {showCompactFilters || hasExtraFiltersActive ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-white/80 bg-white/70 p-2">
+              <span className="px-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-500">Airlines</span>
+              <Button variant={airlineFilter === "all" ? "default" : "outline"} size="sm" onClick={() => setAirlineFilter("all")}>All</Button>
+              {airlineOptions.map((airlineCode) => (
+                <Button key={airlineCode} variant={airlineFilter === airlineCode ? "default" : "outline"} size="sm" onClick={() => setAirlineFilter(airlineCode)}>
+                  {airlineCode} ({routeCountsByAirline[airlineCode] || 0})
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -1818,7 +1940,7 @@ export function AdminRoutesManagement() {
       ) : null}
 
       <Dialog open={Boolean(editingRoute)} onOpenChange={(open) => !open && setEditingRoute(null)}>
-        <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-5xl">
+        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="border-b border-gray-200 px-6 py-5">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="space-y-2">
@@ -1836,8 +1958,6 @@ export function AdminRoutesManagement() {
               </div>
               <div className="space-y-3 lg:max-w-md">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button variant={editorMode === "full" ? "default" : "outline"} size="sm" onClick={() => handleEditorModeChange("full")}>Full</Button>
-                  <Button variant={editorMode === "turbo" ? "default" : "outline"} size="sm" onClick={() => handleEditorModeChange("turbo")}>Turbo</Button>
                   {editorApplyTargetIds.length > 1 ? <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">{editorApplyTargetIds.length} routes ready for bulk apply</Badge> : null}
                 </div>
                 <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -1847,82 +1967,59 @@ export function AdminRoutesManagement() {
               </div>
             </div>
           </DialogHeader>
-          <ScrollArea className="max-h-[74vh]">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-6 px-6 py-5">
-              {editorMode === "full" ? (
-                <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Live route snapshot</div>
-                      <div className="text-sm text-gray-500">Reference data pulled from vAMSYS for the current route.</div>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      {isRouteDetailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      <span>{routeDetail?.source ? `Source: ${routeDetail.source}` : "Source: vAMSYS"}</span>
-                    </div>
+              <div className="rounded-2xl border border-gray-200 bg-gray-50/80 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-gray-900">Live route snapshot</div>
+                    <div className="text-sm text-gray-500">Reference data pulled from vAMSYS for the current route.</div>
                   </div>
-                  <Separator className="my-4" />
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Flight</div>
-                      <div className="mt-1 text-sm font-medium text-gray-900">{formatRouteTextValue(routeDetail?.flightNumber || editingRoute?.flightNumber)}</div>
-                      <div className="text-xs text-gray-500">Callsign: {formatRouteTextValue(routeDetail?.callsign || editingRoute?.flightNumber)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Route</div>
-                      <div className="mt-1 text-sm font-medium text-gray-900">{editingRoute?.fromCode || routeDetail?.departureCode || "—"} → {editingRoute?.toCode || routeDetail?.arrivalCode || "—"}</div>
-                      <div className="text-xs text-gray-500">{formatRouteTextValue(routeDetail?.departureName || editingRoute?.fromName)} / {formatRouteTextValue(routeDetail?.arrivalName || editingRoute?.toName)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Performance</div>
-                      <div className="mt-1 text-sm font-medium text-gray-900">{formatRouteTextValue(routeDetail?.distance || editingRoute?.distance)}</div>
-                      <div className="text-xs text-gray-500">Duration: {formatRouteTextValue(routeDetail?.duration || editingRoute?.duration)}</div>
-                    </div>
-                    <div>
-                      <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Type</div>
-                      <div className="mt-1 text-sm font-medium capitalize text-gray-900">{formatRouteTextValue(routeDetail?.type || editingRoute?.detail?.type)}</div>
-                      <div className="text-xs text-gray-500">Frequency: {formatRouteTextValue(routeDetail?.frequency || editingRoute?.detail?.frequency)}</div>
-                    </div>
+                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                    {isRouteDetailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    <span>{routeDetail?.source ? `Source: ${routeDetail.source}` : "Source: vAMSYS"}</span>
                   </div>
                 </div>
-              ) : (
-                <div className="rounded-2xl border border-gray-200 bg-gradient-to-r from-white via-gray-50 to-red-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-gray-900">Turbo summary</div>
-                      <div className="text-sm text-gray-500">Short mode keeps only the key route context and editable local fields.</div>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      {isRouteDetailLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      <span>{formatRouteTextValue(routeDetail?.departureCode || editingRoute?.fromCode)} → {formatRouteTextValue(routeDetail?.arrivalCode || editingRoute?.toCode)}</span>
-                    </div>
+                <Separator className="my-4" />
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Flight</div>
+                    <div className="mt-1 text-sm font-medium text-gray-900">{formatRouteTextValue(routeDetail?.flightNumber || editingRoute?.flightNumber)}</div>
+                    <div className="text-xs text-gray-500">Callsign: {formatRouteTextValue(routeDetail?.callsign || editingRoute?.flightNumber)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Route</div>
+                    <div className="mt-1 text-sm font-medium text-gray-900">{editingRoute?.fromCode || routeDetail?.departureCode || "—"} → {editingRoute?.toCode || routeDetail?.arrivalCode || "—"}</div>
+                    <div className="text-xs text-gray-500">{formatRouteTextValue(routeDetail?.departureName || editingRoute?.fromName)} / {formatRouteTextValue(routeDetail?.arrivalName || editingRoute?.toName)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Performance</div>
+                    <div className="mt-1 text-sm font-medium text-gray-900">{formatRouteTextValue(routeDetail?.distance || editingRoute?.distance)}</div>
+                    <div className="text-xs text-gray-500">Duration: {formatRouteTextValue(routeDetail?.duration || editingRoute?.duration)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.14em] text-gray-400">Type</div>
+                    <div className="mt-1 text-sm font-medium capitalize text-gray-900">{formatRouteTextValue(routeDetail?.type || editingRoute?.detail?.type)}</div>
+                    <div className="text-xs text-gray-500">Frequency: {formatRouteTextValue(routeDetail?.frequency || editingRoute?.detail?.frequency)}</div>
                   </div>
                 </div>
-              )}
+              </div>
 
-              <div className={`grid gap-6 ${editorMode === "full" ? "xl:grid-cols-[1.25fr_0.95fr]" : "xl:grid-cols-[1.35fr_0.85fr]"}`}>
+              <div className="grid gap-6 xl:grid-cols-[1.25fr_0.95fr]">
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-gray-200 bg-white p-5">
                     <div className="mb-4">
                       <h3 className="text-base font-semibold text-gray-900">Basic Information</h3>
-                      <p className="text-sm text-gray-500">{editorMode === "full" ? "Core live route identity plus local hub placement." : "Turbo mode keeps the key live route controls plus local placement."}</p>
+                      <p className="text-sm text-gray-500">Core live route identity plus local hub placement.</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label>Flight number</Label>
-                        <Input value={liveFormState.flightNumber} onChange={(event) => setLiveFormState((current) => ({ ...current, flightNumber: event.target.value.toUpperCase() }))} placeholder="NWS101" />
+                        <Input value={liveFormState.flightNumber} onChange={(event) => setLiveFormState((current) => ({ ...current, flightNumber: event.target.value.toUpperCase() }))} placeholder="N4710" />
                       </div>
                       <div className="space-y-2">
                         <Label>Callsign</Label>
-                        <Input value={liveFormState.callsign} onChange={(event) => setLiveFormState((current) => ({ ...current, callsign: event.target.value.toUpperCase() }))} placeholder="NWS101" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Airline</Label>
-                        <Input value={routeDetail?.airlineCode || editingRoute?.airlineCode || ""} readOnly disabled />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Type</Label>
-                        <Input value={liveFormState.type} onChange={(event) => setLiveFormState((current) => ({ ...current, type: event.target.value }))} placeholder="scheduled" />
+                        <Input value={liveFormState.callsign} onChange={(event) => setLiveFormState((current) => ({ ...current, callsign: event.target.value.toUpperCase() }))} placeholder="NWS710" />
                       </div>
                       <div className="space-y-2">
                         <Label>Departure</Label>
@@ -1946,32 +2043,22 @@ export function AdminRoutesManagement() {
                     </div>
                   </div>
 
-                  {editorMode === "full" ? (
-                    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                      <div className="mb-4">
-                        <h3 className="text-base font-semibold text-gray-900">Dates and Times</h3>
-                        <p className="text-sm text-gray-500">Editable live schedule fields for the current route.</p>
+                  <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                    <div className="mb-4">
+                      <h3 className="text-base font-semibold text-gray-900">Validity</h3>
+                      <p className="text-sm text-gray-500">Route start/end execution dates.</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Start date</Label>
+                        <Input value={liveFormState.startDate} onChange={(event) => setLiveFormState((current) => ({ ...current, startDate: event.target.value }))} placeholder="2026-04-18 or ISO datetime" />
                       </div>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="space-y-2">
-                          <Label>Start date</Label>
-                          <Input value={liveFormState.startDate} onChange={(event) => setLiveFormState((current) => ({ ...current, startDate: event.target.value }))} placeholder="2026-04-18 or ISO datetime" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>End date</Label>
-                          <Input value={liveFormState.endDate} onChange={(event) => setLiveFormState((current) => ({ ...current, endDate: event.target.value }))} placeholder="2026-10-31 or ISO datetime" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Departure UTC</Label>
-                          <Input value={liveFormState.departureTimeUtc} onChange={(event) => setLiveFormState((current) => ({ ...current, departureTimeUtc: event.target.value }))} placeholder="14:30:00" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Arrival UTC</Label>
-                          <Input value={liveFormState.arrivalTimeUtc} onChange={(event) => setLiveFormState((current) => ({ ...current, arrivalTimeUtc: event.target.value }))} placeholder="18:45:00" />
-                        </div>
+                      <div className="space-y-2">
+                        <Label>End date</Label>
+                        <Input value={liveFormState.endDate} onChange={(event) => setLiveFormState((current) => ({ ...current, endDate: event.target.value }))} placeholder="2026-10-31 or ISO datetime" />
                       </div>
                     </div>
-                  ) : null}
+                  </div>
 
                   <div className="rounded-2xl border border-gray-200 bg-white p-5">
                     <div className="mb-4">
@@ -2037,20 +2124,7 @@ export function AdminRoutesManagement() {
                         <Label>Admin notes</Label>
                         <Textarea value={formState.notes} onChange={(event) => setFormState((current) => ({ ...current, notes: event.target.value }))} className="min-h-[120px]" placeholder="Placement notes, release context, rollout instructions" />
                       </div>
-                      <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                        <div className="space-y-2">
-                          <Label>Website tags</Label>
-                          <Input value={formState.tags} onChange={(event) => setFormState((current) => ({ ...current, tags: event.target.value }))} placeholder="promo, eu-summer, longhaul" />
-                          <div className="text-xs text-gray-500">Comma or line separated.</div>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 md:min-w-[220px]">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">Hide in website overlay</div>
-                            <div className="text-xs text-gray-500">Keeps the route in admin while removing it from public surfacing.</div>
-                          </div>
-                          <Switch checked={formState.hidden} onCheckedChange={(checked) => setFormState((current) => ({ ...current, hidden: Boolean(checked) }))} />
-                        </div>
-                      </div>
+                      <div className="text-xs text-gray-500">Tags and website visibility toggles are hidden in the simplified mode.</div>
                     </div>
                   </div>
                 </div>
@@ -2058,8 +2132,13 @@ export function AdminRoutesManagement() {
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-gray-200 bg-white p-5">
                     <div className="mb-4">
-                      <h3 className="text-base font-semibold text-gray-900">Live Flight Details and Placement</h3>
-                      <p className="text-sm text-gray-500">Overlay placement stays at the top; live route parameters are editable below.</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-base font-semibold text-gray-900">Live Flight Details and Placement</h3>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setShowAdvancedEditorFields((v) => !v)}>
+                          {showAdvancedEditorFields ? "Hide Advanced" : "Advanced"}
+                        </Button>
+                      </div>
+                      <p className="text-sm text-gray-500">Mass-edit fields are shown by default. Advanced includes the rest of API fields.</p>
                     </div>
                     <div className="space-y-4">
                       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
@@ -2103,34 +2182,51 @@ export function AdminRoutesManagement() {
                             <Input value={liveFormState.distanceNm} onChange={(event) => setLiveFormState((current) => ({ ...current, distanceNm: event.target.value.replace(/[^0-9.]/g, "") }))} placeholder="1480" />
                           </div>
                         </div>
+                        {showAdvancedEditorFields ? (
+                          <>
+                            <div className="space-y-2">
+                              <Label>Route type</Label>
+                              <Input value={liveFormState.type} onChange={(event) => setLiveFormState((current) => ({ ...current, type: event.target.value }))} placeholder="scheduled" />
+                            </div>
+                            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+                              <div className="space-y-2">
+                                <Label>Departure UTC</Label>
+                                <Input value={liveFormState.departureTimeUtc} onChange={(event) => setLiveFormState((current) => ({ ...current, departureTimeUtc: event.target.value }))} placeholder="10:20:00" />
+                              </div>
+                              <div className="space-y-2">
+                                <Label>Arrival UTC</Label>
+                                <Input value={liveFormState.arrivalTimeUtc} onChange={(event) => setLiveFormState((current) => ({ ...current, arrivalTimeUtc: event.target.value }))} placeholder="13:05:00" />
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Cruise altitude (ft)</Label>
+                              <Input value={liveFormState.flightLevel} onChange={(event) => setLiveFormState((current) => ({ ...current, flightLevel: event.target.value.toUpperCase() }))} placeholder="36000" />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Cost index</Label>
+                              <Input value={liveFormState.costIndex} onChange={(event) => setLiveFormState((current) => ({ ...current, costIndex: event.target.value }))} placeholder="AUTO / 25" />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Live tags</Label>
+                              <Input value={liveFormState.liveTags} onChange={(event) => setLiveFormState((current) => ({ ...current, liveTags: event.target.value }))} placeholder="scheduled, cargo, seasonal" />
+                            </div>
+                            <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3">
+                              <div>
+                                <div className="text-sm font-medium text-gray-900">Hide live route in vAMSYS</div>
+                                <div className="text-xs text-gray-500">Saves the documented live `hidden` flag on the route itself.</div>
+                              </div>
+                              <Switch checked={liveFormState.liveHidden} onCheckedChange={(checked) => setLiveFormState((current) => ({ ...current, liveHidden: Boolean(checked) }))} />
+                            </div>
+                          </>
+                        ) : null}
                         <div className="space-y-2">
-                          <Label>Cruise altitude (ft)</Label>
-                          <Input value={liveFormState.flightLevel} onChange={(event) => setLiveFormState((current) => ({ ...current, flightLevel: event.target.value.toUpperCase() }))} placeholder="36000" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Cost index</Label>
-                          <Input value={liveFormState.costIndex} onChange={(event) => setLiveFormState((current) => ({ ...current, costIndex: event.target.value }))} placeholder="AUTO / 25" />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Live tags</Label>
-                          <Input value={liveFormState.liveTags} onChange={(event) => setLiveFormState((current) => ({ ...current, liveTags: event.target.value }))} placeholder="scheduled, cargo, seasonal" />
-                          <div className="text-xs text-gray-500">Sent to vAMSYS as the live route `tag` field.</div>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">Hide live route in vAMSYS</div>
-                            <div className="text-xs text-gray-500">Saves the documented live `hidden` flag on the route itself.</div>
-                          </div>
-                          <Switch checked={liveFormState.liveHidden} onCheckedChange={(checked) => setLiveFormState((current) => ({ ...current, liveHidden: Boolean(checked) }))} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Fleet refs</Label>
+                          <Label>Fleet types</Label>
                           <div className="relative">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                             <Input
                               value={liveFleetSearch}
                               onChange={(event) => setLiveFleetSearch(event.target.value)}
-                              placeholder="Type, registration or fleet ID"
+                              placeholder="Type code, fleet, or registration"
                               className="pl-9 pr-9"
                             />
                             {liveFleetSearch ? (
@@ -2145,30 +2241,28 @@ export function AdminRoutesManagement() {
                             ) : null}
                           </div>
                           <div className="text-xs text-gray-500">
-                            Search by fleet code, aircraft type, registration or internal fleet id.
+                            Select by aircraft type (B738, A320, A321...) using checkboxes.
                           </div>
-                          <div className="max-h-[240px] space-y-2 overflow-y-auto pr-1">
-                            {filteredLiveFleetOptions.length > 0 ? (
-                              filteredLiveFleetOptions.map((fleet) => {
-                                const modelPreview = formatFleetSearchPreview(fleet.aircraftModels, "Types");
-                                const registrationPreview = formatFleetSearchPreview(fleet.registrations, "Regs");
-                                const checked = liveFormState.fleetIds.includes(fleet.id);
+                          <div className="max-h-[240px] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                            {filteredLiveFleetTypeOptions.length > 0 ? (
+                              filteredLiveFleetTypeOptions.map((fleetType) => {
+                                const checked = fleetType.fleetIds.every((id) => liveFormState.fleetIds.includes(id));
                                 return (
-                                  <label key={`edit-fleet-${fleet.id}`} className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 px-3 py-3">
-                                    <Checkbox checked={checked} onCheckedChange={(value) => toggleLiveFleet(fleet.id, Boolean(value))} />
+                                  <label key={`edit-fleet-type-${fleetType.typeCode}`} className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 px-3 py-3">
+                                    <Checkbox checked={checked} onCheckedChange={(value) => toggleLiveFleetType(fleetType, Boolean(value))} />
                                     <div className="min-w-0">
-                                      <div className="text-sm font-medium text-gray-900">{fleet.code ? `${fleet.code} · ` : ""}{fleet.name}</div>
-                                      <div className="text-xs text-gray-500">{fleet.airlineCode || "Fleet"} · ID {fleet.id}</div>
-                                      {modelPreview || registrationPreview ? (
+                                      <div className="text-sm font-medium text-gray-900">{fleetType.typeCode}</div>
+                                      <div className="text-xs text-gray-500">{fleetType.fleetIds.length} fleet refs</div>
+                                      {fleetType.fleetNames.length > 0 || fleetType.registrations.length > 0 ? (
                                         <div className="mt-1 text-xs text-gray-500">
-                                          {[modelPreview, registrationPreview].filter(Boolean).join(" · ")}
+                                          {[formatFleetSearchPreview(fleetType.fleetNames, "Fleets"), formatFleetSearchPreview(fleetType.registrations, "Regs")].filter(Boolean).join(" · ")}
                                         </div>
                                       ) : null}
                                     </div>
                                   </label>
                                 );
                               })
-                            ) : fleetOptions.length > 0 ? (
+                            ) : fleetTypeOptions.length > 0 ? (
                               <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-500">
                                 No fleet matches for “{liveFleetSearch.trim()}”. Try a shorter type, registration fragment or fleet id.
                               </div>
@@ -2188,7 +2282,7 @@ export function AdminRoutesManagement() {
                     </div>
                   </div>
 
-                  {editorMode === "full" ? (
+                  {showAdvancedEditorFields ? (
                     <>
                       <div className="rounded-2xl border border-gray-200 bg-white p-5">
                         <div className="mb-4">
@@ -2238,51 +2332,12 @@ export function AdminRoutesManagement() {
                         ) : null}
                       </div>
                     </>
-                  ) : (
-                    <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                      <div className="mb-4">
-                        <h3 className="text-base font-semibold text-gray-900">Turbo snapshot</h3>
-                        <p className="text-sm text-gray-500">Short operational editor for quick single-route changes.</p>
-                      </div>
-                      <div className="space-y-3 text-sm text-gray-700">
-                        <div className="space-y-2">
-                          <Label>Schedule</Label>
-                          <div className="grid gap-3 md:grid-cols-2">
-                            <Input value={liveFormState.departureTimeUtc} onChange={(event) => setLiveFormState((current) => ({ ...current, departureTimeUtc: event.target.value }))} placeholder="Departure UTC" />
-                            <Input value={liveFormState.arrivalTimeUtc} onChange={(event) => setLiveFormState((current) => ({ ...current, arrivalTimeUtc: event.target.value }))} placeholder="Arrival UTC" />
-                          </div>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Days</Label>
-                          <div className="grid grid-cols-7 gap-2">
-                            {ROUTE_DAY_ORDER.map((day) => {
-                              const active = activeServiceDaySet.has(day);
-                              return (
-                                <button
-                                  key={`turbo-${day}`}
-                                  type="button"
-                                  onClick={() => toggleLiveServiceDay(day, !active)}
-                                  className={`rounded-xl border px-2 py-3 text-center text-sm font-medium ${active ? "border-red-200 bg-red-50 text-red-700" : "border-gray-200 bg-gray-50 text-gray-400"}`}
-                                >
-                                  {ROUTE_DAY_LABELS[day]}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                        <div className="flex items-start justify-between gap-4"><span className="text-gray-500">Alternates</span><span className="text-right font-medium text-gray-900">{formatRouteList(routeDetail?.alternates)}</span></div>
-                        <div className="space-y-2">
-                          <Label>Live remarks</Label>
-                          <Textarea value={liveFormState.routeRemarks} onChange={(event) => setLiveFormState((current) => ({ ...current, routeRemarks: event.target.value }))} className="min-h-[100px]" placeholder="Remarks saved on the live route" />
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </div>
-          </ScrollArea>
-          <DialogFooter className="flex-col-reverse gap-2 border-t border-gray-200 px-6 py-4 sm:flex-row sm:justify-between">
+          </div>
+          <DialogFooter className="sticky bottom-0 z-10 flex-col-reverse gap-2 border-t border-gray-200 bg-white px-6 py-4 sm:flex-row sm:justify-between">
             <div className="flex gap-2">
               <Button variant="outline" className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700" onClick={clearRouteMeta} disabled={isClearingRouteMeta || isSavingRouteMeta || isDeletingRoute}>
                 {isClearingRouteMeta ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
@@ -2319,36 +2374,28 @@ export function AdminRoutesManagement() {
           }
         }}
       >
-        <DialogContent className="max-h-[92vh] overflow-hidden p-0 sm:max-w-4xl">
+        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-4xl">
           <DialogHeader className="border-b border-gray-200 px-6 py-5">
             <div className="space-y-2">
               <DialogTitle>Create route</DialogTitle>
               <div className="text-sm text-gray-500">Creates a live vAMSYS route using the documented `/routes` contract, then optionally applies the local admin overlay used by the website.</div>
             </div>
           </DialogHeader>
-          <ScrollArea className="max-h-[74vh]">
+          <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="space-y-6 px-6 py-5">
               <div className="rounded-2xl border border-gray-200 bg-white p-5">
                 <div className="mb-4">
                   <h3 className="text-base font-semibold text-gray-900">Basic Information</h3>
                   <p className="text-sm text-gray-500">Flight identity and the main route endpoints.</p>
                 </div>
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Flight number</Label>
-                    <Input value={createFormState.flightNumber} onChange={(event) => setCreateFormState((current) => ({ ...current, flightNumber: event.target.value.toUpperCase() }))} placeholder="NWS101" />
+                    <Input value={createFormState.flightNumber} onChange={(event) => setCreateFormState((current) => ({ ...current, flightNumber: event.target.value.toUpperCase() }))} placeholder="N4710" />
                   </div>
                   <div className="space-y-2">
                     <Label>Callsign</Label>
-                    <Input value={createFormState.callsign} onChange={(event) => setCreateFormState((current) => ({ ...current, callsign: event.target.value.toUpperCase() }))} placeholder="NWS101" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Type</Label>
-                    <Input value={createFormState.type} onChange={(event) => setCreateFormState((current) => ({ ...current, type: event.target.value }))} placeholder="scheduled" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Cruise altitude (ft)</Label>
-                    <Input value={createFormState.flightLevel} onChange={(event) => setCreateFormState((current) => ({ ...current, flightLevel: event.target.value.toUpperCase() }))} placeholder="36000" />
+                    <Input value={createFormState.callsign} onChange={(event) => setCreateFormState((current) => ({ ...current, callsign: event.target.value.toUpperCase() }))} placeholder="NWS710" />
                   </div>
                   <div className="space-y-2">
                     <Label>Departure ICAO/IATA</Label>
@@ -2360,14 +2407,6 @@ export function AdminRoutesManagement() {
                     <Input value={createFormState.arrivalCode} onChange={(event) => setCreateFormState((current) => ({ ...current, arrivalCode: event.target.value.toUpperCase() }))} placeholder="URSS" />
                     <div className="text-xs text-gray-500">{createArrivalAirport ? `${createArrivalAirport.icao || createArrivalAirport.iata || createFormState.arrivalCode} · ${createArrivalAirport.name}` : "Resolved through the airport catalog on save"}</div>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Departure UTC</Label>
-                    <Input value={createFormState.departureTimeUtc} onChange={(event) => setCreateFormState((current) => ({ ...current, departureTimeUtc: event.target.value }))} placeholder="10:20" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Arrival UTC</Label>
-                    <Input value={createFormState.arrivalTimeUtc} onChange={(event) => setCreateFormState((current) => ({ ...current, arrivalTimeUtc: event.target.value }))} placeholder="13:05" />
-                  </div>
                 </div>
               </div>
 
@@ -2375,7 +2414,12 @@ export function AdminRoutesManagement() {
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-gray-200 bg-white p-5">
                     <div className="mb-4">
-                      <h3 className="text-base font-semibold text-gray-900">Schedule and Routing</h3>
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="text-base font-semibold text-gray-900">Schedule and Routing</h3>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setShowAdvancedCreateFields((v) => !v)}>
+                          {showAdvancedCreateFields ? "Hide Advanced" : "Advanced"}
+                        </Button>
+                      </div>
                       <p className="text-sm text-gray-500">Required live route fields plus the main optional schedule parameters from vAMSYS.</p>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
@@ -2388,38 +2432,12 @@ export function AdminRoutesManagement() {
                         <Input value={createFormState.endDate} onChange={(event) => setCreateFormState((current) => ({ ...current, endDate: event.target.value }))} placeholder="2026-10-31 or 2026-10-31T23:59:59+00:00" />
                       </div>
                       <div className="space-y-2">
-                        <Label>Cost index</Label>
-                        <Input value={createFormState.costIndex} onChange={(event) => setCreateFormState((current) => ({ ...current, costIndex: event.target.value }))} placeholder="25" />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Fuel policy</Label>
-                        <Input value={createFormState.fuelPolicy} onChange={(event) => setCreateFormState((current) => ({ ...current, fuelPolicy: event.target.value }))} placeholder="Standard" />
-                      </div>
-                      <div className="space-y-2">
                         <Label>Flight length</Label>
                         <Input value={createFormState.duration} onChange={(event) => setCreateFormState((current) => ({ ...current, duration: event.target.value }))} placeholder="02:45:00" />
                       </div>
                       <div className="space-y-2">
                         <Label>Distance (nm)</Label>
                         <Input value={createFormState.distanceNm} onChange={(event) => setCreateFormState((current) => ({ ...current, distanceNm: event.target.value.replace(/[^0-9.]/g, "") }))} placeholder="1480" />
-                      </div>
-                    </div>
-                    <div className="mt-4 space-y-2">
-                      <Label>Service days</Label>
-                      <div className="grid grid-cols-7 gap-2">
-                        {ROUTE_DAY_ORDER.map((day) => {
-                          const active = createFormState.serviceDays.includes(day);
-                          return (
-                            <button
-                              key={`create-day-${day}`}
-                              type="button"
-                              onClick={() => toggleCreateServiceDay(day, !active)}
-                              className={`rounded-xl border px-2 py-3 text-sm font-medium ${active ? "border-red-200 bg-red-50 text-red-700" : "border-gray-200 bg-gray-50 text-gray-500"}`}
-                            >
-                              {ROUTE_DAY_LABELS[day]}
-                            </button>
-                          );
-                        })}
                       </div>
                     </div>
                     <div className="mt-4 space-y-2">
@@ -2459,20 +2477,73 @@ export function AdminRoutesManagement() {
                         <Textarea value={createFormState.routeNotes} onChange={(event) => setCreateFormState((current) => ({ ...current, routeNotes: event.target.value }))} className="min-h-[120px]" placeholder="Internal remarks sent as internal_remarks on the live route" />
                       </div>
                     </div>
-                    <div className="mt-4 grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                      <div className="space-y-2">
-                        <Label>Live tags</Label>
-                        <Input value={createFormState.liveTags} onChange={(event) => setCreateFormState((current) => ({ ...current, liveTags: event.target.value }))} placeholder="scheduled, cargo, seasonal" />
-                        <div className="text-xs text-gray-500">Sent to vAMSYS as the live route `tag` field.</div>
-                      </div>
-                      <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 md:min-w-[240px]">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">Hide live route in vAMSYS</div>
-                          <div className="text-xs text-gray-500">Stores the documented live `hidden` flag during route creation.</div>
-                        </div>
-                        <Switch checked={createFormState.liveHidden} onCheckedChange={(checked) => setCreateFormState((current) => ({ ...current, liveHidden: Boolean(checked) }))} />
-                      </div>
+                    <div className="mt-3 text-xs text-gray-500">
+                      If route text, flight length or distance are empty, the route is still created in vAMSYS and auto-calculated values are pulled back after sync.
                     </div>
+
+                    {showAdvancedCreateFields ? (
+                      <div className="mt-4 space-y-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+                        <div className="text-sm font-medium text-gray-900">Advanced API fields</div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div className="space-y-2">
+                            <Label>Route type</Label>
+                            <Input value={createFormState.type} onChange={(event) => setCreateFormState((current) => ({ ...current, type: event.target.value }))} placeholder="scheduled" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Cruise altitude (ft)</Label>
+                            <Input value={createFormState.flightLevel} onChange={(event) => setCreateFormState((current) => ({ ...current, flightLevel: event.target.value.toUpperCase() }))} placeholder="36000" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Departure UTC</Label>
+                            <Input value={createFormState.departureTimeUtc} onChange={(event) => setCreateFormState((current) => ({ ...current, departureTimeUtc: event.target.value }))} placeholder="10:20:00" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Arrival UTC</Label>
+                            <Input value={createFormState.arrivalTimeUtc} onChange={(event) => setCreateFormState((current) => ({ ...current, arrivalTimeUtc: event.target.value }))} placeholder="13:05:00" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Cost index</Label>
+                            <Input value={createFormState.costIndex} onChange={(event) => setCreateFormState((current) => ({ ...current, costIndex: event.target.value }))} placeholder="25" />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Fuel policy</Label>
+                            <Input value={createFormState.fuelPolicy} onChange={(event) => setCreateFormState((current) => ({ ...current, fuelPolicy: event.target.value }))} placeholder="Standard" />
+                          </div>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Live tags</Label>
+                          <Input value={createFormState.liveTags} onChange={(event) => setCreateFormState((current) => ({ ...current, liveTags: event.target.value }))} placeholder="scheduled, cargo" />
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">Hide live route in vAMSYS</div>
+                            <div className="text-xs text-gray-500">Stores live hidden flag on route creation.</div>
+                          </div>
+                          <Switch checked={createFormState.liveHidden} onCheckedChange={(checked) => setCreateFormState((current) => ({ ...current, liveHidden: Boolean(checked) }))} />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>Service days</Label>
+                          <div className="grid grid-cols-7 gap-2">
+                            {ROUTE_DAY_ORDER.map((day) => {
+                              const active = createFormState.serviceDays.includes(day);
+                              return (
+                                <button
+                                  key={`create-day-${day}`}
+                                  type="button"
+                                  onClick={() => toggleCreateServiceDay(day, !active)}
+                                  className={`rounded-xl border px-2 py-3 text-sm font-medium ${active ? "border-red-200 bg-red-50 text-red-700" : "border-gray-200 bg-gray-50 text-gray-500"}`}
+                                >
+                                  {ROUTE_DAY_LABELS[day]}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="rounded-2xl border border-gray-200 bg-white p-5">
@@ -2534,19 +2605,7 @@ export function AdminRoutesManagement() {
                         <Label>Admin notes</Label>
                         <Textarea value={createFormState.notes} onChange={(event) => setCreateFormState((current) => ({ ...current, notes: event.target.value }))} className="min-h-[110px]" placeholder="Placement notes, rollout or publishing context" />
                       </div>
-                      <div className="grid gap-4 md:grid-cols-[1fr_auto] md:items-end">
-                        <div className="space-y-2">
-                          <Label>Website tags</Label>
-                          <Input value={createFormState.tags} onChange={(event) => setCreateFormState((current) => ({ ...current, tags: event.target.value }))} placeholder="promo, regional, summer" />
-                        </div>
-                        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-4 py-3 md:min-w-[220px]">
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">Hide in website overlay</div>
-                            <div className="text-xs text-gray-500">Creates the route, but keeps it hidden in the website curation layer.</div>
-                          </div>
-                          <Switch checked={createFormState.hidden} onCheckedChange={(checked) => setCreateFormState((current) => ({ ...current, hidden: Boolean(checked) }))} />
-                        </div>
-                      </div>
+                      <div className="text-xs text-gray-500">Tags and website visibility toggles are hidden in the simplified mode.</div>
                     </div>
                   </div>
                 </div>
@@ -2555,7 +2614,7 @@ export function AdminRoutesManagement() {
                   <div className="rounded-2xl border border-gray-200 bg-white p-5">
                     <div className="mb-4">
                       <h3 className="text-base font-semibold text-gray-900">Fleet Assignment</h3>
-                      <p className="text-sm text-gray-500">Select at least one fleet reference for the new route.</p>
+                      <p className="text-sm text-gray-500">Select aircraft types (vAMSYS-style): B738, A320, A321 and others.</p>
                     </div>
                     <div className="mb-4 space-y-2">
                       <div className="relative">
@@ -2563,7 +2622,7 @@ export function AdminRoutesManagement() {
                         <Input
                           value={createFleetSearch}
                           onChange={(event) => setCreateFleetSearch(event.target.value)}
-                          placeholder="Type, registration or fleet ID"
+                          placeholder="Type code, fleet, or registration"
                           className="pl-9 pr-9"
                         />
                         {createFleetSearch ? (
@@ -2578,31 +2637,29 @@ export function AdminRoutesManagement() {
                         ) : null}
                       </div>
                       <div className="text-xs text-gray-500">
-                        Start typing an aircraft type, registration or fleet id to narrow the suggestions.
+                        Start typing aircraft type code (e.g. B738, A320, A321).
                       </div>
                     </div>
-                    <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
-                      {filteredCreateFleetOptions.length > 0 ? (
-                        filteredCreateFleetOptions.map((fleet) => {
-                          const modelPreview = formatFleetSearchPreview(fleet.aircraftModels, "Types");
-                          const registrationPreview = formatFleetSearchPreview(fleet.registrations, "Regs");
-                          const checked = createFormState.fleetIds.includes(fleet.id);
+                    <div className="max-h-[360px] space-y-2 overflow-y-auto overscroll-contain pr-1">
+                      {filteredCreateFleetTypeOptions.length > 0 ? (
+                        filteredCreateFleetTypeOptions.map((fleetType) => {
+                          const checked = fleetType.fleetIds.every((id) => createFormState.fleetIds.includes(id));
                           return (
-                            <label key={`create-fleet-${fleet.id}`} className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 px-3 py-3">
-                              <Checkbox checked={checked} onCheckedChange={(value) => toggleCreateFleet(fleet.id, Boolean(value))} />
+                            <label key={`create-fleet-type-${fleetType.typeCode}`} className="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 px-3 py-3">
+                              <Checkbox checked={checked} onCheckedChange={(value) => toggleCreateFleetType(fleetType, Boolean(value))} />
                               <div className="min-w-0">
-                                <div className="text-sm font-medium text-gray-900">{fleet.code ? `${fleet.code} · ` : ""}{fleet.name}</div>
-                                <div className="text-xs text-gray-500">{fleet.airlineCode || "Fleet"} · ID {fleet.id}</div>
-                                {modelPreview || registrationPreview ? (
+                                <div className="text-sm font-medium text-gray-900">{fleetType.typeCode}</div>
+                                <div className="text-xs text-gray-500">{fleetType.fleetIds.length} fleet refs</div>
+                                {fleetType.fleetNames.length > 0 || fleetType.registrations.length > 0 ? (
                                   <div className="mt-1 text-xs text-gray-500">
-                                    {[modelPreview, registrationPreview].filter(Boolean).join(" · ")}
+                                    {[formatFleetSearchPreview(fleetType.fleetNames, "Fleets"), formatFleetSearchPreview(fleetType.registrations, "Regs")].filter(Boolean).join(" · ")}
                                   </div>
                                 ) : null}
                               </div>
                             </label>
                           );
                         })
-                      ) : fleetOptions.length > 0 ? (
+                      ) : fleetTypeOptions.length > 0 ? (
                         <div className="rounded-xl border border-dashed border-gray-200 px-4 py-6 text-sm text-gray-500">
                           No fleet matches for “{createFleetSearch.trim()}”. Try a shorter type, registration fragment or fleet id.
                         </div>
@@ -2614,13 +2671,13 @@ export function AdminRoutesManagement() {
 
                   <div className="rounded-2xl border border-red-100 bg-red-50 p-5 text-sm text-red-900">
                     <div className="font-medium">Create flow</div>
-                    <div className="mt-2 text-red-800/80">The live route is created first via the admin API. If you filled any website overlay fields, they are saved in a second step against the newly returned route id.</div>
+                    <div className="mt-2 text-red-800/80">The live route is created first via the admin API. Local remarks/notes patch is applied in the second step.</div>
                   </div>
                 </div>
               </div>
             </div>
-          </ScrollArea>
-          <DialogFooter className="border-t border-gray-200 px-6 py-4">
+          </div>
+          <DialogFooter className="sticky bottom-0 z-10 border-t border-gray-200 bg-white px-6 py-4">
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)} disabled={isCreatingRoute}>Cancel</Button>
             <Button className="bg-[#E31E24] hover:bg-[#c41a20]" onClick={createRoute} disabled={isCreatingRoute}>
               {isCreatingRoute ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}

@@ -348,6 +348,27 @@ const formatRouteDistanceNm = (value?: string | number | null) => {
   return `${Math.round(distanceNm)} nm`;
 };
 
+const toAircraftTypeCode = (model: unknown) => {
+  const value = String(model || "").toUpperCase().trim();
+  if (!value) {
+    return "";
+  }
+
+  if (/737\s*MAX\s*8|B38M/.test(value)) return "B38M";
+  if (/737\s*-?\s*900\s*ER|B739/.test(value)) return "B739";
+  if (/737\s*-?\s*800|B738/.test(value)) return "B738";
+  if (/777\s*-?\s*300\s*ER|B77W/.test(value)) return "B77W";
+  if (/777\s*-?\s*200\s*ER|777\s*-?\s*200|B772/.test(value)) return "B772";
+  if (/A321\s*NEO|A21N/.test(value)) return "A21N";
+  if (/A321\s*-?\s*2?00|A321/.test(value)) return "A321";
+  if (/A330\s*-?\s*200|A332/.test(value)) return "A332";
+  if (/A330\s*-?\s*300|A333/.test(value)) return "A333";
+  if (/ERJ\s*-?\s*190|E190|E19\b/.test(value)) return "E190";
+
+  const rawCode = value.replace(/[^A-Z0-9]/g, "");
+  return rawCode.slice(0, 4);
+};
+
 const getRouteAircraftTypeLabel = (
   route: RouteOption,
   aircraftOptions: AircraftOption[],
@@ -362,7 +383,7 @@ const getRouteAircraftTypeLabel = (
     new Set(
       aircraftOptions
         .filter((aircraft) => fleetIds.includes(aircraft.fleetId))
-        .map((aircraft) => String(aircraft.model || "").trim())
+        .map((aircraft) => toAircraftTypeCode(aircraft.model))
         .filter(Boolean)
     )
   );
@@ -453,6 +474,8 @@ export function PilotBookings() {
   const [bookingGateMessage, setBookingGateMessage] = useState("");
   const [pilotLocationCode, setPilotLocationCode] = useState("");
   const [pilotLocationLabel, setPilotLocationLabel] = useState("");
+  const [baseLocationCode, setBaseLocationCode] = useState("");
+  const [baseLocationLabel, setBaseLocationLabel] = useState("");
   const [form, setForm] = useState<BookingFormState>(() => createEmptyForm());
   const [isAircraftTypePickerOpen, setIsAircraftTypePickerOpen] = useState(false);
   const [isAircraftPickerOpen, setIsAircraftPickerOpen] = useState(false);
@@ -790,6 +813,35 @@ export function PilotBookings() {
     }
   }, [form.routeId, visibleRouteOptions]);
 
+  // Booking-chain location: if there are active/pending bookings, the effective departure location
+  // is the arrival of the most recent active booking (vAMSYS positional tracking behavior).
+  useEffect(() => {
+    const activeStatuses = ["active", "pending", "confirmed", "booked"];
+    const activeBookings = bookings.filter((b) =>
+      activeStatuses.some((s) => String(b.status || "").toLowerCase().includes(s)) &&
+      !b.deletedAt
+    );
+    if (activeBookings.length > 0) {
+      // Sort by departure time descending, take the last scheduled leg's arrival
+      const sorted = [...activeBookings].sort((a, b) => {
+        const ta = new Date(a.departureTime || a.createdAt || 0).getTime();
+        const tb = new Date(b.departureTime || b.createdAt || 0).getTime();
+        return tb - ta;
+      });
+      const last = sorted[0];
+      if (last.arrivalCode) {
+        setPilotLocationCode(last.arrivalCode.trim().toUpperCase());
+        setPilotLocationLabel(last.arrivalName || last.arrivalCode);
+        return;
+      }
+    }
+    // Revert to base location
+    if (baseLocationCode) {
+      setPilotLocationCode(baseLocationCode);
+      setPilotLocationLabel(baseLocationLabel);
+    }
+  }, [bookings, baseLocationCode, baseLocationLabel]);
+
   useEffect(() => {
     const normalizedDestination = String(form.destinationCode || "").trim().toUpperCase();
     if (!normalizedDestination) {
@@ -984,6 +1036,8 @@ export function PilotBookings() {
         setAircraftOptions(nextAircraft);
         setPilotLocationCode(nextLocationCode);
         setPilotLocationLabel(nextLocationLabel);
+        setBaseLocationCode(nextLocationCode);
+        setBaseLocationLabel(nextLocationLabel);
         setBookingGateMessage(nextGateMessage);
       } catch {
         if (isMounted) {
@@ -991,6 +1045,8 @@ export function PilotBookings() {
           setAircraftOptions([]);
           setPilotLocationCode("");
           setPilotLocationLabel("");
+          setBaseLocationCode("");
+          setBaseLocationLabel("");
           setBookingGateMessage("");
         }
       }
@@ -1474,8 +1530,23 @@ export function PilotBookings() {
                   <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{t("bookings.selectedFlight")}</div>
                   <div className="mt-3 flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-lg font-semibold text-white">{selectedRoute.flightNumber || selectedRoute.callsign || `Route ${selectedRoute.id}`}</div>
-                      <div className="text-sm text-slate-300">{selectedRoute.fromCode || "—"} → {selectedRoute.toCode || "—"}</div>
+                      <div className="text-lg font-semibold text-white">
+                        {selectedRoute.flightNumber || selectedRoute.callsign || `Route ${selectedRoute.id}`}
+                        {selectedRoute.callsign && selectedRoute.flightNumber && selectedRoute.callsign !== selectedRoute.flightNumber ? (
+                          <span className="ml-1.5 font-normal text-slate-400">/ {selectedRoute.callsign}</span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-1 text-sm text-slate-300">
+                        {resolveCountryCodeByIcao(selectedRoute.fromCode) ? (
+                          <img src={`https://flagcdn.com/${resolveCountryCodeByIcao(selectedRoute.fromCode)}.svg`} alt="" className="h-3 w-4.5 shrink-0 rounded-[2px] object-cover" loading="lazy" decoding="async" />
+                        ) : null}
+                        <span>{deriveCityFromLocationLabel(selectedRoute.fromName, selectedRoute.fromCode)} ({selectedRoute.fromCode || "—"})</span>
+                        <span className="text-slate-500">→</span>
+                        {resolveCountryCodeByIcao(selectedRoute.toCode) ? (
+                          <img src={`https://flagcdn.com/${resolveCountryCodeByIcao(selectedRoute.toCode)}.svg`} alt="" className="h-3 w-4.5 shrink-0 rounded-[2px] object-cover" loading="lazy" decoding="async" />
+                        ) : null}
+                        <span>{deriveCityFromLocationLabel(selectedRoute.toName, selectedRoute.toCode)} ({selectedRoute.toCode || "—"})</span>
+                      </div>
                     </div>
                     <Badge variant="outline" className="border-white/10 bg-white/10 text-white">
                       {formatRouteDistanceNm(selectedRoute.distance)}
@@ -1757,8 +1828,23 @@ export function PilotBookings() {
                           >
                             <div className="flex flex-wrap items-start justify-between gap-3">
                               <div className="min-w-0 flex-1">
-                                <div className="truncate text-base font-semibold text-slate-900">{route.flightNumber || route.callsign || `Route ${route.id}`}</div>
-                                <div className="truncate text-sm text-slate-600">{route.fromCode || "—"} → {route.toCode || "—"}</div>
+                                <div className="truncate text-base font-semibold text-slate-900">
+                                  {route.flightNumber || route.callsign || `Route ${route.id}`}
+                                  {route.callsign && route.flightNumber && route.callsign !== route.flightNumber ? (
+                                    <span className="ml-1.5 font-normal text-slate-400">/ {route.callsign}</span>
+                                  ) : null}
+                                </div>
+                                <div className="flex items-center gap-1 truncate text-sm text-slate-600">
+                                  {resolveCountryCodeByIcao(route.fromCode) ? (
+                                    <img src={`https://flagcdn.com/${resolveCountryCodeByIcao(route.fromCode)}.svg`} alt="" className="h-3 w-4.5 shrink-0 rounded-[2px] object-cover" loading="lazy" decoding="async" />
+                                  ) : null}
+                                  <span>{deriveCityFromLocationLabel(route.fromName, route.fromCode)} ({route.fromCode || "—"})</span>
+                                  <span className="text-slate-400">→</span>
+                                  {resolveCountryCodeByIcao(route.toCode) ? (
+                                    <img src={`https://flagcdn.com/${resolveCountryCodeByIcao(route.toCode)}.svg`} alt="" className="h-3 w-4.5 shrink-0 rounded-[2px] object-cover" loading="lazy" decoding="async" />
+                                  ) : null}
+                                  <span>{deriveCityFromLocationLabel(route.toName, route.toCode)} ({route.toCode || "—"})</span>
+                                </div>
                               </div>
                               <Badge variant="outline" className="shrink-0 bg-white text-slate-700">
                                 {formatRouteDistanceNm(route.distance)}
@@ -1767,8 +1853,7 @@ export function PilotBookings() {
                             <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-500">
                               <span className="shrink-0 rounded-full bg-white px-2.5 py-1">{formatRouteDuration(route.duration)}</span>
                               <span className="shrink-0 rounded-full bg-white px-2.5 py-1">{getRouteFrequencyLabel(route, t)}</span>
-                              <span className="max-w-full truncate rounded-full bg-white px-2.5 py-1">{t("bookings.aircraftType")}: {getRouteAircraftTypeLabel(route, aircraftOptions, t)}</span>
-                              <span className="max-w-full truncate rounded-full bg-white px-2.5 py-1">{route.toName || route.toCode || t("bookings.routeDestinationFallback")}</span>
+                              <span className="max-w-full truncate rounded-full bg-white px-2.5 py-1">{getRouteAircraftTypeLabel(route, aircraftOptions, t)}</span>
                             </div>
                           </button>
                         );
