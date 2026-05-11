@@ -21,7 +21,7 @@ function pick<T>(rng: () => number, arr: T[]): T {
 // ── Name pools ────────────────────────────────────────────────────────────────
 interface NamePool {
   label: string;
-  flag: string;
+  flagCode: string;
   maleFirst: string[];
   femaleFirst: string[];
   maleLast: string[];
@@ -30,84 +30,84 @@ interface NamePool {
 
 const POOLS: Record<string, NamePool> = {
   russian: {
-    label: "RU", flag: "🇷🇺",
+    label: "RU", flagCode: "ru",
     maleFirst:   ["Александр","Дмитрий","Иван","Сергей","Андрей","Михаил","Алексей","Николай","Павел","Владимир","Артём","Денис","Максим","Роман","Кирилл","Евгений","Антон","Илья","Виктор","Олег"],
     femaleFirst: ["Анна","Мария","Елена","Наталья","Ольга","Ирина","Татьяна","Светлана","Юлия","Екатерина","Алина","Ксения","Марина","Виктория","Дарья","Полина","Валерия","Надежда","Людмила","Вера"],
     maleLast:    ["Иванов","Смирнов","Кузнецов","Попов","Васильев","Петров","Соколов","Михайлов","Новиков","Фёдоров","Морозов","Волков","Алексеев","Лебедев","Семёнов","Зайцев","Козлов","Степанов","Николаев","Орлов"],
     femaleLast:  ["Иванова","Смирнова","Кузнецова","Попова","Васильева","Петрова","Соколова","Михайлова","Новикова","Фёдорова","Морозова","Волкова","Алексеева","Лебедева","Семёнова","Зайцева","Козлова","Степанова","Николаева","Орлова"],
   },
   tatar: {
-    label: "KAZ", flag: "🇷🇺",
+    label: "KAZ", flagCode: "ru",
     maleFirst:   ["Айдар","Ильнур","Рустам","Тимур","Ренат","Фарид","Радик","Ильдар","Булат","Азат","Марат","Руслан","Риф","Нияз","Альберт","Ринат","Камиль","Рамиль","Ильяс","Зиннур","Наиль","Раиль","Мансур","Ильшат","Шамиль","Радель","Равиль","Эмиль","Артур","Дамир"],
     femaleFirst: ["Гульнара","Алсу","Лейсан","Миляуша","Гузель","Диля","Алия","Зиля","Эльмира","Рания","Регина","Лилия","Айгуль","Ильсияр","Резеда","Гульфия","Диана","Нилуфар","Сабина","Ляйсан","Чулпан","Зухра","Гульшат","Фируза","Лейла","Аделина","Амина","Ясмина","Сумбуль","Дина"],
     maleLast:    ["Гарипов","Хасанов","Закиров","Сафин","Габитов","Мухаметов","Шарипов","Нуриев","Ситдиков","Зиннатов","Галимов","Ахметов","Латыпов","Валиев","Сабиров","Хабибуллин","Юсупов","Тагиров","Сулейманов","Шакиров","Исхаков","Гильмутдинов","Миннуллин","Абдуллин","Шайхутдинов"],
     femaleLast:  ["Гарипова","Хасанова","Закирова","Сафина","Габитова","Мухаметова","Шарипова","Нуриева","Ситдикова","Зиннатова","Галимова","Ахметова","Латыпова","Валиева","Сабирова","Хабибуллина","Юсупова","Тагирова","Сулейманова","Шакирова","Исхакова","Гильмутдинова","Миннуллина","Абдуллина","Шайхутдинова"],
   },
   yakut: {
-    label: "SAK", flag: "🇷🇺",
+    label: "SAK", flagCode: "ru",
     maleFirst:   ["Айал","Айсен","Ньургун","Саргылана","Туйаара","Эрхан","Дьулустан","Эдуард","Семен","Виктор","Егор","Никита","Дмитрий","Петр","Спиридон","Артур","Гаврил","Иннокентий","Максим","Михаил"],
     femaleFirst: ["Айталина","Айыына","Сардана","Туйаара","Ньургуяна","Надежда","Оксана","Мария","Алена","Арина","Валентина","Анна","Екатерина","Светлана","Лена","Дайаана","Кюннэй","Сайаана","Айсена","Тамара"],
     maleLast:    ["Слепцов","Собакин","Попов","Неустроев","Винокуров","Гаврильев","Павлов","Иванов","Петров","Егоров","Николаев","Охлопков","Софронов","Федоров","Тарабукин"],
     femaleLast:  ["Слепцова","Собакина","Попова","Неустроева","Винокурова","Гаврильева","Павлова","Иванова","Петрова","Егорова","Николаева","Охлопкова","Софронова","Федорова","Тарабукина"],
   },
   dagestani: {
-    label: "DAG", flag: "🇷🇺",
+    label: "DAG", flagCode: "ru",
     maleFirst:   ["Магомед","Магомедрасул","Расул","Абдулла","Шамиль","Мурад","Гаджимурад","Гусейн","Али","Омар","Ислам","Рамазан","Курбан","Зиявудин","Нурмагомед","Хабиб","Саид","Марат","Рустам","Аслан"],
     femaleFirst: ["Патимат","Аминат","Зумруд","Мадина","Саида","Зарема","Айшат","Диана","Сабина","Фатима","Амина","Джамиля","Хадижат","Залина","Раисат","Марьям","Наида","Асият","Лейла","Сафият"],
     maleLast:    ["Магомедов","Абдуллаев","Гаджиев","Алиев","Омаров","Исмаилов","Нурмагомедов","Курбанов","Шамилов","Мурадов","Гусейнов","Саидов","Рамазанов","Хабибов","Асланов"],
     femaleLast:  ["Магомедова","Абдуллаева","Гаджиева","Алиева","Омарова","Исмаилова","Нурмагомедова","Курбанова","Шамилова","Мурадова","Гусейнова","Саидова","Рамазанова","Хабибова","Асланова"],
   },
   chechen: {
-    label: "CHE", flag: "🇷🇺",
+    label: "CHE", flagCode: "ru",
     maleFirst:   ["Ахмед","Муслим","Иса","Адам","Рамзан","Аслан","Хусейн","Магомед","Апти","Шамиль","Сулим","Руслан","Турпал","Хамзат","Умар","Абдул","Бекхан","Зелимхан","Мовсар","Имран"],
     femaleFirst: ["Хеда","Амина","Лейла","Зарема","Марьям","Фатима","Мадина","Раиса","Элина","Седа","Айшат","Хава","Луиза","Амират","Диана","Сафия","Индира","Линда","Залина","Хавас"],
     maleLast:    ["Кадыров","Ямадаев","Дудаев","Бисаев","Джемалханов","Эдильгириев","Гелаев","Хасанов","Саидов","Исаев","Алиев","Мусаев","Ахмадов","Беков","Магомадов"],
     femaleLast:  ["Кадырова","Ямадаева","Дудаева","Бисаева","Джемалханова","Эдильгириева","Гелаева","Хасанова","Саидова","Исаева","Алиева","Мусаева","Ахмадова","Бекова","Магомадова"],
   },
   uzbek: {
-    label: "UZ", flag: "🇺🇿",
+    label: "UZ", flagCode: "uz",
     maleFirst:   ["Акбар","Бобур","Шерзод","Фаррух","Отабек","Санжар","Дилшод","Нодир","Жасур","Умид","Зафар","Равшан","Алишер","Ибрагим","Сардор","Хуршид","Хасан","Бехзод","Камол","Азиз"],
     femaleFirst: ["Малика","Нилуфар","Дилноза","Зебо","Гулнора","Феруза","Мадина","Барно","Камола","Мунира","Насиба","Умида","Лола","Дилрабо","Мухаббат","Хилола","Шахло","Гавхар","Дурдона","Наргиза"],
     maleLast:    ["Каримов","Рашидов","Назаров","Исмоилов","Юсупов","Хасанов","Тошматов","Абдуллаев","Мирзаев","Холиков","Норматов","Рахматов","Эргашев","Ниёзов","Тургунов"],
     femaleLast:  ["Каримова","Рашидова","Назарова","Исмоилова","Юсупова","Хасанова","Тошматова","Абдуллаева","Мирзаева","Холикова","Норматова","Рахматова","Эргашева","Ниёзова","Тургунова"],
   },
   kazakh: {
-    label: "KZ", flag: "🇰🇿",
+    label: "KZ", flagCode: "kz",
     maleFirst:   ["Нурлан","Асет","Болат","Даурен","Ерлан","Жандос","Айбек","Серик","Руслан","Арман","Бауыржан","Темірлан","Дамир","Алмас","Самат","Санжар","Расул","Ерболат","Нұрсұлтан","Мейрам"],
     femaleFirst: ["Айгүл","Динара","Гульнара","Алия","Мадина","Жулдыз","Алтынай","Сабина","Камила","Айнур","Зарина","Асель","Назгуль","Ақерке","Айдана","Томирис","Гаухар","Дариға","Жанна","Ұлбосын"],
     maleLast:    ["Ахметов","Нурмагамбетов","Бекқали","Жаксыбеков","Сейткали","Байжанов","Алибеков","Касымов","Телебаев","Абенов","Дюсенов","Ибрагимов","Мусин","Сатпаев","Қасымов"],
     femaleLast:  ["Ахметова","Нурмагамбетова","Бекқалиева","Жаксыбекова","Сейткалиева","Байжанова","Алибекова","Касымова","Телебаева","Абенова","Дюсенова","Ибрагимова","Мусина","Сатпаева","Қасымова"],
   },
   turkish: {
-    label: "TR", flag: "🇹🇷",
+    label: "TR", flagCode: "tr",
     maleFirst:   ["Mehmet","Ali","Mustafa","Ahmet","Hasan","Hüseyin","İbrahim","Ömer","Yusuf","Murat","Can","Burak","Emre","Serkan","Kemal","Fatih","Volkan","Cem","Onur","Tolga"],
     femaleFirst: ["Fatma","Ayşe","Zeynep","Emine","Hatice","Elif","Merve","Selin","Büşra","Derya","Esra","Kübra","Özlem","Nurgül","Tuğba","İrem","Gizem","Pınar","Yasemin","Dilek"],
     maleLast:    ["Yılmaz","Kaya","Demir","Şahin","Çelik","Öztürk","Arslan","Doğan","Yıldız","Koç","Çetin","Ay","Polat","Güler","Aydın","Erdoğan","Özkan","Şimşek","Yıldırım","Demirci"],
     femaleLast:  ["Yılmaz","Kaya","Demir","Şahin","Çelik","Öztürk","Arslan","Doğan","Yıldız","Koç","Çetin","Ay","Polat","Güler","Aydın","Erdoğan","Özkan","Şimşek","Yıldırım","Demirci"],
   },
   british: {
-    label: "GB", flag: "🇬🇧",
+    label: "GB", flagCode: "gb",
     maleFirst:   ["James","Oliver","Harry","George","Jack","Noah","Charlie","Jacob","Alfie","Freddie","William","Thomas","Joshua","Henry","Samuel","Ethan","Max","Leo","Luke","Edward"],
     femaleFirst: ["Olivia","Emma","Sophie","Emily","Isla","Poppy","Ava","Isabella","Lily","Grace","Charlotte","Amelia","Mia","Ella","Alice","Scarlett","Chloe","Ruby","Florence","Rosie"],
     maleLast:    ["Smith","Jones","Williams","Brown","Taylor","Davies","Evans","Wilson","Thomas","Roberts","Johnson","Lewis","Walker","Robinson","Wood","Clark","Hall","Wright","Mitchell","Turner"],
     femaleLast:  ["Smith","Jones","Williams","Brown","Taylor","Davies","Evans","Wilson","Thomas","Roberts","Johnson","Lewis","Walker","Robinson","Wood","Clark","Hall","Wright","Mitchell","Turner"],
   },
   german: {
-    label: "DE", flag: "🇩🇪",
+    label: "DE", flagCode: "de",
     maleFirst:   ["Hans","Wolfgang","Klaus","Dieter","Franz","Karl","Werner","Helmut","Otto","Lukas","Felix","Paul","Leon","Tim","Jonas","Finn","Elias","Max","Moritz","Sebastian"],
     femaleFirst: ["Maria","Anna","Elisabeth","Ursula","Monika","Christine","Stefanie","Sandra","Petra","Andrea","Laura","Lena","Sarah","Julia","Hannah","Leonie","Mia","Sophie","Lisa","Nina"],
     maleLast:    ["Müller","Schmidt","Schneider","Fischer","Weber","Meyer","Wagner","Becker","Schulz","Hoffmann","Schäfer","Koch","Bauer","Richter","Klein","Wolf","Schröder","Neumann","Schwarz","Zimmermann"],
     femaleLast:  ["Müller","Schmidt","Schneider","Fischer","Weber","Meyer","Wagner","Becker","Schulz","Hoffmann","Schäfer","Koch","Bauer","Richter","Klein","Wolf","Schröder","Neumann","Schwarz","Zimmermann"],
   },
   arabic: {
-    label: "AE", flag: "🇦🇪",
+    label: "AE", flagCode: "ae",
     maleFirst:   ["Mohammed","Ahmed","Ali","Omar","Khalid","Abdullah","Hamad","Saeed","Faisal","Tariq","Youssef","Hassan","Ibrahim","Karim","Nasser","Rashid","Walid","Bilal","Zaid","Jasim"],
     femaleFirst: ["Fatima","Aisha","Mariam","Sara","Layla","Noor","Hessa","Moza","Sheikha","Reem","Dana","Lina","Hana","Noura","Shamma","Amal","Dina","Rania","Salma","Ghada"],
     maleLast:    ["Al-Rashidi","Al-Mansouri","Al-Maktoum","Al-Farsi","Al-Khalifa","Al-Hamdan","Al-Sayed","Al-Bakri","Al-Nasser","Al-Mutairi","Al-Harbi","Al-Qahtani","Al-Dosari","Al-Balushi","Al-Shamsi"],
     femaleLast:  ["Al-Rashidi","Al-Mansouri","Al-Maktoum","Al-Farsi","Al-Khalifa","Al-Hamdan","Al-Sayed","Al-Bakri","Al-Nasser","Al-Mutairi","Al-Harbi","Al-Qahtani","Al-Dosari","Al-Balushi","Al-Shamsi"],
   },
   ukrainian: {
-    label: "UA", flag: "🇺🇦",
+    label: "UA", flagCode: "ua",
     maleFirst:   ["Олексій","Андрій","Богдан","Василь","Дмитро","Євген","Іван","Кирило","Максим","Микола","Назар","Олег","Павло","Роман","Сергій","Тарас","Юрій","Ярослав","Владислав","Данило"],
     femaleFirst: ["Анастасія","Вікторія","Дарина","Ірина","Катерина","Людмила","Марина","Наталія","Оксана","Олена","Поліна","Соломія","Тетяна","Уляна","Юлія","Ганна","Діана","Зоряна","Леся","Мар'яна"],
     maleLast:    ["Коваленко","Шевченко","Бондаренко","Ткаченко","Мельник","Кравченко","Олійник","Лисенко","Павленко","Савченко","Поліщук","Яременко","Гаврилюк","Литвин","Василенко"],
@@ -182,7 +182,7 @@ interface Passenger {
   gender: "M" | "F";
   birthYear: number;
   nationality: string;
-  flag: string;
+  flagCode: string;
 }
 
 function generateManifest(bookingId: number, depIcao: string, arrIcao: string, paxCount: number): Passenger[] {
@@ -212,7 +212,7 @@ function generateManifest(bookingId: number, depIcao: string, arrIcao: string, p
       gender: isFemale ? "F" : "M",
       birthYear,
       nationality: pool.label,
-      flag: pool.flag,
+      flagCode: pool.flagCode,
     };
   });
 }
@@ -265,7 +265,7 @@ function SeatMap({ manifest }: { manifest: Passenger[] }) {
                     key={col}
                     onMouseEnter={() => pax ? setTooltip({ seat: key, name: `${pax.lastName} ${pax.firstName}`, gender: pax.gender }) : undefined}
                     onMouseLeave={() => setTooltip(null)}
-                    title={pax ? `${pax.lastName} ${pax.firstName} · ${pax.birthYear} · ${pax.flag}` : key}
+                    title={pax ? `${pax.lastName} ${pax.firstName} · ${pax.birthYear} · ${pax.nationality}` : key}
                     className={`w-6 h-5 rounded-sm text-[9px] flex items-center justify-center cursor-default transition-all select-none
                       ${isBusiness
                         ? pax
@@ -293,7 +293,7 @@ function SeatMap({ manifest }: { manifest: Passenger[] }) {
                     key={col}
                     onMouseEnter={() => pax ? setTooltip({ seat: key, name: `${pax.lastName} ${pax.firstName}`, gender: pax.gender }) : undefined}
                     onMouseLeave={() => setTooltip(null)}
-                    title={pax ? `${pax.lastName} ${pax.firstName} · ${pax.birthYear} · ${pax.flag}` : key}
+                    title={pax ? `${pax.lastName} ${pax.firstName} · ${pax.birthYear} · ${pax.nationality}` : key}
                     className={`w-6 h-5 rounded-sm text-[9px] flex items-center justify-center cursor-default transition-all select-none
                       ${isBusiness
                         ? pax
@@ -454,7 +454,10 @@ export function PassengerManifest({ bookingId, departureCode, arrivalCode, passe
                           </td>
                           <td className="px-4 py-2 text-center text-gray-500">{p.birthYear}</td>
                           <td className="px-4 py-2 text-center">
-                            <span title={p.nationality}>{p.flag} {p.nationality}</span>
+                            <span className="inline-flex items-center gap-1.5">
+                              <img src={`https://flagcdn.com/${p.flagCode}.svg`} alt={p.nationality} className="h-3.5 w-5 rounded-[2px] object-cover" loading="lazy" decoding="async" />
+                              <span title={p.nationality}>{p.nationality}</span>
+                            </span>
                           </td>
                         </tr>
                       );

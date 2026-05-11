@@ -206,6 +206,34 @@ function formatAiracDate(d: Date) {
   return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
 }
 
+function formatApproxFlightsPerDay(totalFlights: number, range: ActivityRange, language: string) {
+  const rangeDays: Record<ActivityRange, number> = {
+    day: 1,
+    week: 7,
+    month: 30,
+    year: 365,
+  };
+
+  const normalizedTotal = Number(totalFlights || 0);
+  const perDay = normalizedTotal > 0 ? normalizedTotal / rangeDays[range] : 0;
+  const rounded = Math.max(0, Math.round(perDay));
+
+  if (language === "ru") {
+    if (rounded <= 0) {
+      return "примерно 0 полетов в день";
+    }
+    if (rounded % 10 === 1 && rounded % 100 !== 11) {
+      return `примерно ${rounded} полет в день`;
+    }
+    if ([2, 3, 4].includes(rounded % 10) && ![12, 13, 14].includes(rounded % 100)) {
+      return `примерно ${rounded} полета в день`;
+    }
+    return `примерно ${rounded} полетов в день`;
+  }
+
+  return `about ${rounded} flight${rounded === 1 ? '' : 's'} per day`;
+}
+
 // ACTIVITY_RANGES is defined inside AdminDashboard so it can use tr()
 
 export function AdminDashboard() {
@@ -286,6 +314,7 @@ export function AdminDashboard() {
   const selectedRangeMeta = ACTIVITY_RANGES.find((item) => item.value === selectedRange) || ACTIVITY_RANGES[1];
   const totalFlightsInRange = activityData.reduce((sum, item) => sum + Number(item.flights || 0), 0);
   const averageFlightsInRange = activityData.length > 0 ? totalFlightsInRange / activityData.length : 0;
+  const averageFlightsLabel = formatApproxFlightsPerDay(totalFlightsInRange, selectedRange, language);
   const chartMax = activityData.reduce((max, item) => Math.max(max, Number(item.flights || 0)), 0);
   const recentFlightsPreview = logs.slice(0, 8);
   const peakBucket = activityData.reduce<ActivityPoint | null>((best, item) => {
@@ -408,7 +437,7 @@ export function AdminDashboard() {
               </div>
               <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                 <div className="text-xs uppercase tracking-wide text-gray-500">{tr("Средний онлайн", "Avg online")}</div>
-                <div className="mt-1 text-2xl font-bold text-gray-900">{averageFlightsInRange.toFixed(1)}</div>
+                <div className="mt-1 text-xl font-bold leading-tight text-gray-900">{averageFlightsLabel}</div>
               </div>
               <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                 <div className="text-xs uppercase tracking-wide text-gray-500">{tr("Пик онлайна", "Peak online")}</div>
