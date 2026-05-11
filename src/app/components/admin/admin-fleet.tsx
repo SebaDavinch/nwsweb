@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, History, LayoutGrid, List, Loader2, Palette, Pencil, Plane, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ArrowUpDown, ChevronDown, ChevronRight, ChevronUp, ExternalLink, FileText, History, LayoutGrid, List, Loader2, MapPin, Palette, Pencil, Plane, Plus, RefreshCw, Search, Settings2, SlidersHorizontal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "../ui/card";
 import { Badge } from "../ui/badge";
@@ -13,6 +13,18 @@ import { ToggleGroup, ToggleGroupItem } from "../ui/toggle-group";
 import { fetchAdminBootstrap, getCachedAdminBootstrap } from "./admin-bootstrap-cache";
 import { useLanguage } from "../../context/language-context";
 
+interface FleetResource {
+  type?: string | null;
+  label: string;
+  url?: string | null;
+}
+
+interface FleetHub {
+  id: number | string;
+  name: string;
+  airportsText?: string | null;
+}
+
 interface FleetAircraft {
   id: string;
   model: string;
@@ -23,7 +35,13 @@ interface FleetAircraft {
   serviceable?: boolean;
   status?: string;
   baseHubId?: string;
-  notes?: string;
+  notes?: string | null;
+  description?: string | null;
+  imageUrl?: string | null;
+  baseHub?: FleetHub | null;
+  liveries?: FleetResource[];
+  scenarios?: FleetResource[];
+  links?: FleetResource[];
 }
 
 interface FleetGroup {
@@ -34,8 +52,9 @@ interface FleetGroup {
   color?: string;
   status?: string;
   baseHubId?: string;
-  notes?: string;
+  notes?: string | null;
   source?: string;
+  baseHub?: FleetHub | null;
   aircraft: FleetAircraft[];
 }
 
@@ -100,6 +119,7 @@ interface AdminAircraftFlight {
 
 type FleetViewMode = "gallery" | "list";
 type FleetAirlineCode = "NWS" | "KAR" | "STW";
+type SortKey = "registration" | "model" | "airlineCode" | "fleetName" | "fleetCode" | "status";
 
 const FLEET_VIEW_MODE_KEY = "nws.admin.fleet.viewMode";
 
@@ -167,6 +187,75 @@ const liveryStatusClassName = (status?: string | null) => {
   }
 };
 
+const resolveNullableNumber = (...values: unknown[]) => {
+  for (const value of values) {
+    if (value == null || value === "") {
+      continue;
+    }
+
+    const numeric = Number(value);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  return null;
+};
+
+const resolveNullableText = (...values: unknown[]) => {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
+const normalizeResourceItems = (items: FleetResource[] | undefined, notes?: string | null) => {
+  const source = Array.isArray(items) ? items : [];
+  const noteLinks = Array.from(String(notes || "").matchAll(/https?:\/\/\S+/gi)).map((match) => ({
+    label: match[0],
+    url: match[0],
+    type: "note",
+  }));
+  const merged = [...source, ...noteLinks];
+  const seen = new Set<string>();
+
+  return merged.filter((item) => {
+    const key = `${String(item?.label || "").trim().toLowerCase()}|${String(item?.url || "").trim().toLowerCase()}`;
+    if (!key || seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+};
+
+const renderResourceButton = (item: FleetResource, index: number) => {
+  if (item.url) {
+    return (
+      <a
+        key={`${item.label}-${index}`}
+        href={item.url}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+      >
+        <ExternalLink className="h-4 w-4" />
+        {item.label}
+      </a>
+    );
+  }
+
+  return (
+    <Badge key={`${item.label}-${index}`} variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">
+      {item.label}
+    </Badge>
+  );
+};
+
 const resolveFleetAirlineCode = (fleet?: Partial<FleetGroup> | null): FleetAirlineCode => {
   const source = [fleet?.airlineCode, fleet?.name, fleet?.code, fleet?.notes]
     .map((value) => String(value || "").trim().toUpperCase())
@@ -196,29 +285,71 @@ const normalizeManagedFleets = (value: unknown): FleetGroup[] => {
   return value.map((fleet, fleetIndex) => {
     const record = (fleet && typeof fleet === "object" ? fleet : {}) as Record<string, unknown>;
     const aircraft = Array.isArray(record.aircraft) ? record.aircraft : [];
+    const baseHubRecord = (record.baseHub && typeof record.baseHub === "object" ? record.baseHub : record.base_hub) as Record<string, unknown> | undefined;
+
     return {
       id: String(record.id || `fleet-${fleetIndex + 1}`),
       name: String(record.name || record.code || `Fleet ${fleetIndex + 1}`),
       code: String(record.code || ""),
-      airlineCode: typeof record.airlineCode === "string" ? record.airlineCode : undefined,
+      airlineCode: resolveNullableText(record.airlineCode, record.airline_code, (record.airline as Record<string, unknown> | undefined)?.code) || undefined,
       color: typeof record.color === "string" ? record.color : undefined,
-      status: typeof record.status === "string" ? record.status : undefined,
-      baseHubId: typeof record.baseHubId === "string" ? record.baseHubId : undefined,
-      notes: typeof record.notes === "string" ? record.notes : undefined,
+      status: resolveNullableText(record.status, record.state) || undefined,
+      baseHubId: resolveNullableText(record.baseHubId, record.base_hub_id, baseHubRecord?.id) || undefined,
+      notes: typeof record.notes === "string" ? record.notes : null,
       source: typeof record.source === "string" ? record.source : undefined,
+      baseHub: baseHubRecord
+        ? {
+            id: String(baseHubRecord.id || ""),
+            name: String(baseHubRecord.name || baseHubRecord.title || baseHubRecord.code || "").trim() || "Hub",
+            airportsText: resolveNullableText(baseHubRecord.airportsText, baseHubRecord.airports_text),
+          }
+        : null,
       aircraft: aircraft.map((item, aircraftIndex) => {
         const aircraftRecord = (item && typeof item === "object" ? item : {}) as Record<string, unknown>;
+        const rangeNm = resolveNullableNumber(
+          aircraftRecord.range_nm,
+          aircraftRecord.rangeNm,
+          aircraftRecord.range,
+          aircraftRecord.max_range,
+          aircraftRecord.maxRange,
+          aircraftRecord.flight_range,
+          aircraftRecord.flightRange
+        );
+        const cruiseSpeed = resolveNullableNumber(
+          aircraftRecord.cruise_speed,
+          aircraftRecord.cruiseSpeed,
+          aircraftRecord.speed,
+          aircraftRecord.cruise,
+          aircraftRecord.max_speed,
+          aircraftRecord.maxSpeed
+        );
+        const seats = resolveNullableNumber(aircraftRecord.seats, aircraftRecord.passengers, aircraftRecord.capacity, aircraftRecord.max_pax);
+        const serviceableRaw = aircraftRecord.serviceable ?? aircraftRecord.is_serviceable ?? aircraftRecord.isServiceable ?? aircraftRecord.available;
+        const aircraftBaseHubRecord = (aircraftRecord.baseHub && typeof aircraftRecord.baseHub === "object" ? aircraftRecord.baseHub : aircraftRecord.base_hub) as Record<string, unknown> | undefined;
+
         return {
           id: String(aircraftRecord.id || `aircraft-${fleetIndex + 1}-${aircraftIndex + 1}`),
-          model: String(aircraftRecord.model || "Aircraft"),
-          registration: String(aircraftRecord.registration || ""),
-          seats: Number(aircraftRecord.seats || 0) || 0,
-          range_nm: Number(aircraftRecord.range_nm || 0) || 0,
-          cruise_speed: Number(aircraftRecord.cruise_speed || 0) || 0,
-          serviceable: aircraftRecord.serviceable === false ? false : true,
-          status: typeof aircraftRecord.status === "string" ? aircraftRecord.status : undefined,
-          baseHubId: typeof aircraftRecord.baseHubId === "string" ? aircraftRecord.baseHubId : undefined,
-          notes: typeof aircraftRecord.notes === "string" ? aircraftRecord.notes : undefined,
+          model: String(aircraftRecord.model || aircraftRecord.name || aircraftRecord.type || aircraftRecord.aircraft_type || aircraftRecord.aircraftType || "Aircraft"),
+          registration: String(aircraftRecord.registration || aircraftRecord.reg || ""),
+          seats: seats ?? 0,
+          range_nm: rangeNm ?? undefined,
+          cruise_speed: cruiseSpeed ?? undefined,
+          serviceable: typeof serviceableRaw === "boolean" ? serviceableRaw : true,
+          status: resolveNullableText(aircraftRecord.status, aircraftRecord.state) || undefined,
+          baseHubId: resolveNullableText(aircraftRecord.baseHubId, aircraftRecord.base_hub_id, aircraftBaseHubRecord?.id) || undefined,
+          notes: typeof aircraftRecord.notes === "string" ? aircraftRecord.notes : null,
+          description: typeof aircraftRecord.description === "string" ? aircraftRecord.description : null,
+          imageUrl: resolveNullableText(aircraftRecord.imageUrl, aircraftRecord.image_url),
+          baseHub: aircraftBaseHubRecord
+            ? {
+                id: String(aircraftBaseHubRecord.id || ""),
+                name: String(aircraftBaseHubRecord.name || aircraftBaseHubRecord.title || aircraftBaseHubRecord.code || "").trim() || "Hub",
+                airportsText: resolveNullableText(aircraftBaseHubRecord.airportsText, aircraftBaseHubRecord.airports_text),
+              }
+            : null,
+          liveries: Array.isArray(aircraftRecord.liveries) ? (aircraftRecord.liveries as FleetResource[]) : [],
+          scenarios: Array.isArray(aircraftRecord.scenarios) ? (aircraftRecord.scenarios as FleetResource[]) : [],
+          links: Array.isArray(aircraftRecord.links) ? (aircraftRecord.links as FleetResource[]) : [],
         };
       }),
     };
@@ -248,7 +379,7 @@ export function AdminFleet() {
   const [fleets, setFleets] = useState<FleetGroup[]>(() => normalizeManagedFleets(initialBootstrap?.fleets));
   const [liveFleets, setLiveFleets] = useState<LiveFleetGroup[]>(() => normalizeLiveFleets(initialBootstrap?.liveFleets));
   const [hubs, setHubs] = useState<HubItem[]>(() => Array.isArray(initialBootstrap?.hubs) ? (initialBootstrap.hubs as HubItem[]) : []);
-  const [viewMode, setViewMode] = useState<FleetViewMode>("gallery");
+  const [viewMode, setViewMode] = useState<FleetViewMode>("list");
   const [isLoading, setIsLoading] = useState(!Array.isArray(initialBootstrap?.fleets));
   const [isSyncing, setIsSyncing] = useState(false);
   const [isLoadingLiveFleet, setIsLoadingLiveFleet] = useState(!Array.isArray(initialBootstrap?.liveFleets));
@@ -269,6 +400,13 @@ export function AdminFleet() {
   const [selectedAircraftId, setSelectedAircraftId] = useState<string>("");
   const [aircraftFlightsCache, setAircraftFlightsCache] = useState<Record<string, AdminAircraftFlight[]>>({});
   const [loadingFlightsId, setLoadingFlightsId] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("registration");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [filterFleetId, setFilterFleetId] = useState("all");
+  const [filterAirline, setFilterAirline] = useState("all");
+  const [filterServiceable, setFilterServiceable] = useState("all");
+  const [filterOpen, setFilterOpen] = useState(false);
 
   const loadAircraftFlights = async (aircraftId: string, numericId: number) => {
     if (aircraftFlightsCache[aircraftId] !== undefined) return;
@@ -387,6 +525,109 @@ export function AdminFleet() {
     }),
     [fleets]
   );
+
+  const hubById = useMemo(
+    () => new Map(hubs.map((hub) => [String(hub.id), String(hub.title || hub.name || hub.code || hub.id)])),
+    [hubs]
+  );
+
+  const flatAircraft = useMemo(
+    () => fleets.flatMap((fleet) => (Array.isArray(fleet.aircraft) ? fleet.aircraft : []).map((aircraft) => ({ ...aircraft, fleetRef: fleet }))),
+    [fleets]
+  );
+
+  const filteredAircraft = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return flatAircraft.filter((aircraft) => {
+      const airlineCode = resolveFleetAirlineCode(aircraft.fleetRef);
+      if (filterFleetId !== "all" && aircraft.fleetRef.id !== filterFleetId) return false;
+      if (filterAirline !== "all" && airlineCode !== filterAirline) return false;
+      if (filterServiceable === "serviceable" && aircraft.serviceable === false) return false;
+      if (filterServiceable === "maintenance" && aircraft.serviceable !== false) return false;
+      if (query) {
+        const haystack = [
+          aircraft.registration,
+          aircraft.model,
+          aircraft.status,
+          aircraft.notes,
+          aircraft.fleetRef.name,
+          aircraft.fleetRef.code,
+          aircraft.fleetRef.notes,
+          airlineCode,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      return true;
+    });
+  }, [filterAirline, filterFleetId, filterServiceable, flatAircraft, search]);
+
+  const sortedAircraft = useMemo(() => {
+    return [...filteredAircraft].sort((left, right) => {
+      let leftValue = "";
+      let rightValue = "";
+
+      switch (sortKey) {
+        case "registration":
+          leftValue = left.registration;
+          rightValue = right.registration;
+          break;
+        case "model":
+          leftValue = left.model;
+          rightValue = right.model;
+          break;
+        case "airlineCode":
+          leftValue = resolveFleetAirlineCode(left.fleetRef);
+          rightValue = resolveFleetAirlineCode(right.fleetRef);
+          break;
+        case "fleetName":
+          leftValue = left.fleetRef.name;
+          rightValue = right.fleetRef.name;
+          break;
+        case "fleetCode":
+          leftValue = left.fleetRef.code;
+          rightValue = right.fleetRef.code;
+          break;
+        case "status":
+          leftValue = left.serviceable === false ? "0" : "1";
+          rightValue = right.serviceable === false ? "0" : "1";
+          break;
+      }
+
+      const comparison = leftValue.localeCompare(rightValue, undefined, { numeric: true });
+      return sortDir === "asc" ? comparison : -comparison;
+    });
+  }, [filteredAircraft, sortDir, sortKey]);
+
+  const totalAircraft = fleets.reduce((sum, fleet) => sum + (Array.isArray(fleet.aircraft) ? fleet.aircraft.length : 0), 0);
+  const serviceableAircraft = fleets.reduce(
+    (sum, fleet) => sum + (Array.isArray(fleet.aircraft) ? fleet.aircraft.filter((aircraft) => aircraft.serviceable !== false).length : 0),
+    0
+  );
+  const totalLiveries = liveFleets.reduce((sum, fleet) => sum + (Array.isArray(fleet.liveries) ? fleet.liveries.length : 0), 0);
+  const airlineOptions = useMemo(
+    () => Array.from(new Set(fleets.map((fleet) => resolveFleetAirlineCode(fleet)))).sort(),
+    [fleets]
+  );
+  const activeFilterCount = (filterFleetId !== "all" ? 1 : 0) + (filterAirline !== "all" ? 1 : 0) + (filterServiceable !== "all" ? 1 : 0);
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDir("asc");
+  };
+
+  const SortIcon = ({ column }: { column: SortKey }) => {
+    if (sortKey !== column) {
+      return <ArrowUpDown className="h-3.5 w-3.5 text-gray-400" />;
+    }
+
+    return sortDir === "asc" ? <ChevronUp className="h-3.5 w-3.5 text-[#E31E24]" /> : <ChevronDown className="h-3.5 w-3.5 text-[#E31E24]" />;
+  };
 
   const openLiveryDialog = (fleetId: string) => {
     const liveFleet = liveFleetById.get(String(fleetId));
@@ -892,12 +1133,38 @@ export function AdminFleet() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div>
           <h2 className="text-2xl font-bold text-gray-800">{tr("Управление флотом", "Fleet Management")}</h2>
           <p className="text-sm text-gray-500">{tr("Управляйте локальными группами флота, самолетами, хабами и live-синхронизацией из vAMSYS.", "Manage local fleet groups, aircraft, hubs and live sync from vAMSYS.")}</p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-3">
+        <div className="flex flex-col gap-3 xl:items-end">
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+            <button
+              type="button"
+              onClick={() => setFilterOpen((current) => !current)}
+              className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium shadow-sm transition ${
+                filterOpen || activeFilterCount > 0 ? "bg-[#E31E24] text-white" : "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              {tr("Фильтры", "Filters")}
+              {activeFilterCount > 0 ? (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-white text-[11px] font-bold text-[#E31E24]">{activeFilterCount}</span>
+              ) : null}
+            </button>
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={tr("Поиск по флоту, самолету, регистрации...", "Search fleet, aircraft, registration...")}
+                className="w-72 rounded-xl border border-gray-200 py-2 pl-9 pr-3 text-sm outline-none focus:border-[#E31E24] focus:ring-1 focus:ring-[#E31E24]"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-3">
           <ToggleGroup
             type="single"
             value={viewMode}
@@ -922,13 +1189,424 @@ export function AdminFleet() {
             <Plus className="h-4 w-4" />
             {tr("Новая группа", "New group")}
           </Button>
+          </div>
         </div>
       </div>
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          { label: tr("Группы флота", "Fleet groups"), value: fleets.length },
+          { label: tr("Самолеты", "Aircraft"), value: totalAircraft },
+          { label: tr("Исправные", "Serviceable"), value: serviceableAircraft },
+          { label: tr("Ливреи", "Liveries"), value: totalLiveries },
+        ].map(({ label, value }) => (
+          <div key={label} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="text-sm text-gray-500">{label}</div>
+            <div className="mt-2 text-2xl font-semibold text-gray-900">{value}</div>
+          </div>
+        ))}
+      </div>
+
+      {filterOpen ? (
+        <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">{tr("Тип ВС", "Aircraft type")}</div>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFilterFleetId("all")}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterFleetId === "all" ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+              >
+                {tr("Все", "All")}
+              </button>
+              {fleets.map((fleet) => (
+                <button
+                  key={fleet.id}
+                  type="button"
+                  onClick={() => setFilterFleetId(filterFleetId === fleet.id ? "all" : fleet.id)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterFleetId === fleet.id ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  {fleet.code || fleet.name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {airlineOptions.length > 1 ? (
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">{tr("Авиакомпания", "Airline")}</div>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setFilterAirline("all")}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterAirline === "all" ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  {tr("Все", "All")}
+                </button>
+                {airlineOptions.map((code) => (
+                  <button
+                    key={code}
+                    type="button"
+                    onClick={() => setFilterAirline(filterAirline === code ? "all" : code)}
+                    className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterAirline === code ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                  >
+                    {code}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500">{tr("Статус", "Status")}</div>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                ["all", tr("Все", "All")],
+                ["serviceable", tr("Исправен", "Serviceable")],
+                ["maintenance", tr("На обслуживании", "Maintenance")],
+              ] as const).map(([option, label]) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => setFilterServiceable(option)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${filterServiceable === option ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {activeFilterCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterFleetId("all");
+                setFilterAirline("all");
+                setFilterServiceable("all");
+              }}
+              className="w-full rounded-xl border border-gray-200 py-1.5 text-xs text-gray-500 transition hover:bg-gray-50"
+            >
+              {tr("Сбросить все фильтры", "Reset all filters")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="flex min-h-[240px] items-center justify-center rounded-lg bg-white text-gray-500 shadow-sm">
           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           {tr("Загрузка каталога флота...", "Loading fleet catalog...")}
+        </div>
+      ) : viewMode === "list" ? (
+        <div className="overflow-hidden rounded-2xl border border-gray-200 shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-gray-200 bg-gray-50 text-left">
+                <tr>
+                  {([
+                    { col: "registration" as SortKey, label: tr("Борт", "Tail") },
+                    { col: "model" as SortKey, label: tr("Название", "Model") },
+                    { col: "airlineCode" as SortKey, label: tr("Авиакомпания", "Airline") },
+                    { col: "fleetName" as SortKey, label: tr("Группы флота", "Fleet group") },
+                    { col: "fleetCode" as SortKey, label: tr("Код", "Code") },
+                    { col: "status" as SortKey, label: tr("Статус", "Status") },
+                  ] as Array<{ col: SortKey; label: string }>).map(({ col, label }) => (
+                    <th
+                      key={col}
+                      className="cursor-pointer select-none px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500 hover:text-gray-700"
+                      onClick={() => handleSort(col)}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        {label}
+                        <SortIcon column={col} />
+                      </div>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 bg-white">
+                {sortedAircraft.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-14 text-center text-sm text-gray-400">
+                      {tr("Самолеты не найдены по текущим фильтрам.", "No aircraft matched the current filters.")}
+                    </td>
+                  </tr>
+                ) : sortedAircraft.map((aircraft) => {
+                  const isSelected = selectedAircraftId === aircraft.id;
+                  const flights = aircraftFlightsCache[aircraft.id];
+                  const airlineCode = resolveFleetAirlineCode(aircraft.fleetRef);
+                  const liveFleet = liveFleetById.get(String(aircraft.fleetRef.id));
+                  const liveLiveries = Array.isArray(liveFleet?.liveries) ? liveFleet.liveries : [];
+                  const baseHubLabel = aircraft.baseHub?.name || aircraft.fleetRef.baseHub?.name || hubById.get(String(aircraft.baseHubId || aircraft.fleetRef.baseHubId || ""));
+                  const baseHubAirportsText = aircraft.baseHub?.airportsText || aircraft.fleetRef.baseHub?.airportsText || null;
+                  const liveryItems = normalizeResourceItems(aircraft.liveries, aircraft.notes);
+                  const scenarioItems = normalizeResourceItems(aircraft.scenarios, aircraft.notes);
+                  const genericLinks = normalizeResourceItems(aircraft.links, aircraft.notes).filter(
+                    (item) => !liveryItems.some((entry) => entry.label === item.label && entry.url === item.url) && !scenarioItems.some((entry) => entry.label === item.label && entry.url === item.url)
+                  );
+
+                  return (
+                    <Fragment key={aircraft.id}>
+                      <tr
+                        onClick={() => {
+                          const nextId = isSelected ? "" : aircraft.id;
+                          setSelectedAircraftId(nextId);
+                          if (nextId) {
+                            void loadAircraftFlights(nextId, Number(nextId) || 0);
+                          }
+                        }}
+                        className={`cursor-pointer transition-colors ${isSelected ? "bg-red-50" : "hover:bg-gray-50"}`}
+                      >
+                        <td className="px-4 py-3 font-mono font-semibold text-gray-900">{aircraft.registration || "—"}</td>
+                        <td className="px-4 py-3 text-gray-700">{aircraft.model}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{airlineCode}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-500">{aircraft.fleetRef.name}</td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{aircraft.fleetRef.code || "—"}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
+                            aircraft.serviceable === false ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-green-50 text-green-700 ring-green-200"
+                          }`}>
+                            {aircraft.serviceable === false ? tr("На обслуживании", "Maintenance") : tr("Исправен", "Serviceable")}
+                          </span>
+                        </td>
+                      </tr>
+
+                      {isSelected ? (
+                        <tr>
+                          <td colSpan={6} className="border-t border-red-100 bg-red-50/40 px-6 py-5">
+                            <div className="space-y-5">
+                              {aircraft.imageUrl ? (
+                                <div className="overflow-hidden rounded-2xl border border-gray-100 bg-gray-50">
+                                  <img src={aircraft.imageUrl} alt={aircraft.model} className="h-52 w-full object-cover" />
+                                </div>
+                              ) : null}
+
+                              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                  <h3 className="text-xl font-semibold text-gray-900">{aircraft.model}</h3>
+                                  <div className="mt-0.5 text-sm text-gray-500">
+                                    {aircraft.registration || "—"}
+                                    {aircraft.fleetRef.name ? ` · ${aircraft.fleetRef.name}` : ""}
+                                    {airlineCode ? ` · ${airlineCode}` : ""}
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-2">
+                                  <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{aircraft.status || "active"}</Badge>
+                                  <Badge variant="outline" className={aircraft.serviceable === false ? "border-amber-200 bg-amber-50 text-amber-700" : "border-green-200 bg-green-50 text-green-700"}>
+                                    {aircraft.serviceable === false ? tr("На обслуживании", "Maintenance") : tr("Исправен", "Serviceable")}
+                                  </Badge>
+                                </div>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2">
+                                <Button type="button" variant="outline" size="sm" onClick={() => openAircraftDialog(aircraft.fleetRef.id, aircraft)}>
+                                  <Pencil className="h-4 w-4" />
+                                  {tr("Изменить самолет", "Edit aircraft")}
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => openAircraftDialog(aircraft.fleetRef.id)}>
+                                  <Plus className="h-4 w-4" />
+                                  {tr("Добавить самолет", "Add aircraft")}
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => openGroupDialog(aircraft.fleetRef)}>
+                                  <Pencil className="h-4 w-4" />
+                                  {tr("Изменить группу", "Edit group")}
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => openLiveryDialog(aircraft.fleetRef.id)} disabled={isLoadingLiveFleet || liveLiveries.length === 0}>
+                                  <Palette className="h-4 w-4" />
+                                  {tr("Ливреи", "Liveries")}
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => deleteAircraft(aircraft.id)}>
+                                  <Trash2 className="h-4 w-4" />
+                                  {tr("Удалить самолет", "Delete aircraft")}
+                                </Button>
+                              </div>
+
+                              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                                {[
+                                  { label: tr("Места", "Seats"), value: aircraft.seats || 0 },
+                                  { label: tr("Дальность", "Range"), value: aircraft.range_nm ? `${aircraft.range_nm} nm` : "—" },
+                                  { label: tr("Скорость", "Speed"), value: aircraft.cruise_speed ? `${aircraft.cruise_speed} kt` : "—" },
+                                  { label: tr("Хаб", "Hub"), value: baseHubLabel || "—" },
+                                ].map(({ label, value }) => (
+                                  <div key={label} className="rounded-xl border border-gray-200 bg-white px-4 py-3">
+                                    <div className="text-xs uppercase tracking-wide text-gray-500">{label}</div>
+                                    <div className="mt-1 text-lg font-semibold text-gray-900">{value}</div>
+                                  </div>
+                                ))}
+                              </div>
+
+                              {baseHubLabel ? (
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <MapPin className="h-4 w-4 text-red-600" />
+                                    {tr("Базовый хаб", "Base hub")}
+                                  </div>
+                                  <div className="mt-2 text-sm text-gray-700">{baseHubLabel}</div>
+                                  {baseHubAirportsText ? <div className="mt-1 text-xs text-gray-500">{baseHubAirportsText}</div> : null}
+                                </div>
+                              ) : null}
+
+                              {aircraft.description || aircraft.notes || aircraft.fleetRef.notes ? (
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <FileText className="h-4 w-4 text-red-600" />
+                                    {tr("Заметки", "Notes")}
+                                  </div>
+                                  <div className="mt-2 space-y-2 text-sm text-gray-600">
+                                    {aircraft.description ? <p>{aircraft.description}</p> : null}
+                                    {aircraft.notes ? <p>{aircraft.notes}</p> : null}
+                                    {!aircraft.notes && aircraft.fleetRef.notes ? <p>{aircraft.fleetRef.notes}</p> : null}
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {liveryItems.length > 0 ? (
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <Palette className="h-4 w-4 text-red-600" />
+                                    {tr("Ливреи", "Liveries")}
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2">{liveryItems.map(renderResourceButton)}</div>
+                                </div>
+                              ) : null}
+
+                              {scenarioItems.length > 0 ? (
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <Plane className="h-4 w-4 text-red-600" />
+                                    {tr("Сценарии", "Scenarios")}
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2">{scenarioItems.map(renderResourceButton)}</div>
+                                </div>
+                              ) : null}
+
+                              {genericLinks.length > 0 ? (
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                    <ExternalLink className="h-4 w-4 text-red-600" />
+                                    {tr("Ресурсы", "Resources")}
+                                  </div>
+                                  <div className="mt-3 flex flex-wrap gap-2">{genericLinks.map(renderResourceButton)}</div>
+                                </div>
+                              ) : null}
+
+                              {liveLiveries.length > 0 ? (
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                                      <Palette className="h-4 w-4 text-red-600" />
+                                      Live liveries
+                                    </div>
+                                    <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{liveLiveries.length} entries</Badge>
+                                  </div>
+                                  <div className="grid gap-2 md:grid-cols-2">
+                                    {liveLiveries.slice(0, 4).map((livery) => (
+                                      <button
+                                        key={livery.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setSelectedLiveryFleetId(String(aircraft.fleetRef.id));
+                                          setSelectedLiveryId(livery.id);
+                                          setSelectedLiveryDetail(livery);
+                                          setLiveryDialogOpen(true);
+                                        }}
+                                        className="rounded-xl border border-gray-200 bg-white px-3 py-3 text-left transition-colors hover:border-red-100 hover:bg-gray-50"
+                                      >
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div>
+                                            <div className="font-medium text-gray-900">{livery.name}</div>
+                                            <div className="mt-1 text-xs text-gray-500">{livery.aircraftType || livery.aircraft || "Unknown aircraft"}</div>
+                                          </div>
+                                          <Badge variant="outline" className={liveryStatusClassName(livery.status)}>{livery.status || "pending"}</Badge>
+                                        </div>
+                                      </button>
+                                    ))}
+                                  </div>
+                                  <div>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => openLiveryDialog(aircraft.fleetRef.id)}>
+                                      <Palette className="h-4 w-4" />
+                                      {tr("Открыть модерацию ливрей", "Open livery moderation")}
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-900">
+                                  <Settings2 className="h-4 w-4 text-red-600" />
+                                  {tr("Конфигурация", "Config & Equipment")}
+                                </div>
+                                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 text-sm">
+                                  {[
+                                    { label: tr("Статус", "Status"), value: aircraft.status || "active" },
+                                    { label: tr("Флот", "Fleet"), value: aircraft.fleetRef.name || "—" },
+                                    { label: tr("Код флота", "Fleet code"), value: aircraft.fleetRef.code || "—" },
+                                    { label: tr("Авиакомпания", "Airline"), value: airlineCode },
+                                    { label: tr("Источник", "Source"), value: aircraft.fleetRef.source || "local" },
+                                    { label: tr("Ливреи", "Liveries"), value: liveLiveries.length },
+                                  ].map(({ label, value }) => (
+                                    <div key={label} className="flex items-center justify-between gap-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2">
+                                      <span className="text-xs text-gray-500">{label}</span>
+                                      <span className="font-medium text-gray-900">{value}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-gray-900">
+                                  <History className="h-4 w-4 text-red-600" />
+                                  {tr("Последние рейсы", "Latest Flights")}
+                                </div>
+                                {loadingFlightsId === aircraft.id ? (
+                                  <div className="flex items-center gap-2 py-4 text-sm text-gray-500">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    {tr("Загрузка...", "Loading...")}
+                                  </div>
+                                ) : !flights || flights.length === 0 ? (
+                                  <div className="text-sm text-gray-400">{tr("Рейсов нет", "No flights found")}</div>
+                                ) : (
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                      <thead>
+                                        <tr className="border-b border-gray-200">
+                                          <th className="pb-1 text-left font-medium text-gray-500">{tr("Рейс", "Flight")}</th>
+                                          <th className="pb-1 text-left font-medium text-gray-500">{tr("Маршрут", "Route")}</th>
+                                          <th className="pb-1 text-left font-medium text-gray-500">{tr("Посадка", "Landing")}</th>
+                                          <th className="pb-1 text-left font-medium text-gray-500">{tr("Статус", "Status")}</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-gray-100">
+                                        {flights.map((flight) => (
+                                          <tr key={flight.id}>
+                                            <td className="py-1.5 pr-3 font-mono font-medium text-gray-800">{flight.flightNumber}</td>
+                                            <td className="py-1.5 pr-3 font-mono text-gray-600">{flight.departure} → {flight.arrival}</td>
+                                            <td className="py-1.5 pr-3 text-gray-600">{flight.landingRate}</td>
+                                            <td className="py-1.5">
+                                              <Badge variant="outline" className="border-gray-200 bg-white text-[10px] text-gray-700">{flight.status}</Badge>
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div className="space-y-6">

@@ -105,6 +105,46 @@ interface AirportBulkFormState {
   preferredAlternates: string;
 }
 
+const ruCountryNameFallbackMap: Record<string, string> = {
+  Belarus: "Беларусь",
+  Cuba: "Куба",
+  Egypt: "Египет",
+  Georgia: "Грузия",
+  Iran: "Иран",
+  Kyrgyzstan: "Киргизия",
+  "North Korea": "Северная Корея",
+  Russia: "Россия",
+  Tajikistan: "Таджикистан",
+  Thailand: "Таиланд",
+  Turkey: "Турция",
+  Venezuela: "Венесуэла",
+  Vietnam: "Вьетнам",
+};
+
+const getLocalizedCountryName = (
+  countryName?: string | null,
+  countryIso2?: string | null,
+  language: string = "en"
+) => {
+  const rawName = String(countryName || "").trim();
+  if (!rawName || language !== "ru") {
+    return rawName;
+  }
+
+  const iso2 = String(countryIso2 || "").trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(iso2)) {
+    try {
+      const translated = new Intl.DisplayNames(["ru"], { type: "region" }).of(iso2);
+      if (translated) {
+        return translated;
+      }
+    } catch {
+    }
+  }
+
+  return ruCountryNameFallbackMap[rawName] || rawName;
+};
+
 const formatDateTime = (value?: string | null) => {
   if (!value) {
     return "—";
@@ -825,10 +865,27 @@ export function AdminAirportsManagement() {
     [airports]
   );
 
-  const countryOptions = useMemo(
-    () => Array.from(new Set(airports.map((airport) => String(airport.countryName || "")).filter((value) => value && value !== "—"))).sort(),
-    [airports]
-  );
+  const countryOptions = useMemo(() => {
+    const countryIsoByName = new Map<string, string>();
+
+    airports.forEach((airport) => {
+      const countryName = String(airport.countryName || "").trim();
+      if (!countryName || countryName === "—") {
+        return;
+      }
+
+      if (!countryIsoByName.has(countryName)) {
+        countryIsoByName.set(countryName, String(airport.countryIso2 || "").trim());
+      }
+    });
+
+    return Array.from(countryIsoByName.entries())
+      .map(([value, iso2]) => ({
+        value,
+        label: getLocalizedCountryName(value, iso2, language),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, language === "ru" ? "ru" : "en"));
+  }, [airports, language]);
 
   const filteredAirports = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -1103,7 +1160,9 @@ export function AdminAirportsManagement() {
               <SelectTrigger className="w-full xl:w-56"><SelectValue placeholder="Country" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">{tr("Все страны", "All countries")}</SelectItem>
-                {countryOptions.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                {countryOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <Select value={sortBy} onValueChange={setSortBy}>

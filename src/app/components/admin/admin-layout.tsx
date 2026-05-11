@@ -23,7 +23,6 @@ import { AdminAuthLogs } from "./admin-auth-logs";
 import { AdminBannerGeneratorPage } from "./admin-banner-generator";
 import { AdminGallery } from "./admin-gallery";
 import { AdminCallsignChecker } from "./admin-callsign-checker";
-import { AdminNotams } from "./admin-notams";
 import {
   Award,
   Bell,
@@ -46,7 +45,6 @@ import {
   Route,
   Send,
   Settings,
-  ShieldAlert,
   ShieldCheck,
   Users,
 } from "lucide-react";
@@ -75,7 +73,7 @@ function AdminPageContent({ page, pageId }: { page: string; pageId: number }) {
   if (page === "fleet") return <AdminFleet />;
   if (page === "news") return <AdminNews />;
   if (page === "activities") return <AdminActivities />;
-  if (page === "notams") return <AdminNotams />;
+  if (page === "notams") return <AdminNews />;
   if (page === "pilots") return <AdminPilots />;
   if (page === "documents") return <AdminDocuments />;
   if (page === "events") return <AdminEvents />;
@@ -203,11 +201,10 @@ export function AdminLayout() {
         id: "media",
         label: tr("Медиа", "Media"),
         items: [
-          { page: "news", icon: Bell, label: tr("Новости", "News") },
+          { page: "news", icon: Bell, label: t("admin.nav.news") },
           { page: "tickets", icon: MessageSquare, label: tr("Тикеты", "Tickets") },
           { page: "badges", icon: Award, label: tr("Бейджи", "Badges") },
           { page: "activities", icon: Bell, label: tr("Активности", "Activities") },
-          { page: "notams", icon: ShieldAlert, label: tr("NOTAMы vAMSYS", "vAMSYS NOTAMs") },
           { page: "banner-generator", icon: ImagePlus, label: tr("Генератор баннеров", "Banner Generator"), standalone: "/banner-generator" },
           { page: "gallery", icon: Images, label: tr("Галерея", "Gallery") },
         ],
@@ -233,9 +230,10 @@ export function AdminLayout() {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const requestedPage = params.get("page") || "dashboard";
+    const normalizedPage = requestedPage === "notams" ? "news" : requestedPage;
     const requestedId = Number(params.get("id") || 0) || 0;
     if (ADMIN_PAGES.has(requestedPage)) {
-      setActivePage(requestedPage);
+      setActivePage(normalizedPage);
       setActiveId(requestedId);
     } else {
       setActivePage("dashboard");

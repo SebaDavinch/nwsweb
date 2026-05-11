@@ -27,7 +27,23 @@ import {
 } from "../ui/dropdown-menu";
 import { NewsForm, type NewsFormData } from "./news-form";
 
-type OpsCategory = "NOTAM" | "Alert";
+type OpsCategory = "News" | "NOTAM" | "Alert";
+
+interface ManagedNewsItem {
+  id: string | number;
+  title?: string;
+  content?: string;
+  summary?: string;
+  author?: string;
+  date?: string;
+  status?: string;
+  category?: string;
+  type?: string;
+  published?: boolean;
+  views?: number;
+  tag?: string | null;
+  linkUrl?: string | null;
+}
 
 interface NotamApiItem {
   id: number;
@@ -57,9 +73,9 @@ interface AlertApiItem {
 
 interface OpsItem {
   id: string;
-  externalId: number;
+  externalId: string | number;
   category: OpsCategory;
-  source: "vamsys";
+  source: "vamsys" | "local";
   title: string;
   content: string;
   author: string;
@@ -95,18 +111,49 @@ const toNotamPriority = (value: string | undefined): OpsItem["notamPriority"] =>
 };
 
 export function AdminNews() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [filter, setFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<OpsItem | null>(null);
   const [items, setItems] = useState<OpsItem[]>([]);
+  const tr = useCallback((ru: string, en: string) => (language === "ru" ? ru : en), [language]);
 
   const label = (key: string, fallback: string) => {
     const translated = t(key);
     return translated === key ? fallback : translated;
   };
+
+  const mapManagedNews = useCallback((item: ManagedNewsItem): OpsItem | null => {
+    const normalizedCategory = String(item.category || item.type || "").trim().toLowerCase();
+    if (normalizedCategory !== "news") {
+      return null;
+    }
+
+    const normalizedStatus = String(item.status || "").trim().toLowerCase();
+    const status: OpsItem["status"] = normalizedStatus === "archived"
+      ? "Archived"
+      : normalizedStatus === "draft"
+        ? "Draft"
+        : "Published";
+
+    return {
+      id: `news-${String(item.id || "")}`,
+      externalId: String(item.id || ""),
+      source: "local",
+      title: String(item.title || tr("Новость без заголовка", "Untitled news")),
+      category: "News",
+      content: String(item.content || item.summary || ""),
+      author: String(item.author || tr("Админ", "Admin")),
+      date: String(item.date || "").slice(0, 10) || new Date().toISOString().slice(0, 10),
+      status,
+      views: Number(item.views || 0),
+      sendToDiscord: false,
+      tag: item.tag || null,
+      linkUrl: item.linkUrl || null,
+    };
+  }, [tr]);
 
   const mapNotam = useCallback((notam: NotamApiItem): OpsItem => ({
     id: `notam-${Number(notam.id || 0)}`,
@@ -159,20 +206,20 @@ export function AdminNews() {
 
   const loadOps = useCallback(async (isActiveCheck?: () => boolean) => {
     try {
-      const [notamsResponse, alertsResponse] = await Promise.all([
-        fetch("/api/admin/notams"),
-        fetch("/api/admin/alerts"),
+      const [newsResponse, notamsResponse, alertsResponse] = await Promise.all([
+        fetch("/api/admin/content/activities", { credentials: "include" }).catch(() => null),
+        fetch("/api/admin/notams", { credentials: "include" }).catch(() => null),
+        fetch("/api/admin/alerts", { credentials: "include" }).catch(() => null),
       ]);
 
-      if (!notamsResponse.ok || !alertsResponse.ok) {
-        return;
-      }
-
-      const notamsPayload = await notamsResponse.json();
-      const alertsPayload = await alertsResponse.json();
+      const newsPayload = newsResponse && newsResponse.ok ? await newsResponse.json() : null;
+      const notamsPayload = notamsResponse && notamsResponse.ok ? await notamsResponse.json() : null;
+      const alertsPayload = alertsResponse && alertsResponse.ok ? await alertsResponse.json() : null;
+      const newsItems: ManagedNewsItem[] = Array.isArray(newsPayload?.items) ? newsPayload.items : [];
       const notams: NotamApiItem[] = Array.isArray(notamsPayload?.notams) ? notamsPayload.notams : [];
       const alerts: AlertApiItem[] = Array.isArray(alertsPayload?.alerts) ? alertsPayload.alerts : [];
       const mapped = [
+        ...newsItems.map((item) => mapManagedNews(item)).filter((item): item is OpsItem => Boolean(item)),
         ...alerts.map((alert) => mapAlert(alert)),
         ...notams.map((notam) => mapNotam(notam)),
       ].sort((left, right) => {
@@ -191,7 +238,7 @@ export function AdminNews() {
     } catch (error) {
       console.error("Не удалось загрузить alerts и NOTAM", error);
     }
-  }, [mapAlert, mapNotam]);
+  }, [mapAlert, mapManagedNews, mapNotam]);
 
   useEffect(() => {
     let active = true;
@@ -203,7 +250,37 @@ export function AdminNews() {
 
   const handleCreate = async (data: NewsFormData) => {
     try {
-      if (data.category === "NOTAM") {
+      if (data.category === "News") {
+        const requestBody = {
+          title: data.title,
+          category: "News",
+          type: "news",
+          status: data.status,
+          published: data.status === "Published",
+          author: data.author || tr("Админ", "Admin"),
+          date: data.date || new Date().toISOString().slice(0, 10),
+          content: data.content,
+          summary: data.content.slice(0, 180),
+          tag: data.tag || null,
+          linkUrl: data.linkUrl || null,
+          sendToDiscord: Boolean(data.sendToDiscord),
+        };
+        const response = await fetch(
+          editingItem?.category === "News"
+            ? `/api/admin/content/activities/${encodeURIComponent(String(editingItem.externalId))}`
+            : "/api/admin/content/activities",
+          {
+            method: editingItem?.category === "News" ? "PUT" : "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(requestBody),
+          }
+        );
+        if (!response.ok) {
+          alert(label("admin.news.operationFailed", "Операция не выполнена"));
+          return;
+        }
+      } else if (data.category === "NOTAM") {
         const requestBody = {
           title: data.title,
           content: data.content,
@@ -216,6 +293,7 @@ export function AdminNews() {
         };
         const response = await fetch(editingItem?.externalId ? `/api/admin/notams/${editingItem.externalId}` : "/api/admin/notams", {
           method: editingItem?.externalId ? "PUT" : "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         });
@@ -236,6 +314,7 @@ export function AdminNews() {
         };
         const response = await fetch(editingItem?.externalId ? `/api/admin/alerts/${editingItem.externalId}` : "/api/admin/alerts", {
           method: editingItem?.externalId ? "PUT" : "POST",
+          credentials: "include",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(requestBody),
         });
@@ -262,10 +341,20 @@ export function AdminNews() {
 
     if (confirm(t("admin.news.confirmDelete"))) {
       try {
-        const endpoint = current.category === "Alert" ? `/api/admin/alerts/${current.externalId}` : `/api/admin/notams/${current.externalId}`;
-        const response = await fetch(endpoint, { method: "DELETE" }).catch(() => null);
+        const endpoint = current.category === "News"
+          ? `/api/admin/content/activities/${encodeURIComponent(String(current.externalId))}`
+          : current.category === "Alert"
+            ? `/api/admin/alerts/${current.externalId}`
+            : `/api/admin/notams/${current.externalId}`;
+        const response = await fetch(endpoint, { method: "DELETE", credentials: "include" }).catch(() => null);
         if (!response || !response.ok) {
-          alert(current.category === "Alert" ? label("admin.news.deleteAlertFailed", "Не удалось удалить alert из vAMSYS") : t("admin.news.deleteNotamFailed") || "Не удалось удалить NOTAM из vAMSYS");
+          alert(
+            current.category === "News"
+              ? label("admin.news.operationFailed", "Операция не выполнена")
+              : current.category === "Alert"
+                ? label("admin.news.deleteAlertFailed", "Не удалось удалить alert из vAMSYS")
+                : t("admin.news.deleteNotamFailed") || "Не удалось удалить NOTAM из vAMSYS"
+          );
           return;
         }
         await loadOps();
@@ -326,6 +415,7 @@ export function AdminNews() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">{t("news.allCategories")}</SelectItem>
+                  <SelectItem value="news">{t("news.cat.news")}</SelectItem>
                   <SelectItem value="alert">{label("admin.news.filter.alert", "Alerts")}</SelectItem>
                   <SelectItem value="notam">{t("news.cat.notam")}</SelectItem>
                 </SelectContent>
@@ -366,7 +456,7 @@ export function AdminNews() {
                       <td className="px-4 py-3 font-medium text-gray-900">{item.title}</td>
                       <td className="px-4 py-3">
                         <Badge variant="outline" className={`
-                          ${item.category === 'NOTAM' ? 'border-orange-200 bg-orange-50 text-orange-700' : 'border-sky-200 bg-sky-50 text-sky-700'}
+                          ${item.category === 'NOTAM' ? 'border-orange-200 bg-orange-50 text-orange-700' : item.category === 'Alert' ? 'border-sky-200 bg-sky-50 text-sky-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}
                         `}>
                           {item.category}
                         </Badge>
@@ -380,7 +470,7 @@ export function AdminNews() {
                               : "border-gray-200 bg-gray-50 text-gray-700"
                           }
                         >
-                          {item.source === "vamsys" ? "vAMSYS" : "Локально"}
+                          {item.source === "vamsys" ? "vAMSYS" : tr("Сайт", "Site")}
                         </Badge>
                       </td>
                       <td className="px-4 py-3">

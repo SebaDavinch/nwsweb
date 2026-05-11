@@ -2683,6 +2683,39 @@ const extractPilotRoleLabels = (pilot = {}) => {
   return Array.from(labels);
 };
 
+const hasStaffLikeRoleLabels = (labels = []) => {
+  const normalized = (Array.isArray(labels) ? labels : [])
+    .map((value) => normalizeAdminText(value).toLowerCase())
+    .filter(Boolean);
+
+  return normalized.some(
+    (value) =>
+      value.includes("staff") ||
+      value.includes("dispatch") ||
+      value.includes("ops") ||
+      value.includes("operation") ||
+      value.includes("train") ||
+      value.includes("instructor") ||
+      value.includes("exam") ||
+      value.includes("event") ||
+      value.includes("community") ||
+      value.includes("media") ||
+      value.includes("marketing") ||
+      value.includes("hr") ||
+      value.includes("human") ||
+      value.includes("recruit") ||
+      value.includes("ceo") ||
+      value.includes("coo") ||
+      value.includes("director") ||
+      value.includes("management") ||
+      value.includes("manager") ||
+      value.includes("support") ||
+      value.includes("moder") ||
+      value.includes("lead") ||
+      value.includes("chief")
+  );
+};
+
 const inferStaffDivision = (labels = []) => {
   const normalized = labels
     .map((value) => normalizeAdminText(value).toLowerCase())
@@ -2784,23 +2817,30 @@ const findExistingStaffEntry = (items = [], { pilotId = null, email = "", userna
 
 const syncAdminStaffCollection = async () => {
   const [rosterPayload, ranksMap] = await Promise.all([
-    loadPilotsRoster({ force: true }),
-    loadRanksMap(),
+    loadPilotsRoster({ force: true }).catch(async (error) => {
+      logger.warn("[admin-staff] roster_force_refresh_failed", String(error));
+      return loadPilotsRoster();
+    }),
+    loadRanksMap().catch(async (error) => {
+      logger.warn("[admin-staff] ranks_refresh_failed", String(error));
+      return loadRanksMap();
+    }),
   ]);
 
   const existingItems = listManagedAdminCollection("staff");
   const rosterPilots = (Array.isArray(rosterPayload?.pilots) ? rosterPayload.pilots : [])
     .filter((pilot) => Number(pilot?.id || 0) > 0);
+  const staffRosterPilots = rosterPilots.filter((pilot) => pilot && isPilotStaff(pilot));
   const rosterById = new Map(
-    rosterPilots
+    staffRosterPilots
       .map((pilot) => [Number(pilot?.id || 0) || 0, pilot])
       .filter(([id]) => id > 0)
   );
   const detailedPilots = [];
   const profileBatchSize = 20;
 
-  for (let index = 0; index < rosterPilots.length; index += profileBatchSize) {
-    const batch = rosterPilots.slice(index, index + profileBatchSize);
+  for (let index = 0; index < staffRosterPilots.length; index += profileBatchSize) {
+    const batch = staffRosterPilots.slice(index, index + profileBatchSize);
     const detailedBatch = await Promise.all(
       batch.map(async (rosterPilot) => {
         const pilotId = Number(rosterPilot?.id || 0) || 0;
@@ -9654,7 +9694,19 @@ const extractRoleNames = (pilot) => {
 };
 
 const isPilotStaff = (pilot) => {
-  return hasConfiguredVamsysAdminAccess(pilot);
+  if (hasConfiguredVamsysAdminAccess(pilot)) {
+    return true;
+  }
+
+  if (Array.isArray(pilot?.staff_roles) && pilot.staff_roles.length > 0) {
+    return true;
+  }
+
+  if (Array.isArray(pilot?.staffRoles) && pilot.staffRoles.length > 0) {
+    return true;
+  }
+
+  return hasStaffLikeRoleLabels(extractPilotRoleLabels(pilot));
 };
 
 const resolveVamsysDiscordMatch = (pilot, discordUser) => {
@@ -16300,6 +16352,11 @@ const loadPilotsRoster = async ({ force = false } = {}) => {
         airlineId: Number(pilot?.airline_id || 0) || null,
         rank: rankId ? rankMap.get(rankId) || `Rank #${rankId}` : "",
         rankId,
+        honoraryRankId: Number(pilot?.honorary_rank_id || pilot?.honoraryRankId || pilot?.honorary_rank?.id || 0) || null,
+        honoraryRankName: resolveHonoraryRankLabel(pilot),
+        roles: Array.isArray(pilot?.roles) ? pilot.roles : [],
+        staff_roles: Array.isArray(pilot?.staff_roles) ? pilot.staff_roles : Array.isArray(pilot?.staffRoles) ? pilot.staffRoles : [],
+        groups: Array.isArray(pilot?.groups) ? pilot.groups : [],
         hours: Number(pilot?.hours || pilot?.total_hours || 0) || 0,
         flights: Number(pilot?.flights || pilot?.total_flights || 0) || 0,
         status,

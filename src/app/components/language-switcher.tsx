@@ -12,7 +12,7 @@ export function LanguageSwitcher() {
         }`}
         title="English"
       >
-        <span className="text-2xl">🇬🇧</span>
+        <img src="https://flagcdn.com/gb.svg" alt="EN" className="h-6 w-8 rounded-sm object-cover" loading="lazy" decoding="async" />
       </button>
       <button
         onClick={() => setLanguage("ru")}
@@ -21,7 +21,7 @@ export function LanguageSwitcher() {
         }`}
         title="Русский"
       >
-        <span className="text-2xl">🇷🇺</span>
+        <img src="https://flagcdn.com/ru.svg" alt="RU" className="h-6 w-8 rounded-sm object-cover" loading="lazy" decoding="async" />
       </button>
     </div>
   );

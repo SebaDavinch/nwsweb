@@ -43,6 +43,46 @@ interface AirportsResponse {
   error?: string;
 }
 
+const ruCountryNameFallbackMap: Record<string, string> = {
+  Belarus: "Беларусь",
+  Cuba: "Куба",
+  Egypt: "Египет",
+  Georgia: "Грузия",
+  Iran: "Иран",
+  Kyrgyzstan: "Киргизия",
+  "North Korea": "Северная Корея",
+  Russia: "Россия",
+  Tajikistan: "Таджикистан",
+  Thailand: "Таиланд",
+  Turkey: "Турция",
+  Venezuela: "Венесуэла",
+  Vietnam: "Вьетнам",
+};
+
+const getLocalizedCountryName = (
+  countryName?: string | null,
+  countryIso2?: string | null,
+  language: string = "en"
+) => {
+  const rawName = String(countryName || "").trim();
+  if (!rawName || language !== "ru") {
+    return rawName;
+  }
+
+  const iso2 = String(countryIso2 || "").trim().toUpperCase();
+  if (/^[A-Z]{2}$/.test(iso2)) {
+    try {
+      const translated = new Intl.DisplayNames(["ru"], { type: "region" }).of(iso2);
+      if (translated) {
+        return translated;
+      }
+    } catch {
+    }
+  }
+
+  return ruCountryNameFallbackMap[rawName] || rawName;
+};
+
 const pilotAirportsCache = createDashboardSessionCache<DashboardAirport[]>("nws.dashboard.pilotAirports.v1", 10 * 60 * 1000);
 
 const normalizeAirports = (value: unknown): DashboardAirport[] => {
@@ -75,7 +115,7 @@ const normalizeAirports = (value: unknown): DashboardAirport[] => {
 };
 
 export function PilotAirports() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const navigate = useNavigate();
   const [airports, setAirports] = useState<DashboardAirport[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -128,10 +168,27 @@ export function PilotAirports() {
     };
   }, []);
 
-  const countryOptions = useMemo(
-    () => Array.from(new Set(airports.map((airport) => String(airport.countryName || "").trim()).filter(Boolean))).sort(),
-    [airports]
-  );
+  const countryOptions = useMemo(() => {
+    const countryIsoByName = new Map<string, string>();
+
+    airports.forEach((airport) => {
+      const countryName = String(airport.countryName || "").trim();
+      if (!countryName) {
+        return;
+      }
+
+      if (!countryIsoByName.has(countryName)) {
+        countryIsoByName.set(countryName, String(airport.countryIso2 || "").trim());
+      }
+    });
+
+    return Array.from(countryIsoByName.entries())
+      .map(([value, iso2]) => ({
+        value,
+        label: getLocalizedCountryName(value, iso2, language),
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label, language === "ru" ? "ru" : "en"));
+  }, [airports, language]);
 
   const filteredAirports = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -213,7 +270,9 @@ export function PilotAirports() {
           <SelectTrigger className="w-44"><SelectValue placeholder={t("dashboard.airports.country")} /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("dashboard.airports.allCountries")}</SelectItem>
-            {countryOptions.map((country) => <SelectItem key={country} value={country}>{country}</SelectItem>)}
+            {countryOptions.map((country) => (
+              <SelectItem key={country.value} value={country.value}>{country.label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <Select value={baseFilter} onValueChange={setBaseFilter}>

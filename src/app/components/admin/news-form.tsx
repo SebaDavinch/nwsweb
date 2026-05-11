@@ -23,7 +23,7 @@ import { useLanguage } from "../../context/language-context";
 
 export interface NewsFormData {
   title: string;
-  category: "News" | "NOTAM" | "Event" | "Alert";
+  category: "News" | "NOTAM" | "Alert";
   notamType?: "info" | "warning" | "critical";
   notamPriority?: "low" | "medium" | "high";
   mustRead?: boolean;
@@ -163,7 +163,6 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
                   <SelectItem value="Alert">{t("admin.news.form.category.alert")}</SelectItem>
                   <SelectItem value="News">{t("news.cat.news")}</SelectItem>
                   <SelectItem value="NOTAM">{t("news.cat.notam")}</SelectItem>
-                  <SelectItem value="Event">{t("news.cat.event")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

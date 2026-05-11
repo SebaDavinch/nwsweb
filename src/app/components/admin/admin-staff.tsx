@@ -171,7 +171,11 @@ export function AdminStaff() {
       });
 
       if (!response.ok) {
-        throw new Error(tr("Не удалось синхронизировать персонал", "Failed to sync staff"));
+        const payload = await response.json().catch(() => null);
+        const responseText = payload?.error || payload?.message || "";
+        throw new Error(
+          String(responseText || tr("Не удалось синхронизировать персонал", "Failed to sync staff"))
+        );
       }
 
       const payload = await response.json().catch(() => null);
@@ -184,7 +188,8 @@ export function AdminStaff() {
       );
     } catch (error) {
       console.error("Failed to sync staff", error);
-      toast.error(tr("Не удалось синхронизировать персонал", "Failed to sync staff"));
+      const message = error instanceof Error ? error.message : "";
+      toast.error(message || tr("Не удалось синхронизировать персонал", "Failed to sync staff"));
     } finally {
       setIsSyncing(false);
     }
