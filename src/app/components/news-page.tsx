@@ -17,6 +17,7 @@ import {
 import { toast } from "sonner";
 import { useAuth } from "../context/auth-context";
 import { useLanguage } from "../context/language-context";
+import { useNews as useFallbackNews } from "../context/news-context";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -70,6 +71,64 @@ interface PublicFeedPayload {
   activities?: NewsItem[];
   news?: NewsItem[];
 }
+
+const mapFallbackNewsItem = (item: {
+  id: number;
+  externalId?: number;
+  source?: "local" | "vamsys";
+  tag?: string | null;
+  linkUrl?: string | null;
+  title: string;
+  category: "News" | "NOTAM" | "Event";
+  content: string;
+  author: string;
+  date: string;
+  status: "Published" | "Draft" | "Archived";
+  views: number;
+}) : NewsItem => ({
+  id: String(item.id),
+  source: item.source === "vamsys" ? "vamsys" : "manual",
+  originalId: Number(item.externalId || 0) || null,
+  title: item.title,
+  category: item.category === "Event" ? "Event" : "News",
+  content: item.content,
+  summary: item.content,
+  author: item.author,
+  date: item.date,
+  status: item.status,
+  views: Number(item.views || 0) || 0,
+  tag: item.tag || null,
+  linkUrl: item.linkUrl || null,
+  imageUrl: null,
+  featured: false,
+  activityType: item.category === "Event" ? "event" : "news",
+  activitySubtype: null,
+  target: null,
+  registrations: 0,
+  completions: 0,
+  points: 0,
+  registrationOpen: false,
+});
+
+const getFallbackFeedItems = (
+  mode: PublicFeedMode,
+  items: Array<{
+    id: number;
+    externalId?: number;
+    source?: "local" | "vamsys";
+    tag?: string | null;
+    linkUrl?: string | null;
+    title: string;
+    category: "News" | "NOTAM" | "Event";
+    content: string;
+    author: string;
+    date: string;
+    status: "Published" | "Draft" | "Archived";
+    views: number;
+  }>
+) => items
+  .filter((item) => (mode === "news" ? item.category === "News" : item.category === "Event"))
+  .map(mapFallbackNewsItem);
 
 const getViewModeStorageKey = (mode: PublicFeedMode) =>
   mode === "news" ? "nws.public.news.viewMode" : "nws.public.activities.viewMode";
@@ -171,6 +230,7 @@ interface PublicFeedPageProps {
 function PublicFeedPage({ mode }: PublicFeedPageProps) {
   const { t } = useLanguage();
   const { isAuthenticated, connectPilotApi } = useAuth();
+  const { news: fallbackNews } = useFallbackNews();
   const [news, setNews] = useState<NewsItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -403,7 +463,7 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
         });
         if (!response.ok) {
           if (isActive) {
-            setNews([]);
+            setNews(getFallbackFeedItems(mode, fallbackNews));
           }
           return;
         }
@@ -411,11 +471,16 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
         const payload = (await response.json().catch(() => null)) as PublicFeedPayload | null;
         if (isActive) {
           const items = mode === "news" ? payload?.news : payload?.activities;
-          setNews(Array.isArray(items) ? items : []);
+          const resolvedItems = Array.isArray(items) ? items : [];
+          setNews(
+            resolvedItems.length === 0
+              ? getFallbackFeedItems(mode, fallbackNews)
+              : resolvedItems
+          );
         }
       } catch {
         if (isActive) {
-          setNews([]);
+          setNews(getFallbackFeedItems(mode, fallbackNews));
         }
       } finally {
         if (isActive) {
@@ -429,7 +494,7 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
     return () => {
       isActive = false;
     };
-  }, [mode]);
+  }, [fallbackNews, mode]);
 
   const handleViewModeChange = (nextViewMode: string) => {
     if (nextViewMode !== "gallery" && nextViewMode !== "list") {

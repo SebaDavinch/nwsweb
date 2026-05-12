@@ -251,7 +251,6 @@ export function Header() {
           { path: "/fleet", label: t("nav.fleet") },
           { path: "/routes", label: t("nav.routes") },
           { path: "/live", label: "Live Flights" },
-          { path: "/gates", label: isRu ? "Стоянки" : "Gate Assigner" },
         ],
       },
       {
