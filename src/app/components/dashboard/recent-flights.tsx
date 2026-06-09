@@ -177,7 +177,8 @@ const getLandingRateClassName = (value?: number | null) => {
 };
 
 export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const ru = language === "ru";
   const [flights, setFlights] = useState<Flight[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
@@ -731,11 +732,11 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
                   <div className="flex flex-wrap justify-end gap-2 lg:min-w-[280px]">
                     <Button size="sm" variant={isSaved ? "default" : "outline"} className={isSaved ? "bg-amber-500 text-white hover:bg-amber-600" : ""} onClick={() => void toggleSavedFlight(flight.id)} disabled={isSavingPreferences}>
                       <Star className={`mr-2 h-4 w-4 ${isSaved ? "fill-current" : ""}`} />
-                      {isSaved ? "Saved" : "Save"}
+                      {isSaved ? (ru ? "Сохранено" : "Saved") : (ru ? "Сохранить" : "Save")}
                     </Button>
                     <Button size="sm" variant={isCompared ? "default" : "outline"} className={isCompared ? "bg-sky-600 text-white hover:bg-sky-700" : ""} onClick={() => void toggleCompareFlight(flight.id)} disabled={isSavingPreferences}>
                       <Scale className="mr-2 h-4 w-4" />
-                      {isCompared ? "Compared" : "Compare"}
+                      {isCompared ? (ru ? "Сравнивается" : "Compared") : (ru ? "Сравнить" : "Compare")}
                     </Button>
                     {onOpenPirep && flight.id > 0 ? (
                       <Button size="sm" variant="outline" onClick={() => onOpenPirep(flight.id)}>
