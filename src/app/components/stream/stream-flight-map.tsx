@@ -90,13 +90,22 @@ const ptsToPath = (pts: LL[], proj: (ll: LL) => [number, number] | null): string
     return d + (i === 0 ? `M${xy[0].toFixed(1)},${xy[1].toFixed(1)}` : `L${xy[0].toFixed(1)},${xy[1].toFixed(1)}`);
   }, "");
 
-// ── World land ────────────────────────────────────────────────────────────────
+// ── World land (lazy — computed inside component, not at module level) ─────────
 
 type WorldAtlas = Topology<Objects> & { objects: { land: Parameters<typeof feature>[1] } };
-const landFeature = feature(
-  worldLandAtlas as unknown as WorldAtlas,
-  (worldLandAtlas as unknown as WorldAtlas).objects.land,
-);
+
+function getLandFeature() {
+  try {
+    return feature(
+      worldLandAtlas as unknown as WorldAtlas,
+      (worldLandAtlas as unknown as WorldAtlas).objects.land,
+    );
+  } catch {
+    return null;
+  }
+}
+
+const landFeature = getLandFeature();
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
@@ -253,7 +262,7 @@ export function StreamFlightMap() {
       curXY: curLL ? proj(curLL) : null,
       trailPath,
       remainPath,
-      landPath: pg(landFeature) ?? "",
+      landPath: landFeature ? (pg(landFeature) ?? "") : "",
       gratPath: pg(geoGraticule10()) ?? "",
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps

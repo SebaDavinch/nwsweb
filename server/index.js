@@ -29418,7 +29418,7 @@ app.get("/api/pilot/stream-token", (req, res) => {
   const pid = String(pilotId);
   let token = Object.entries(streamTokens).find(([, v]) => v === pid)?.[0] ?? null;
   if (!token) {
-    token = require("crypto").randomUUID();
+    token = crypto.randomUUID();
     streamTokens[token] = pid;
     saveStreamTokens();
   }
