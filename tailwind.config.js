@@ -5,6 +5,13 @@ export default {
     extend: {
       colors: {
         midnight: '#070b1a',
+        'nw-red':   '#E31E24',
+        'nw-navy':  '#131B2E',
+        'nw-dark':  '#0D1018',
+      },
+      fontFamily: {
+        display: ['Oswald', 'Inter', 'sans-serif'],
+        body:    ['Inter', 'sans-serif'],
       },
     },
   },

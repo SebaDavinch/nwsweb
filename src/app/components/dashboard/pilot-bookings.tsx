@@ -496,6 +496,11 @@ export function PilotBookings() {
 
     return `${currentLocationCity} (${code})`;
   }, [currentLocationCity, pilotLocationCode, t]);
+  const isTemporaryBookingLocation = useMemo(() => {
+    const currentCode = String(pilotLocationCode || "").trim().toUpperCase();
+    const baseCode = String(baseLocationCode || "").trim().toUpperCase();
+    return Boolean(currentCode && baseCode && currentCode !== baseCode);
+  }, [baseLocationCode, pilotLocationCode]);
 
   const resolveBookingsConnectionMessage = (
     payload: Pick<BookingsResponse, "error" | "code"> | null,
@@ -1118,6 +1123,41 @@ export function PilotBookings() {
     }));
   };
 
+  const handleMoveToDestination = () => {
+    if (!selectedDestination) {
+      return;
+    }
+
+    const nextCode = String(selectedDestination.code || "").trim().toUpperCase();
+    if (!nextCode) {
+      return;
+    }
+
+    setPilotLocationCode(nextCode);
+    setPilotLocationLabel(selectedDestination.name || nextCode);
+    setForm((current) => ({
+      ...current,
+      destinationCode: "",
+      routeId: "",
+      routeQuery: "",
+    }));
+  };
+
+  const handleRestoreBaseLocation = () => {
+    if (!baseLocationCode) {
+      return;
+    }
+
+    setPilotLocationCode(baseLocationCode);
+    setPilotLocationLabel(baseLocationLabel);
+    setForm((current) => ({
+      ...current,
+      destinationCode: "",
+      routeId: "",
+      routeQuery: "",
+    }));
+  };
+
   const handleRouteSelect = (route: RouteOption) => {
     setForm((current) => ({
       ...current,
@@ -1501,7 +1541,20 @@ export function PilotBookings() {
 
               <div className="grid gap-3">
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{t("bookings.currentLocation")}</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{t("bookings.currentLocation")}</div>
+                    {isTemporaryBookingLocation ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-white/10 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                        onClick={handleRestoreBaseLocation}
+                      >
+                        {t("bookings.restoreBaseLocation")}
+                      </Button>
+                    ) : null}
+                  </div>
                   <div className="mt-3 flex items-start gap-3">
                     <div className="mt-0.5 rounded-full bg-sky-500/15 p-2 text-sky-300">
                       <MapPin className="h-4 w-4" />
@@ -1564,6 +1617,19 @@ export function PilotBookings() {
                     </div>
                   ) : null}
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {selectedDestination ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="border-white/10 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+                        onClick={handleMoveToDestination}
+                        disabled={String(selectedDestination.code || "").trim().toUpperCase() === String(pilotLocationCode || "").trim().toUpperCase()}
+                      >
+                        <MapPin className="mr-2 h-4 w-4" />
+                        {t("bookings.moveToDestination")}
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       variant="outline"
@@ -1803,11 +1869,25 @@ export function PilotBookings() {
                         : t("bookings.selectDestinationHint")}
                     </div>
                   </div>
-                  {selectedDestination ? (
-                    <Button type="button" variant="outline" size="sm" onClick={() => setForm((current) => ({ ...current, destinationCode: "", routeId: "", routeQuery: "" }))}>
-                      {t("bookings.showAll")}
-                    </Button>
-                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    {selectedDestination ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleMoveToDestination}
+                        disabled={String(selectedDestination.code || "").trim().toUpperCase() === String(pilotLocationCode || "").trim().toUpperCase()}
+                      >
+                        <MapPin className="mr-2 h-4 w-4" />
+                        {t("bookings.moveToDestination")}
+                      </Button>
+                    ) : null}
+                    {selectedDestination ? (
+                      <Button type="button" variant="outline" size="sm" onClick={() => setForm((current) => ({ ...current, destinationCode: "", routeId: "", routeQuery: "" }))}>
+                        {t("bookings.showAll")}
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
 
                 <ScrollArea className="h-[260px] w-full overflow-x-hidden pr-2">

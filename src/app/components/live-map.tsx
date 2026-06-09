@@ -73,6 +73,7 @@ interface LiveMapProps {
   selectedFlight?: Flight | null;
   onFlightSelect?: (flight: Flight) => void;
   onCloseDetail?: () => void;
+  className?: string;
 }
 
 const getVACColor = (vac: string) => {
@@ -383,54 +384,41 @@ const resolveFallbackMarkerPoint = (
   return null;
 };
 
-// Create gradient airplane icon for detailed view
-const createGradientAirplaneIcon = (angle: number = -45) => {
+// FR24-style airplane marker: clean silhouette, VAC colour, altitude glow
+const createAirplaneMarker = (angle = 0, color = "#E31E24", selected = false, altitude: number | null = null) => {
+  const size = selected ? 44 : 34;
+  const half = size / 2;
+  const glow = selected ? `drop-shadow(0 0 6px ${color}) drop-shadow(0 0 2px white)` : `drop-shadow(0 0 4px ${color}80)`;
+  // altitude colour ring for selected
+  const altColor = altitude != null ? altitudeToColor(altitude) : color;
+  const ring = selected
+    ? `<circle cx="16" cy="16" r="14" fill="none" stroke="${altColor}" stroke-width="1.5" opacity="0.7"/>`
+    : "";
   return L.divIcon({
-    html: `<div style="transform: rotate(${angle}deg);">
-      <svg width="40" height="40" viewBox="0 0 24 24" fill="url(#planeGradient)" stroke="white" stroke-width="1">
-        <defs>
-          <linearGradient id="planeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
-            <stop offset="50%" style="stop-color:#3b82f6;stop-opacity:1" />
-            <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
-          </linearGradient>
-        </defs>
-        <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+    html: `<div style="transform:rotate(${angle}deg);width:${size}px;height:${size}px;filter:${glow}">
+      <svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+        ${ring}
+        <path d="M16 3 L19.5 13 L28 15.5 L19.5 18 L20.5 27 L16 24.5 L11.5 27 L12.5 18 L4 15.5 L12.5 13 Z"
+          fill="${color}" stroke="rgba(255,255,255,0.9)" stroke-width="${selected ? 1.5 : 1}" stroke-linejoin="round"/>
       </svg>
     </div>`,
-    className: "gradient-airplane-marker",
-    iconSize: [40, 40],
-    iconAnchor: [20, 20],
+    className: "airplane-marker",
+    iconSize: [size, size],
+    iconAnchor: [half, half],
   });
 };
 
-// Create airport marker icon
-const createAirportMarker = (type: 'departure' | 'arrival') => {
-  const color = type === 'departure' ? '#3b82f6' : '#10b981'; // Blue for dep, Green for arr
-  return L.divIcon({
-    html: `<div style="filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5));">
-      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="${color}" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/>
-        <circle cx="12" cy="10" r="3" fill="white"/>
-      </svg>
-    </div>`,
-    className: "airport-marker-custom bg-transparent border-none",
-    iconSize: [32, 32],
-    iconAnchor: [16, 32],
-  });
-};
+const createAirportDot = (color: string, label: string) => L.divIcon({
+  html: `<div style="position:relative;display:flex;flex-direction:column;align-items:center;gap:2px;">
+    <div style="width:10px;height:10px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.85);box-shadow:0 0 6px ${color}80;"></div>
+    <div style="font-size:9px;font-weight:700;letter-spacing:0.1em;color:rgba(255,255,255,0.75);text-shadow:0 1px 3px #000;font-family:Oswald,sans-serif;white-space:nowrap;">${label}</div>
+  </div>`,
+  className: "airport-marker",
+  iconSize: [10, 28],
+  iconAnchor: [5, 5],
+});
 
-// Create small dot marker for route endpoints
-const createRouteDotMarker = (color: string) => {
-  return L.divIcon({
-    html: `<div style="background: ${color}; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px ${color};"></div>`,
-    className: "route-dot-marker",
-    iconSize: [10, 10],
-    iconAnchor: [5, 5],
-  });
-};
-
-export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail }: LiveMapProps) {
+export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail, className }: LiveMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
@@ -628,9 +616,8 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
               lineJoin: "round",
             }).addTo(layerGroupRef.current);
 
-            // Airport markers
-            L.marker([routeCoords.departureLat, routeCoords.departureLon], { icon: createAirportMarker('departure') }).addTo(layerGroupRef.current);
-            L.marker([routeCoords.arrivalLat, routeCoords.arrivalLon], { icon: createAirportMarker('arrival') }).addTo(layerGroupRef.current);
+            L.marker([routeCoords.departureLat, routeCoords.departureLon], { icon: createAirportDot('#60a5fa', selectedFlight.departure) }).addTo(layerGroupRef.current);
+            L.marker([routeCoords.arrivalLat, routeCoords.arrivalLon], { icon: createAirportDot('#34d399', selectedFlight.destination) }).addTo(layerGroupRef.current);
         }
 
         const renderTrackForPolyline = downsampleTrackForRender(renderTrack, MAX_SELECTED_TRACK_RENDER_POINTS);
@@ -654,7 +641,10 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
         );
 
         if (markerPoint) {
-          L.marker([markerPoint.lat, markerPoint.lon], { icon: createGradientAirplaneIcon(markerHeading) }).addTo(layerGroupRef.current);
+          const vacColor = getVACColor(selectedFlight.vac);
+          L.marker([markerPoint.lat, markerPoint.lon], {
+            icon: createAirplaneMarker(markerHeading, vacColor, true, markerPoint.altitude),
+          }).addTo(layerGroupRef.current);
         }
 
     } else {
@@ -681,8 +671,8 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
                   lineJoin: "round",
               }).addTo(layerGroupRef.current!);
 
-              L.marker([routeCoords.departureLat, routeCoords.departureLon], { icon: createRouteDotMarker(vacColor) }).addTo(layerGroupRef.current!);
-              L.marker([routeCoords.arrivalLat, routeCoords.arrivalLon], { icon: createRouteDotMarker(vacColor) }).addTo(layerGroupRef.current!);
+              L.marker([routeCoords.departureLat, routeCoords.departureLon], { icon: createAirportDot(vacColor, flight.departure) }).addTo(layerGroupRef.current!);
+              L.marker([routeCoords.arrivalLat, routeCoords.arrivalLon], { icon: createAirportDot(vacColor, flight.destination) }).addTo(layerGroupRef.current!);
             }
 
             const hasCurrentTelemetry = Number.isFinite(Number(flight.currentLat)) && Number.isFinite(Number(flight.currentLon));
@@ -723,16 +713,7 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
               markerPoint?.heading ?? flight.heading
             );
 
-            const airplaneIcon = L.divIcon({
-                html: `<div style="transform: rotate(${markerHeading}deg); color: ${statusColor}; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" stroke="white" stroke-width="1.5">
-                    <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
-                </svg>
-                </div>`,
-                className: "airplane-marker",
-                iconSize: [32, 32],
-                iconAnchor: [16, 16],
-            });
+            const airplaneIcon = createAirplaneMarker(markerHeading, vacColor, false, markerPoint?.altitude ?? null);
 
             if (!markerPoint) {
               return;
@@ -750,7 +731,7 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
   }, [flights, selectedFlight, t, onFlightSelect]);
 
   return (
-    <div className="w-full h-[800px] relative rounded-xl overflow-hidden border-2 border-gray-800 shadow-2xl bg-[#0f172a]">
+    <div className={className ?? "w-full h-[800px] relative bg-[#0d1117]"}>
       {selectedFlight && onCloseDetail && (
         <FlightDetailSidebar 
             flight={{ ...selectedFlight, pilotId: String(selectedFlight.pilotId || "") }} 

@@ -6,6 +6,9 @@ export interface SiteDesignSettings {
   primaryColor: string;
   accentColor: string;
   bannerGeneratorUrl: string;
+  vkCommunityUrl: string;
+  vkWidgetUrl: string;
+  vkCommunityName: string;
   headerLogoDataUrl: string;
   footerLogoDataUrl: string;
   loginLogoDataUrl: string;
@@ -19,6 +22,9 @@ export const DEFAULT_SITE_DESIGN: SiteDesignSettings = {
   primaryColor: "#E31E24",
   accentColor: "#2A2A2A",
   bannerGeneratorUrl: "",
+  vkCommunityUrl: "",
+  vkWidgetUrl: "",
+  vkCommunityName: "Nordwind Virtual VK",
   headerLogoDataUrl: "",
   footerLogoDataUrl: "",
   loginLogoDataUrl: "",

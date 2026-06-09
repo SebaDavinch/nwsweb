@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2, RefreshCcw } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronUp, Loader2, RefreshCcw, Plane, Clock, Gauge, Users } from "lucide-react";
 import { CartesianGrid, Line, LineChart, ReferenceLine, XAxis, YAxis } from "recharts";
 import { Button } from "../ui/button";
 import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartTooltipContent } from "../ui/chart";
@@ -276,78 +276,127 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
     ? detail.pointsBreakdown
     : null;
 
+  const vacColor = detail.vac === "KAR" ? "#2563eb" : detail.vac === "STW" ? "#ea580c" : "#E31E24";
+
   return (
-    <div className="space-y-4">
-      {/* Back */}
+    <div className="space-y-4 pb-8">
+
+      {/* ── Top bar: back + status ── */}
       <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}><ArrowLeft className="mr-2 h-4 w-4" />К рейсам</Button>
+        <Button variant="ghost" size="sm" onClick={onBack} className="shrink-0">
+          <ArrowLeft className="mr-1.5 h-4 w-4" />К рейсам
+        </Button>
       </div>
 
-      {/* Status header */}
-      <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-6 py-4">
-        <div className="text-[10px] uppercase tracking-widest text-gray-400 mb-3">PIREP STATUS</div>
-        <div className="flex flex-wrap items-center gap-6">
-          <div className="flex items-center gap-3">
-            <span className={`rounded-lg border px-3 py-1.5 text-xs font-bold uppercase ${statusColor(detail.status)}`}>
-              {detail.status || "Completed"}
-            </span>
+      {/* ── Status header ── */}
+      <div className="rounded-2xl overflow-hidden border border-gray-800 bg-[#111318] text-white">
+        {/* Top accent line */}
+        <div className="h-[3px]" style={{ background: `linear-gradient(90deg, ${vacColor}, transparent)` }} />
+        <div className="flex flex-wrap items-center gap-5 px-5 py-4">
+          {/* Status */}
+          <div className={`shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide ${statusColor(detail.status)}`}>
+            {detail.status || "Completed"}
           </div>
+
+          {/* Flight number */}
           <div>
-            <div className="text-[10px] uppercase text-gray-400">Пилот</div>
-            <div className="text-sm font-bold text-gray-900">
-              {detail.callsign && <span className="mr-1 text-gray-500">{detail.callsign} ·</span>}
-              {detail.pilot || "—"}
+            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Рейс</div>
+            <div className="font-mono font-bold text-white" style={{ fontFamily: "var(--font-display)" }}>
+              {detail.callsign || detail.flightNumber}
             </div>
           </div>
+
+          {/* Route */}
           <div>
-            <div className="text-[10px] uppercase text-gray-400">Рейс</div>
-            <div className="font-mono text-sm font-bold text-gray-900">{detail.flightNumber}</div>
-          </div>
-          <div>
-            <div className="text-[10px] uppercase text-gray-400">Маршрут</div>
-            <div className="font-mono text-sm font-bold text-gray-900">{detail.departure} → {detail.arrival}</div>
-          </div>
-          {detail.rank && (
-            <div>
-              <div className="text-[10px] uppercase text-gray-400">Ранг</div>
-              <div className="text-sm font-medium text-gray-700">{detail.rank}</div>
+            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Маршрут</div>
+            <div className="flex items-center gap-1.5 font-mono font-bold text-white">
+              <span>{detail.departure}</span>
+              <svg width="20" height="6" viewBox="0 0 20 6" fill="none">
+                <line x1="0" y1="3" x2="16" y2="3" stroke="currentColor" strokeWidth="1.5" opacity=".5"/>
+                <path d="M13 1L16 3L13 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity=".5"/>
+              </svg>
+              <span>{detail.arrival}</span>
             </div>
-          )}
+            {(detail.departureName || detail.arrivalName) && (
+              <div className="text-[10px] text-white/35 mt-0.5">
+                {detail.departureName} → {detail.arrivalName}
+              </div>
+            )}
+          </div>
+
+          {/* Pilot */}
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Пилот</div>
+            <div className="text-sm text-white/80">{detail.pilot || "—"}</div>
+            {detail.rank && <div className="text-[10px] text-white/35">{detail.rank}</div>}
+          </div>
+
+          {/* Aircraft */}
+          <div>
+            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">ВС</div>
+            <div className="font-mono text-sm text-white/80">{detail.aircraftRegistration || detail.aircraft || "—"}</div>
+            {detail.aircraftModel && <div className="text-[10px] text-white/35">{detail.aircraftModel}</div>}
+          </div>
+
+          {/* Score */}
           {detail.score != null && (
-            <div className="ml-auto">
-              <div className="text-[10px] uppercase text-gray-400 text-right">Счёт</div>
-              <div className="text-2xl font-bold text-[#E31E24]">{detail.score}</div>
+            <div className="ml-auto text-right">
+              <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Счёт</div>
+              <div className="text-3xl font-bold tabular-nums" style={{ color: vacColor, fontFamily: "var(--font-display)" }}>
+                {detail.score}
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Map */}
-      {Array.isArray(detail.telemetryTrack) && detail.telemetryTrack.length >= 2 ? (
-        <Section title="Карта рейса" defaultOpen={true}>
-          <div className="h-[380px]">
-            <LiveMap flights={[selectedFlight]} selectedFlight={selectedFlight} />
-          </div>
-        </Section>
-      ) : null}
-
-      {/* Two-column layout */}
+      {/* ── Main 2-col layout ── */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_300px]">
 
-        {/* ── Left column ───────────────────────────────────────────── */}
+        {/* ── LEFT: map + info blocks ── */}
         <div className="space-y-4 min-w-0">
+
+          {/* Map */}
+          {Array.isArray(detail.telemetryTrack) && detail.telemetryTrack.length >= 2 && (
+            <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm" style={{ height: 380 }}>
+              <LiveMap
+                flights={[selectedFlight]}
+                selectedFlight={selectedFlight}
+                className="w-full h-full"
+              />
+            </div>
+          )}
+
+          {/* Quick stats strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              { icon: Clock, label: "Налёт", value: detail.flightTime || "—" },
+              { icon: Clock, label: "Блок-время", value: detail.blockTime || "—" },
+              { icon: Gauge, label: "Посадка", value: detail.landingRate != null ? `${detail.landingRate} fpm` : "—" },
+              { icon: Plane, label: "Дистанция", value: detail.distance || "—" },
+            ].map(({ icon: Icon, label, value }) => (
+              <div key={label} className="rounded-2xl border border-gray-100 bg-white px-4 py-3 shadow-sm">
+                <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-gray-400 mb-1">
+                  <Icon className="h-3 w-3" />{label}
+                </div>
+                <div className="font-mono font-bold text-gray-900 text-sm">{value}</div>
+              </div>
+            ))}
+          </div>
 
           {/* Flight info */}
           <Section title="Информация о рейсе" defaultOpen={true}>
-            <div className="px-5 py-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-              <Stat label="Коллсайн" value={detail.callsign || detail.flightNumber} />
-              <Stat label="Тип" value="Scheduled" />
+            <div className="px-5 py-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
+              <Stat label="Каллсайн" value={detail.callsign || detail.flightNumber} />
               <Stat label="Сеть" value={detail.network || "Offline"} />
-              <Stat label="Воздушное судно" value={detail.aircraftRegistration || "—"} sub={detail.aircraftModel || detail.aircraft} />
-              <Stat label="Рейс" value={detail.departure} sub={detail.departureName || undefined} />
-              <Stat label="Прибытие" value={detail.arrival} sub={detail.arrivalName || undefined} />
-              <Stat label="Дата" value={fmtDt(detail.departureTime || detail.createdAt)} />
+              <Stat label="ВС" value={detail.aircraftRegistration || "—"} sub={detail.aircraftModel || detail.aircraft} />
+              <Stat label="Вылет" value={detail.departure} sub={detail.departureName || undefined} />
+              <Stat label="Прилёт" value={detail.arrival} sub={detail.arrivalName || undefined} />
+              <Stat label="Дата вылета" value={fmtDt(detail.departureTime || detail.createdAt)} />
               <Stat label="Завершён" value={fmtDt(detail.completedAt || detail.arrivalTime)} />
+              {(detail.passengers != null || detail.cargo != null) && (
+                <Stat label="Пасс / Груз" value={`${detail.passengers ?? "—"} / ${detail.cargo ?? "—"} кг`} />
+              )}
             </div>
           </Section>
 
@@ -359,7 +408,7 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
                   <tr className="border-b border-gray-100 text-[10px] uppercase tracking-wider text-gray-400">
                     <th className="px-5 py-2.5 text-left font-semibold">Событие</th>
                     <th className="px-4 py-2.5 text-right font-semibold">Факт</th>
-                    <th className="px-4 py-2.5 text-right font-semibold">Запланировано</th>
+                    <th className="px-4 py-2.5 text-right font-semibold">План</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
@@ -370,24 +419,14 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
                     { label: "Дистанция", actual: detail.distance || "—", sched: "—" },
                     { label: "Прилёт (STA)", actual: fmtTime(detail.arrivalTime || detail.completedAt), sched: "—" },
                   ].map(({ label, actual, sched }) => (
-                    <tr key={label} className="hover:bg-gray-50">
+                    <tr key={label} className="hover:bg-gray-50 transition-colors">
                       <td className="px-5 py-2.5 font-medium text-gray-700">{label}</td>
                       <td className="px-4 py-2.5 text-right font-mono font-semibold text-gray-900">{actual}</td>
-                      <td className="px-4 py-2.5 text-right text-gray-400">{sched}</td>
+                      <td className="px-4 py-2.5 text-right font-mono text-gray-400">{sched}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-          </Section>
-
-          {/* Performance */}
-          <Section title="Характеристики посадки" defaultOpen={true}>
-            <div className="px-5 py-4 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-              <Stat label="Скорость касания" value={detail.landingRate != null ? `${detail.landingRate} fpm` : "—"} />
-              <Stat label="Посадка" value={detail.landing || "—"} />
-              <Stat label="Дистанция" value={detail.distance || "—"} />
-              <Stat label="Точки" value={detail.points ?? "—"} />
             </div>
           </Section>
 
@@ -404,7 +443,7 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
                     ))}
                   </div>
                 )}
-                <ChartContainer config={chartConfig} className="h-[280px] w-full">
+                <ChartContainer config={chartConfig} className="h-[260px] w-full">
                   <LineChart data={flightProfileData.chartData} margin={{ top: 8, right: 16, bottom: 0, left: 0 }}>
                     <CartesianGrid vertical={false} />
                     <XAxis dataKey="elapsed" tickLine={false} axisLine={false} minTickGap={32}
@@ -443,58 +482,81 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
           )}
         </div>
 
-        {/* ── Right sidebar ─────────────────────────────────────────── */}
+        {/* ── RIGHT: compact cards ── */}
         <div className="space-y-4">
 
-          {/* Time card */}
-          <Section title="Время" defaultOpen={true}>
-            <div className="px-5 py-4 space-y-3">
-              <div className="text-center">
-                <div className="text-[10px] uppercase tracking-wider text-gray-400 mb-1">AWARDED</div>
-                <div className="text-2xl font-bold text-gray-900 font-mono">{detail.flightTime || "—"}</div>
+          {/* Score breakdown */}
+          {(detail.score != null || pointsBreakdown) && (
+            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+              <div className="flex items-center justify-between px-5 py-3.5 border-b border-gray-100">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Очки</span>
+                {detail.score != null && (
+                  <span className="text-xl font-bold font-mono" style={{ color: vacColor }}>{detail.score}</span>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-3">
-                <Stat label="Airborne" value={detail.flightTime || "—"} />
-                <Stat label="Block" value={detail.blockTime || "—"} />
-                <Stat label="Scheduled" value={fmtTime(detail.departureTime)} />
-                <Stat label="Estimated" value="—" />
+              <div className="px-5 py-3 space-y-1.5">
+                {pointsBreakdown ? pointsBreakdown.map((item) => (
+                  <div key={item.label} className="flex items-center justify-between text-sm">
+                    <span className="text-gray-500 text-xs">{item.label}</span>
+                    <span className={`font-bold font-mono text-xs ${item.value >= 0 ? "text-green-600" : "text-red-500"}`}>
+                      {item.value >= 0 ? "+" : ""}{item.value}
+                    </span>
+                  </div>
+                )) : <div className="text-xs text-gray-400 py-1">Детализация недоступна</div>}
               </div>
             </div>
-          </Section>
-
-          {/* Points */}
-          {(detail.score != null || pointsBreakdown) && (
-            <Section title="Очки" badge={detail.score ?? undefined} defaultOpen={true}>
-              <div className="px-5 py-4 space-y-2">
-                {pointsBreakdown ? (
-                  pointsBreakdown.map((item) => (
-                    <div key={item.label} className="flex items-center justify-between text-sm">
-                      <span className="text-gray-600">{item.label}</span>
-                      <span className={`font-bold font-mono ${item.value >= 0 ? "text-green-600" : "text-red-500"}`}>
-                        {item.value >= 0 ? "+" : ""}{item.value}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-sm text-gray-500">Детализация очков недоступна.</div>
-                )}
-                {detail.score != null && (
-                  <div className="flex items-center justify-between border-t border-gray-100 pt-2 text-sm font-bold">
-                    <span className="text-gray-700">Flight Score:</span>
-                    <span className="text-gray-900 font-mono">{detail.score}</span>
-                  </div>
-                )}
-              </div>
-            </Section>
           )}
 
-          {/* Dispatch */}
-          <Section title="Диспетч" defaultOpen={false}>
-            <div className="px-5 py-4 grid grid-cols-2 gap-3">
-              <Stat label="Пассажиры" value={detail.passengers ?? "—"} />
-              <Stat label="Груз (кг)" value={detail.cargo ?? "—"} />
+          {/* Time */}
+          <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Время</span>
             </div>
-          </Section>
+            <div className="px-5 py-4">
+              <div className="text-center mb-4">
+                <div className="text-[9px] uppercase tracking-widest text-gray-400 mb-1">Налёт присвоен</div>
+                <div className="text-2xl font-bold font-mono text-gray-900">{detail.flightTime || "—"}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 border-t border-gray-100 pt-3">
+                <Stat label="В воздухе" value={detail.flightTime || "—"} />
+                <Stat label="Блок" value={detail.blockTime || "—"} />
+                <Stat label="Вылет UTC" value={fmtTime(detail.departureTime)} />
+                <Stat label="Прилёт UTC" value={fmtTime(detail.arrivalTime || detail.completedAt)} />
+              </div>
+            </div>
+          </div>
+
+          {/* Landing */}
+          <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Посадка</span>
+              {detail.landingRate != null && (
+                <span className={`text-xs font-bold font-mono ${Math.abs(detail.landingRate) < 200 ? "text-green-600" : Math.abs(detail.landingRate) < 400 ? "text-amber-600" : "text-red-600"}`}>
+                  {detail.landingRate} fpm
+                </span>
+              )}
+            </div>
+            <div className="px-5 py-4 grid grid-cols-2 gap-3">
+              <Stat label="Скорость" value={detail.landingRate != null ? `${detail.landingRate} fpm` : "—"} />
+              <Stat label="Оценка" value={detail.landing || "—"} />
+              <Stat label="Дистанция" value={detail.distance || "—"} />
+              <Stat label="Очки" value={detail.points ?? "—"} />
+            </div>
+          </div>
+
+          {/* Cargo & pax */}
+          {(detail.passengers != null || detail.cargo != null) && (
+            <div className="rounded-2xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+              <div className="px-5 py-3.5 border-b border-gray-100 flex items-center gap-2">
+                <Users className="h-3.5 w-3.5 text-gray-400" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">Загрузка</span>
+              </div>
+              <div className="px-5 py-4 grid grid-cols-2 gap-3">
+                <Stat label="Пассажиры" value={detail.passengers ?? "—"} />
+                <Stat label="Груз, кг" value={detail.cargo ?? "—"} />
+              </div>
+            </div>
+          )}
 
           {/* Comments */}
           <Section title="Комментарии" defaultOpen={true}>
@@ -509,7 +571,7 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
                   value={commentDraft}
                   onChange={(e) => { setCommentDraft(e.target.value); setCommentError(null); setCommentSuccess(false); }}
                   placeholder="Добавить комментарий..."
-                  className="min-h-20 text-sm"
+                  className="min-h-[80px] text-sm"
                   maxLength={1000}
                   disabled={isSubmittingComment}
                 />
@@ -525,7 +587,6 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
             </div>
           </Section>
 
-          {/* Reload */}
           <Button variant="outline" size="sm" className="w-full" onClick={() => window.location.reload()}>
             <RefreshCcw className="mr-2 h-3.5 w-3.5" />Обновить PIREP
           </Button>

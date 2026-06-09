@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 
-export type NotificationCategory = "booking" | "claim" | "review" | "reply" | "notam" | "event" | "badge" | "system";
+export type NotificationCategory = "booking" | "claim" | "review" | "reply" | "notam" | "event" | "challenge" | "badge" | "system";
 
 export interface NotificationItem {
   id: string;

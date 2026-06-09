@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Flag, Image, Loader2, Star, Trash2, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Flag, Image, Loader2, Star, Trash2, CheckCircle2, AlertTriangle, RefreshCw, Send, XCircle } from "lucide-react";
 import { useLanguage } from "../../context/language-context";
 
 interface GalleryMedia {
@@ -12,6 +12,12 @@ interface GalleryMedia {
   isFeatured?: boolean;
   reportCount?: number;
   createdAt?: string;
+  description?: string | null;
+  socialPublishStatus?: "pending" | "published" | "failed" | "skipped" | string;
+  socialPublishedToDiscordAt?: string | null;
+  socialPublishedToVkAt?: string | null;
+  socialPublishSkippedAt?: string | null;
+  socialPublishDecisionBy?: string | null;
 }
 
 interface GalleryReport {
@@ -26,6 +32,7 @@ interface GalleryReport {
 }
 
 type Tab = "media" | "reports";
+type SocialFilter = "all" | "pending" | "published" | "failed" | "skipped";
 
 export function AdminGallery() {
   const { language } = useLanguage();
@@ -40,6 +47,8 @@ export function AdminGallery() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [featuringId, setFeaturingId] = useState<string | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+  const [socialFilter, setSocialFilter] = useState<SocialFilter>("pending");
 
   const loadMedia = useCallback(async () => {
     setIsLoadingMedia(true);
@@ -115,8 +124,65 @@ export function AdminGallery() {
     }
   };
 
+  const handleSocialPublish = async (
+    item: GalleryMedia,
+    options: { publishToDiscord?: boolean; publishToVk?: boolean; skip?: boolean }
+  ) => {
+    setPublishingId(item.id);
+    try {
+      const res = await fetch(`/api/admin/gallery/media/${item.id}/publish`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(options),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(String(payload?.error || tr("Не удалось обработать публикацию", "Failed to process publication")));
+      }
+
+      const updated = payload?.media;
+      if (updated && typeof updated === "object") {
+        setMedia((prev) =>
+          prev.map((entry) =>
+            entry.id === item.id
+              ? {
+                  ...entry,
+                  socialPublishStatus: updated.socialPublishStatus,
+                  socialPublishedToDiscordAt: updated.socialPublishedToDiscordAt,
+                  socialPublishedToVkAt: updated.socialPublishedToVkAt,
+                  socialPublishSkippedAt: updated.socialPublishSkippedAt,
+                  socialPublishDecisionBy: updated.socialPublishDecisionBy,
+                }
+              : entry
+          )
+        );
+      }
+    } catch {
+      // ignore UI toast here to keep admin panel lightweight
+    } finally {
+      setPublishingId(null);
+    }
+  };
+
   const featuredCount = media.filter((m) => m.isFeatured).length;
   const pendingReports = reports.filter((r) => !r.resolved);
+  const normalizedStatus = (status?: string) => {
+    if (!status) return "pending";
+    const value = String(status).trim().toLowerCase();
+    if (value === "published" || value === "failed" || value === "skipped") return value;
+    return "pending";
+  };
+  const socialFilterCounts = {
+    all: media.length,
+    pending: media.filter((m) => normalizedStatus(m.socialPublishStatus) === "pending").length,
+    published: media.filter((m) => normalizedStatus(m.socialPublishStatus) === "published").length,
+    failed: media.filter((m) => normalizedStatus(m.socialPublishStatus) === "failed").length,
+    skipped: media.filter((m) => normalizedStatus(m.socialPublishStatus) === "skipped").length,
+  } as const;
+  const filteredMedia = media.filter((item) =>
+    socialFilter === "all" ? true : normalizedStatus(item.socialPublishStatus) === socialFilter
+  );
 
   return (
     <div className="space-y-6">
@@ -185,8 +251,37 @@ export function AdminGallery() {
             {tr("Нет фотографий", "No photos yet")}
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            {media.map((item) => (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-gray-100 bg-white p-2">
+              {([
+                ["pending", tr("Ожидают", "Pending")],
+                ["published", tr("Опубликованы", "Published")],
+                ["failed", tr("С ошибкой", "Failed")],
+                ["skipped", tr("Пропущены", "Skipped")],
+                ["all", tr("Все", "All")],
+              ] as [SocialFilter, string][]).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => setSocialFilter(value)}
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+                    socialFilter === value
+                      ? "bg-[#1d1d1f] text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {label} ({socialFilterCounts[value]})
+                </button>
+              ))}
+            </div>
+
+            {filteredMedia.length === 0 ? (
+              <div className="rounded-2xl border border-gray-100 bg-gray-50 py-10 text-center text-sm text-gray-500">
+                {tr("Нет фото для выбранного фильтра", "No photos for the selected filter")}
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {filteredMedia.map((item) => (
               <div key={item.id} className="group relative overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
                 <div className="relative">
                   <img src={item.assetUrl} alt={item.title || "Gallery photo"} className="h-48 w-full object-cover" />
@@ -230,9 +325,55 @@ export function AdminGallery() {
                       {deletingId === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                     </button>
                   </div>
+                  <div className="mt-2 rounded-lg border border-gray-100 bg-gray-50 p-2">
+                    <div className="mb-2 text-[11px] text-gray-500">
+                      {tr("Размещение на площадках", "Platform placement")}: {item.socialPublishStatus || "pending"}
+                      {item.socialPublishDecisionBy ? ` • ${item.socialPublishDecisionBy}` : ""}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSocialPublish(item, { publishToDiscord: true })}
+                        disabled={publishingId === item.id}
+                        className="flex items-center justify-center gap-1 rounded-md bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700 hover:bg-indigo-100 disabled:opacity-60"
+                      >
+                        {publishingId === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                        Discord
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSocialPublish(item, { publishToVk: true })}
+                        disabled={publishingId === item.id}
+                        className="flex items-center justify-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-60"
+                      >
+                        {publishingId === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                        VK
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSocialPublish(item, { publishToDiscord: true, publishToVk: true })}
+                        disabled={publishingId === item.id}
+                        className="flex items-center justify-center gap-1 rounded-md bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+                      >
+                        {publishingId === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                        {tr("Discord + VK", "Discord + VK")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSocialPublish(item, { skip: true })}
+                        disabled={publishingId === item.id}
+                        className="flex items-center justify-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-200 disabled:opacity-60"
+                      >
+                        {publishingId === item.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <XCircle className="h-3 w-3" />}
+                        {tr("Не публиковать", "Skip")}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
-            ))}
+                ))}
+              </div>
+            )}
           </div>
         )
       )}

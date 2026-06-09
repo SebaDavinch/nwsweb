@@ -1,5 +1,7 @@
 import { createBrowserRouter } from "react-router";
 import { Root } from "./components/root";
+import { StreamRoot } from "./components/stream/stream-root";
+import { StreamFlightMap } from "./components/stream/stream-flight-map";
 import { Home } from "./components/home";
 import { About } from "./components/about";
 import { Fleet } from "./components/fleet";
@@ -66,6 +68,13 @@ export const router = createBrowserRouter([
     ],
   },
   {
+    path: "/stream",
+    Component: StreamRoot,
+    children: [
+      { path: "map", Component: StreamFlightMap },
+    ],
+  },
+  {
     path: "/admin",
     Component: AdminLayout,
     children: [
@@ -96,5 +105,12 @@ export const router = createBrowserRouter([
       { path: "settings", Component: AdminSettings },
       { path: "*", Component: AdminDashboard },
     ]
-  }
+  },
+  {
+    path: "/stream",
+    Component: StreamRoot,
+    children: [
+      { path: "map", Component: StreamFlightMap },
+    ],
+  },
 ]);

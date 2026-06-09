@@ -188,6 +188,30 @@ export function AdminSettings() {
                     {tr(". Редактор активностей открывает его с уже заполненными полями, а сохранение складывает готовый PNG в локальные ассеты сайта через API.", ". The activities editor opens it with prefilled fields, and save stores the final PNG in local site assets via API.")}
                   </div>
                 </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label>{tr("Ссылка на VK-сообщество", "VK community URL")}</Label>
+                  <Input
+                    placeholder="https://vk.com/..."
+                    value={design.vkCommunityUrl}
+                    onChange={(event) => setDesign((current) => ({ ...current, vkCommunityUrl: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{tr("Название VK-блока", "VK card title")}</Label>
+                  <Input
+                    placeholder={tr("Nordwind Virtual VK", "Nordwind Virtual VK")}
+                    value={design.vkCommunityName}
+                    onChange={(event) => setDesign((current) => ({ ...current, vkCommunityName: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{tr("VK widget URL", "VK widget URL")}</Label>
+                  <Input
+                    placeholder="https://vk.com/widget_community.php?..."
+                    value={design.vkWidgetUrl}
+                    onChange={(event) => setDesign((current) => ({ ...current, vkWidgetUrl: event.target.value }))}
+                  />
+                </div>
                 <div className="space-y-2">
                   <Label>{tr("Основной цвет", "Primary color")}</Label>
                   <Input type="color" value={design.primaryColor} onChange={(event) => setDesign((current) => ({ ...current, primaryColor: event.target.value }))} className="h-11" />

@@ -24,9 +24,11 @@ interface NotamItem {
   priority: "low" | "medium" | "high";
   mustRead: boolean;
   isRead?: boolean;
+  isOpened?: boolean;
   tag?: string | null;
   url?: string | null;
   createdAt?: string | null;
+  openedAt?: string | null;
   readCount?: number;
 }
 
@@ -85,6 +87,7 @@ export function PilotNotams() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [message, setMessage] = useState("");
+  const [openingIds, setOpeningIds] = useState<number[]>([]);
   const [readingIds, setReadingIds] = useState<number[]>([]);
   const [selectedNotam, setSelectedNotam] = useState<NotamItem | null>(null);
 
@@ -129,9 +132,60 @@ export function PilotNotams() {
     void loadNotams();
   }, []);
 
+  const patchNotamState = (notamId: number, patch: Partial<NotamItem>) => {
+    setNotams((current) => current.map((item) => (item.id === notamId ? { ...item, ...patch } : item)));
+    setSelectedNotam((current) => (current?.id === notamId ? { ...current, ...patch } : current));
+  };
+
+  const persistOpenedState = async (notamId: number) => {
+    if (openingIds.includes(notamId)) {
+      return false;
+    }
+
+    setOpeningIds((current) => [...current, notamId]);
+    try {
+      const response = await fetch(`/api/pilot/notams/${notamId}/open`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(String(payload?.error || t("notams.toastOpenError")));
+      }
+
+      patchNotamState(notamId, {
+        isOpened: true,
+        openedAt: String(payload?.openedAt || new Date().toISOString()),
+      });
+      return true;
+    } catch (error) {
+      toast.error(String(error || t("notams.toastOpenError")));
+      return false;
+    } finally {
+      setOpeningIds((current) => current.filter((item) => item !== notamId));
+    }
+  };
+
+  const handleOpenNotam = (notam: NotamItem) => {
+    setSelectedNotam(notam);
+    if (!notam.isOpened) {
+      void persistOpenedState(notam.id);
+    }
+  };
+
   const handleMarkAsRead = async (notamId: number) => {
+    const targetNotam = notams.find((item) => item.id === notamId) || (selectedNotam?.id === notamId ? selectedNotam : null);
+    if (targetNotam?.mustRead && !targetNotam.isOpened) {
+      toast.error(t("notams.openBeforeRead"));
+      return;
+    }
+
     setReadingIds((current) => [...current, notamId]);
     try {
+      if (targetNotam?.mustRead) {
+        await persistOpenedState(notamId);
+      }
+
       const response = await fetch(`/api/pilot/notams/${notamId}/read`, {
         method: "POST",
         credentials: "include",
@@ -163,6 +217,18 @@ export function PilotNotams() {
       return matchesSearch && matchesType && matchesPriority;
     });
   }, [notams, priorityFilter, search, typeFilter]);
+
+  const canMarkAsRead = (notam: NotamItem | null) => {
+    if (!notam || notam.isRead) {
+      return false;
+    }
+
+    if (!notam.mustRead) {
+      return true;
+    }
+
+    return Boolean(notam.isOpened) && !openingIds.includes(notam.id);
+  };
 
   return (
     <div className="space-y-6">
@@ -265,7 +331,7 @@ export function PilotNotams() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <button
                     type="button"
-                    onClick={() => setSelectedNotam(item)}
+                    onClick={() => handleOpenNotam(item)}
                     className="min-w-0 flex-1 text-left"
                   >
                     <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -306,7 +372,7 @@ export function PilotNotams() {
                       <Button
                         variant="outline"
                         className="mt-4 w-full"
-                        onClick={() => setSelectedNotam(item)}
+                        onClick={() => handleOpenNotam(item)}
                       >
                         {t("notams.open")}
                       </Button>
@@ -315,6 +381,11 @@ export function PilotNotams() {
                           href={item.url}
                           target="_blank"
                           rel="noreferrer"
+                          onClick={() => {
+                            if (!item.isOpened) {
+                              void persistOpenedState(item.id);
+                            }
+                          }}
                           className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#E31E24] transition-colors hover:text-[#c41a20]"
                         >
                           <ExternalLink className="h-4 w-4" />
@@ -326,10 +397,13 @@ export function PilotNotams() {
                           variant="outline"
                           className="mt-3 w-full"
                           onClick={() => handleMarkAsRead(item.id)}
-                          disabled={readingIds.includes(item.id)}
+                          disabled={readingIds.includes(item.id) || !canMarkAsRead(item)}
                         >
                           {readingIds.includes(item.id) ? t("notams.reading") : t("notams.read")}
                         </Button>
+                      ) : null}
+                      {item.mustRead && !item.isOpened && !item.isRead ? (
+                        <div className="mt-2 text-xs text-amber-700">{t("notams.openBeforeRead")}</div>
                       ) : null}
                     </div>
                   </div>
@@ -386,18 +460,30 @@ export function PilotNotams() {
                   {!selectedNotam.isRead ? (
                     <Button
                       onClick={() => void handleMarkAsRead(selectedNotam.id)}
-                      disabled={readingIds.includes(selectedNotam.id)}
+                      disabled={readingIds.includes(selectedNotam.id) || !canMarkAsRead(selectedNotam)}
                     >
                       {readingIds.includes(selectedNotam.id) ? t("notams.reading") : t("notams.read")}
                     </Button>
                   ) : null}
                   {selectedNotam.url ? (
                     <Button variant="outline" asChild>
-                      <a href={selectedNotam.url} target="_blank" rel="noreferrer">
+                      <a
+                        href={selectedNotam.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={() => {
+                          if (!selectedNotam.isOpened) {
+                            void persistOpenedState(selectedNotam.id);
+                          }
+                        }}
+                      >
                         <ExternalLink className="mr-2 h-4 w-4" />
                         {t("notams.readMore")}
                       </a>
                     </Button>
+                  ) : null}
+                  {selectedNotam.mustRead && !selectedNotam.isOpened && !selectedNotam.isRead ? (
+                    <div className="w-full text-sm text-amber-700">{t("notams.openBeforeRead")}</div>
                   ) : null}
                   <Button variant="outline" onClick={() => setSelectedNotam(null)}>
                     {t("notams.close")}

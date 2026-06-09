@@ -85,6 +85,9 @@ const liveFeedChannelId =
 const liveFeedIntervalMs = Number(process.env.LIVE_FEED_INTERVAL_MS || 120000);
 const alertFeedChannelId = String(process.env.ALERT_FEED_CHANNEL_ID || '').trim();
 const notamFeedChannelId = String(process.env.NOTAM_FEED_CHANNEL_ID || '').trim();
+// Stats report auto-post: set STATS_REPORT_CHANNEL_ID and optionally STATS_REPORT_UTC_HOUR (default 6)
+const statsReportChannelId = String(process.env.STATS_REPORT_CHANNEL_ID || '').trim();
+const statsReportUtcHour = Math.max(0, Math.min(23, Number(process.env.STATS_REPORT_UTC_HOUR || 6) || 6));
 const contentAutoPublishIntervalMs = Math.max(
   60_000,
   Number(process.env.CONTENT_AUTO_PUBLISH_INTERVAL_MS || 120_000) || 120_000
@@ -368,6 +371,9 @@ const commands = [
         .setMinValue(1)
         .setMaxValue(10)
     ),
+  new SlashCommandBuilder()
+    .setName('stats-report')
+    .setDescription('VA activity report: yesterday / last 7 days / this month'),
   new SlashCommandBuilder()
     .setName('profile')
     .setDescription('Show your pilot profile from vAMSYS'),
@@ -4279,6 +4285,134 @@ function formatHours(value) {
   return `${n.toFixed(2)}h`;
 }
 
+// ── Stats Report helpers ──────────────────────────────────────────────────────
+
+function getPirepDate(p) {
+  const raw = p.created_at || p.finished_at || p.gate_in_time || null;
+  return raw ? new Date(raw) : null;
+}
+
+function getPirepSeconds(p) {
+  return Number(p.flight_length || p.flight_time || p.flight_time_seconds || p.duration_seconds || 0) || 0;
+}
+
+function getPirepNm(p) {
+  return Number(p.distance || p.distance_nm || p.gc_distance || p.gcDistance || 0) || 0;
+}
+
+function getPirepRoute(p) {
+  const dep = String(p.departure_airport_id || p.departure_id || p.departure?.icao || '').trim().toUpperCase();
+  const arr = String(p.arrival_airport_id || p.arrival_id || p.arrival?.icao || '').trim().toUpperCase();
+  return dep && arr ? `${dep}→${arr}` : null;
+}
+
+async function fetchMonthlyPireps() {
+  const all = [];
+  for (let page = 1; page <= 4; page++) {
+    try {
+      const payload = await vamsysFetch(`/pireps?page[size]=100&page[number]=${page}&sort=-created_at`);
+      const items = Array.isArray(payload?.data) ? payload.data : [];
+      all.push(...items);
+      if (items.length < 100) break;
+    } catch {
+      break;
+    }
+  }
+  return all;
+}
+
+function computePeriodStats(pireps, start, end) {
+  const inRange = pireps.filter((p) => {
+    const d = getPirepDate(p);
+    return d && d >= start && d < end && ACCEPTED_PIREP_STATUSES.has(String(p.status || '').toLowerCase());
+  });
+
+  const flights = inRange.length;
+  const totalSeconds = inRange.reduce((s, p) => s + getPirepSeconds(p), 0);
+  const totalHours = totalSeconds / 3600;
+  const totalNm = inRange.reduce((s, p) => s + getPirepNm(p), 0);
+
+  const routeCounts = {};
+  const airportCounts = {};
+  for (const p of inRange) {
+    const route = getPirepRoute(p);
+    if (route) routeCounts[route] = (routeCounts[route] || 0) + 1;
+    const dep = String(p.departure_airport_id || p.departure_id || p.departure?.icao || '').trim().toUpperCase();
+    const arr = String(p.arrival_airport_id || p.arrival_id || p.arrival?.icao || '').trim().toUpperCase();
+    if (dep) airportCounts[dep] = (airportCounts[dep] || 0) + 1;
+    if (arr) airportCounts[arr] = (airportCounts[arr] || 0) + 1;
+  }
+
+  const topRoutes = Object.entries(routeCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topAirports = Object.entries(airportCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  return { flights, totalHours, totalNm, topRoutes, topAirports };
+}
+
+function formatPeriodField(stats) {
+  if (stats.flights === 0) return '_Нет полётов за период_';
+  const lines = [];
+  const nm = stats.totalNm > 0 ? `  🗺 **${Math.round(stats.totalNm).toLocaleString()} NM**` : '';
+  lines.push(`✈ **${stats.flights}**${nm}  ⏱ **${stats.totalHours.toFixed(1)}h**`);
+  if (stats.topRoutes.length > 0) {
+    lines.push('');
+    lines.push('**Топ маршруты**');
+    for (const [route, count] of stats.topRoutes) {
+      lines.push(`\`${route}\` ×${count}`);
+    }
+  }
+  if (stats.topAirports.length > 0) {
+    lines.push('');
+    lines.push('**Аэропорты**  ' + stats.topAirports.map(([ap, n]) => `\`${ap}\` ×${n}`).join('  '));
+  }
+  return lines.join('\n');
+}
+
+function buildStatsReportEmbed(yesterday, last7, month, dates) {
+  const { yDate, l7Start, mStart, now } = dates;
+  const fmtDate = (d) => d.toISOString().slice(0, 10);
+
+  return new EmbedBuilder()
+    .setColor(0xe31e24)
+    .setTitle('✈ Nordwind Virtual – Stats Report')
+    .setDescription('Статистика полётов по периодам')
+    .addFields(
+      {
+        name: `📅 Вчера (${fmtDate(yDate)})`,
+        value: formatPeriodField(yesterday),
+        inline: false,
+      },
+      {
+        name: `📅 Последние 7 дней (${fmtDate(l7Start)} – ${fmtDate(now)})`,
+        value: formatPeriodField(last7),
+        inline: false,
+      },
+      {
+        name: `📅 Этот месяц (${fmtDate(mStart)} – ${fmtDate(now)})`,
+        value: formatPeriodField(month),
+        inline: false,
+      },
+    )
+    .setFooter({ text: 'Nordwind Virtual · vAMSYS Flight Report' })
+    .setTimestamp(new Date());
+}
+
+async function generateStatsReport() {
+  const now = new Date();
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const yDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
+  const l7Start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const mStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+  const pireps = await fetchMonthlyPireps();
+
+  const yesterday = computePeriodStats(pireps, yDate, todayStart);
+  const last7 = computePeriodStats(pireps, l7Start, now);
+  const month = computePeriodStats(pireps, mStart, now);
+
+  return buildStatsReportEmbed(yesterday, last7, month, { yDate, l7Start, mStart, now });
+}
+
 function formatUtcDate(dateValue) {
   if (!dateValue) return '—';
   const date = new Date(dateValue);
@@ -5167,6 +5301,29 @@ client.once('clientReady', () => {
     clearInterval(liveFeedTimer);
   }
   liveFeedTimer = setInterval(upsertLiveFlightsFeedMessage, liveFeedIntervalMs);
+
+  // Daily stats report auto-post
+  if (statsReportChannelId && hasVamsysCredentials()) {
+    const scheduleNextStatsReport = () => {
+      const now = new Date();
+      const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, statsReportUtcHour, 0, 0));
+      const msUntil = next.getTime() - now.getTime();
+      setTimeout(async () => {
+        try {
+          const channel = await client.channels.fetch(statsReportChannelId).catch(() => null);
+          if (channel?.isTextBased()) {
+            const embed = await generateStatsReport();
+            await channel.send({ embeds: [embed] });
+          }
+        } catch (err) {
+          console.error('[stats-report] daily post failed:', err?.message || err);
+        }
+        scheduleNextStatsReport();
+      }, msUntil);
+      console.log(`[stats-report] next auto-post scheduled in ${Math.round(msUntil / 60000)} min (${next.toISOString()})`);
+    };
+    scheduleNextStatsReport();
+  }
 
   notifyPirepReviewStatus();
   if (pirepReviewTimer) {
@@ -6443,6 +6600,22 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply({ embeds: [embed] });
     } catch (err) {
       await interaction.editReply('Failed to load vAMSYS statistics.');
+    }
+    return;
+  }
+
+  if (interaction.commandName === 'stats-report') {
+    if (!hasVamsysCredentials()) {
+      await interaction.reply({ content: 'vAMSYS credentials are not configured.', ephemeral: true });
+      return;
+    }
+    await interaction.deferReply();
+    try {
+      const embed = await generateStatsReport();
+      await interaction.editReply({ embeds: [embed] });
+    } catch (err) {
+      console.error('[stats-report] error:', err?.message || err);
+      await interaction.editReply('Не удалось загрузить статистику из vAMSYS.');
     }
     return;
   }

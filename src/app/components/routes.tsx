@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import { useLanguage } from "../context/language-context";
 import {
   MapPin,
@@ -40,6 +41,80 @@ type ApiRoute = {
   frequency?: string;
 };
 
+type ApiHub = {
+  id: string | number;
+  name?: string;
+  airportCodes?: string[];
+  airportLabels?: string[];
+  airportsText?: string | null;
+};
+
+type HubOption = {
+  value: string;
+  label: string;
+  airportCodes: string[];
+};
+
+const AIRLINE_BRANDS = [
+  { code: "NWS", label: "Nordwind Airlines", accentClass: "border-[#E31E24]/30 bg-[#E31E24]/6 text-[#E31E24]" },
+  { code: "KAR", label: "IKAR", accentClass: "border-emerald-500/30 bg-emerald-500/6 text-emerald-700" },
+  { code: "STW", label: "Southwind Airlines", accentClass: "border-amber-500/30 bg-amber-500/6 text-amber-700" },
+] as const;
+
+const extractHubAirportCodes = (hub: ApiHub) => {
+  const directCodes = Array.isArray(hub.airportCodes) ? hub.airportCodes : [];
+  const labelCodes = Array.isArray(hub.airportLabels)
+    ? hub.airportLabels.map((item) => String(item || "").split(" - ")[0].trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  return Array.from(new Set([...directCodes, ...labelCodes].map((code) => String(code || "").trim().toUpperCase()).filter(Boolean)));
+};
+
+function AirlineWordmark({ code, language }: { code: string; language: string }) {
+  const airlineSuffix = language === "ru" ? "Авиалинии" : "Airlines";
+
+  if (code === "KAR") {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="h-6 w-6 rounded-full bg-emerald-600/10 ring-1 ring-emerald-600/20 flex items-center justify-center">
+          <div className="h-2.5 w-2.5 rotate-45 rounded-sm bg-emerald-600" />
+        </div>
+        <div className="leading-none">
+          <div className="text-[13px] font-black uppercase tracking-[0.2em] text-emerald-700">IKAR</div>
+          <div className="text-[9px] uppercase tracking-[0.18em] text-emerald-700/70">{airlineSuffix}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (code === "STW") {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500/10 ring-1 ring-amber-500/25">
+          <div className="h-3 w-3 rounded-full bg-amber-500 shadow-[0_0_0_2px_rgba(251,191,36,0.18)]" />
+        </div>
+        <div className="leading-none">
+          <div className="text-[12px] font-black uppercase tracking-[0.12em] text-amber-700">Southwind</div>
+          <div className="text-[9px] uppercase tracking-[0.18em] text-amber-700/70">{airlineSuffix}</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex gap-1">
+        <div className="h-5 w-2.5 -skew-x-[22deg] rounded-sm bg-[#E31E24]" />
+        <div className="h-5 w-2.5 -skew-x-[22deg] rounded-sm bg-[#E31E24]" />
+      </div>
+      <div className="leading-none">
+        <div className="text-[12px] font-black uppercase tracking-[0.12em] text-[#E31E24]">Nordwind</div>
+        <div className="text-[9px] uppercase tracking-[0.18em] text-[#E31E24]/70">{airlineSuffix}</div>
+      </div>
+    </div>
+  );
+}
+
 const parseDistanceNm = (value: unknown) => {
   const text = String(value || "").trim();
   if (!text) return 0;
@@ -79,12 +154,19 @@ const estimateDailyFlights = (route: ApiRoute) => {
 };
 
 export function Routes() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
+  const formatDurationLabel = (minutes: number) => {
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return language === "ru" ? `${hours}ч ${remainingMinutes}м` : `${hours}h ${remainingMinutes}m`;
+  };
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedAirline, setSelectedAirline] = useState("ALL");
   const [selectedHub, setSelectedHub] = useState("ALL");
   const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
   const [apiRoutes, setApiRoutes] = useState<ApiRoute[]>([]);
+  const [apiHubs, setApiHubs] = useState<ApiHub[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
@@ -103,11 +185,14 @@ export function Routes() {
         }
         const payload = await response.json();
         const rows = Array.isArray(payload?.routes) ? payload.routes : [];
+        const hubs = Array.isArray(payload?.hubs) ? payload.hubs : [];
         if (!mounted) return;
         setApiRoutes(rows);
+        setApiHubs(hubs);
       } catch {
         if (!mounted) return;
         setApiRoutes([]);
+        setApiHubs([]);
         setHasError(true);
       } finally {
         if (mounted) setIsLoading(false);
@@ -124,15 +209,16 @@ export function Routes() {
     return apiRoutes
       .filter((route) => Number.isFinite(Number(route.fromLat)) && Number.isFinite(Number(route.fromLon)) && Number.isFinite(Number(route.toLat)) && Number.isFinite(Number(route.toLon)))
       .map((route) => {
+        const unknownLabel = tr("Неизвестно", "Unknown");
         const from: Airport = {
           code: String(route.fromCode || "").trim() || "—",
-          name: String(route.fromName || route.fromCode || "Unknown").trim() || "Unknown",
+          name: String(route.fromName || route.fromCode || unknownLabel).trim() || unknownLabel,
           lat: Number(route.fromLat),
           lon: Number(route.fromLon),
         };
         const to: Airport = {
           code: String(route.toCode || "").trim() || "—",
-          name: String(route.toName || route.toCode || "Unknown").trim() || "Unknown",
+          name: String(route.toName || route.toCode || unknownLabel).trim() || unknownLabel,
           lat: Number(route.toLat),
           lon: Number(route.toLon),
         };
@@ -140,7 +226,7 @@ export function Routes() {
         return {
           id: String(route.id || ""),
           airline: String(route.airlineCode || "NWS").toUpperCase(),
-          aircraft: route.fleetIds?.length ? `Fleet ${String(route.fleetIds[0])}` : "—",
+          aircraft: route.fleetIds?.length ? `${tr("Флот", "Fleet")} ${String(route.fleetIds[0])}` : "—",
           totalDistance: parseDistanceNm(route.distance),
           totalDuration: parseDurationMinutes(route.duration),
           legs: [
@@ -153,7 +239,57 @@ export function Routes() {
           ],
         };
       });
-  }, [apiRoutes]);
+  }, [apiRoutes, language]);
+
+  const availableAirlines = useMemo(
+    () => AIRLINE_BRANDS.filter((brand) => routes.some((route) => route.airline === brand.code)),
+    [routes]
+  );
+
+  const airlineScopedRoutes = useMemo(
+    () => (selectedAirline === "ALL" ? routes : routes.filter((route) => route.airline === selectedAirline)),
+    [routes, selectedAirline]
+  );
+
+  const hubOptions = useMemo<HubOption[]>(() => {
+    const activeDepartureCodes = new Set(
+      airlineScopedRoutes.map((route) => String(route.legs[0].from.code || "").trim().toUpperCase()).filter(Boolean)
+    );
+
+    return apiHubs
+      .map((hub) => {
+        const airportCodes = extractHubAirportCodes(hub).filter((code) => activeDepartureCodes.has(code));
+        if (!airportCodes.length) {
+          return null;
+        }
+
+        const hubName = String(hub.name || airportCodes[0]).trim() || airportCodes[0];
+        return {
+          value: String(hub.id || hubName),
+          label: `${hubName} · ${airportCodes.join(", ")}`,
+          airportCodes,
+        };
+      })
+      .filter((hub): hub is HubOption => Boolean(hub))
+      .sort((left, right) => left.label.localeCompare(right.label));
+  }, [airlineScopedRoutes, apiHubs]);
+
+  const selectedHubOption = useMemo(
+    () => (selectedHub === "ALL" ? null : hubOptions.find((hub) => hub.value === selectedHub) || null),
+    [hubOptions, selectedHub]
+  );
+
+  useEffect(() => {
+    if (selectedAirline !== "ALL" && !availableAirlines.some((brand) => brand.code === selectedAirline)) {
+      setSelectedAirline("ALL");
+    }
+  }, [availableAirlines, selectedAirline]);
+
+  useEffect(() => {
+    if (selectedHub !== "ALL" && !selectedHubOption) {
+      setSelectedHub("ALL");
+    }
+  }, [selectedHub, selectedHubOption]);
 
   // Filter Logic
   const filteredRoutes = useMemo(() => {
@@ -166,36 +302,33 @@ export function Routes() {
         route.legs[0].to.name.toLowerCase().includes(searchQuery.toLowerCase());
       
       const matchAirline = selectedAirline === "ALL" || route.airline === selectedAirline;
-      const matchHub = selectedHub === "ALL" || route.legs[0].from.code === selectedHub;
+      const departureCode = String(route.legs[0].from.code || "").trim().toUpperCase();
+      const matchHub = !selectedHubOption || selectedHubOption.airportCodes.includes(departureCode);
 
       return matchSearch && matchAirline && matchHub;
     });
-  }, [routes, searchQuery, selectedAirline, selectedHub]);
+  }, [routes, searchQuery, selectedAirline, selectedHubOption]);
 
-  const uniqueHubs = useMemo(
-    () => Array.from(new Set(routes.map(r => r.legs[0].from.code))).filter(Boolean).sort(),
-    [routes]
-  );
-
-  const airlines = useMemo(
-    () => Array.from(new Set(routes.map((r) => r.airline))).filter(Boolean).sort(),
-    [routes]
-  );
-
-  const airportsForMap = useMemo(() => {
-    const map = new Map<string, Airport>();
-    for (const route of filteredRoutes) {
-      const from = route.legs[0].from;
-      const to = route.legs[0].to;
-      if (from?.code) map.set(from.code, from);
-      if (to?.code) map.set(to.code, to);
+  useEffect(() => {
+    if (selectedRoute && !filteredRoutes.some((route) => route.id === selectedRoute.id)) {
+      setSelectedRoute(null);
     }
-    return Array.from(map.values());
-  }, [filteredRoutes]);
+  }, [filteredRoutes, selectedRoute]);
+
+  const mapRoutes = useMemo(
+    () => filteredRoutes.map((route) => ({
+      id: route.id,
+      from: route.legs[0].from,
+      to: route.legs[0].to,
+      label: `${route.airline} · ${route.legs[0].from.code} → ${route.legs[0].to.code}`,
+      active: selectedRoute?.id === route.id,
+    })),
+    [filteredRoutes, selectedRoute]
+  );
 
   const stats = useMemo(() => {
     const destinationCount = new Set(filteredRoutes.map((r) => r.legs[0].to.code)).size;
-    const majorHubs = new Set(filteredRoutes.map((r) => r.legs[0].from.code)).size;
+    const majorHubs = selectedHub === "ALL" ? hubOptions.length : filteredRoutes.length > 0 ? 1 : 0;
     const routeMap = new Map(apiRoutes.map((r) => [String(r.id || ""), r]));
     const dailyFlights = filteredRoutes.reduce((sum, route) => {
       const row = routeMap.get(String(route.id));
@@ -208,7 +341,7 @@ export function Routes() {
       majorHubs,
       dailyFlights: Math.max(0, Math.round(dailyFlights)),
     };
-  }, [apiRoutes, filteredRoutes]);
+  }, [apiRoutes, filteredRoutes, hubOptions.length, selectedHub]);
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
@@ -216,9 +349,11 @@ export function Routes() {
       <section className="bg-[#2A2A2A] text-white py-12">
         <div className="max-w-7xl mx-auto px-4">
           <h1 className="text-4xl font-bold mb-4">{t("routes.hero.title")}</h1>
-          <p className="text-xl text-gray-300 max-w-2xl">
-            {t("routes.hero.subtitle")}
-          </p>
+          <Link to="/tickets">
+            <Button className="bg-[#E31E24] hover:bg-[#C11A20] text-white px-6 py-3 text-base font-semibold rounded-xl">
+              {tr("Связаться с нами", "Contact us")}
+            </Button>
+          </Link>
         </div>
       </section>
 
@@ -232,46 +367,68 @@ export function Routes() {
               <div>
                 <h3 className="text-lg font-bold mb-4 flex items-center gap-2">
                   <Filter size={18} className="text-[#E31E24]" />
-                  Filters
+                  {tr("Фильтры", "Filters")}
                 </h3>
                 
                 <div className="space-y-4">
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
                     <Input 
-                      placeholder="Search destination..." 
+                      placeholder={tr("Поиск направления...", "Search destination...")} 
                       className="pl-9"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-gray-500">Airline</label>
-                      <Select value={selectedAirline} onValueChange={setSelectedAirline}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="All" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="ALL">All Airlines</SelectItem>
-                          {airlines.map((airline) => (
-                            <SelectItem key={airline} value={airline}>{airline}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-500">{tr("Авиакомпания", "Airline")}</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAirline("ALL")}
+                        className={`inline-flex h-11 items-center rounded-xl border px-4 text-sm font-semibold transition ${
+                          selectedAirline === "ALL"
+                            ? "border-[#E31E24] bg-[#E31E24] text-white shadow-sm"
+                            : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                        }`}
+                      >
+                        {tr("Все", "All")}
+                      </button>
 
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-gray-500">Hub</label>
+                      {availableAirlines.map((brand) => {
+                        const isActive = selectedAirline === brand.code;
+                        return (
+                          <button
+                            key={brand.code}
+                            type="button"
+                            onClick={() => setSelectedAirline(brand.code)}
+                            className={`inline-flex min-w-[170px] items-center rounded-xl border px-3 py-2 text-left transition ${
+                              isActive
+                                ? `${brand.accentClass} shadow-sm ring-1 ring-current/10`
+                                : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"
+                            }`}
+                            aria-pressed={isActive}
+                            title={brand.label}
+                          >
+                            <AirlineWordmark code={brand.code} language={language} />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-gray-500">{tr("Хаб", "Hub")}</label>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <Select value={selectedHub} onValueChange={setSelectedHub}>
                         <SelectTrigger>
-                          <SelectValue placeholder="All Hubs" />
+                          <SelectValue placeholder={tr("Все хабы", "All hubs")} />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="ALL">All Hubs</SelectItem>
-                          {uniqueHubs.map(hub => (
-                            <SelectItem key={hub} value={hub || "UNK"}>{hub}</SelectItem>
+                          <SelectItem value="ALL">{tr("Все хабы", "All hubs")}</SelectItem>
+                          {hubOptions.map((hub) => (
+                            <SelectItem key={hub.value} value={hub.value}>{hub.label}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
@@ -283,7 +440,7 @@ export function Routes() {
               <div className="border-t pt-4">
                  <div className="flex items-center justify-between mb-4">
                    <span className="text-sm text-gray-500 font-medium">
-                     Found {filteredRoutes.length} routes
+                     {tr(`Найдено маршрутов: ${filteredRoutes.length}`, `Found ${filteredRoutes.length} routes`)}
                    </span>
                    {selectedRoute && (
                      <Button 
@@ -292,20 +449,20 @@ export function Routes() {
                        className="text-xs h-7"
                        onClick={() => setSelectedRoute(null)}
                      >
-                       Clear Selection
+                       {tr("Сбросить выбор", "Clear selection")}
                      </Button>
                    )}
                  </div>
                  
                  <ScrollArea className="h-[400px] pr-4">
                    <div className="space-y-3">
-                     {filteredRoutes.map((route, idx) => (
+                     {filteredRoutes.map((route) => (
                        <div 
-                         key={idx}
+                         key={route.id || `${route.legs[0].from.code}-${route.legs[0].to.code}`}
                          onClick={() => setSelectedRoute(route)}
                          className={`
                            group p-3 rounded-lg border cursor-pointer transition-all duration-200
-                           ${selectedRoute === route 
+                           ${selectedRoute?.id === route.id 
                              ? "bg-red-50 border-[#E31E24] ring-1 ring-[#E31E24]" 
                              : "bg-white border-gray-200 hover:border-gray-300 hover:shadow-sm"
                            }
@@ -316,7 +473,7 @@ export function Routes() {
                              {route.airline}
                            </Badge>
                            <span className="text-xs text-gray-400 font-mono">
-                             {Math.floor(route.totalDuration / 60)}h {route.totalDuration % 60}m
+                             {formatDurationLabel(route.totalDuration)}
                            </span>
                          </div>
                          
@@ -351,8 +508,8 @@ export function Routes() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3">
             <Info className="text-blue-500 shrink-0" size={20} />
             <div className="text-sm text-blue-800">
-              <p className="font-bold mb-1">Live API Data</p>
-              <p>Routes, hubs and destination stats are loaded from vAMSYS API.</p>
+              <p className="font-bold mb-1">{tr("Живые данные API", "Live API Data")}</p>
+              <p>{tr("Маршруты и реальные хабы подгружаются напрямую из vAMSYS.", "Routes and real hubs are loaded directly from vAMSYS.")}</p>
             </div>
           </div>
         </div>
@@ -362,17 +519,17 @@ export function Routes() {
            <Card className="flex-1 border-none shadow-md overflow-hidden min-h-[500px] relative z-0">
              <FlightMap 
                route={selectedRoute} 
-               airports={airportsForMap}
+              availableRoutes={mapRoutes}
              />
              <div className="absolute bottom-4 left-4 right-4 z-[400] pointer-events-none">
                 <div className="bg-white/90 backdrop-blur rounded-lg p-3 shadow-lg border border-gray-200 inline-flex items-center gap-4 pointer-events-auto">
                    <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded-full bg-[#E31E24] border-2 border-white shadow-sm"></div>
-                      <span className="text-xs font-medium text-gray-700">Hub / Destination</span>
+                   <span className="text-xs font-medium text-gray-700">{tr("Хаб / аэропорт", "Hub / airport")}</span>
                    </div>
                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-1 bg-[#E31E24] rounded-full opacity-60"></div>
-                      <span className="text-xs font-medium text-gray-700">Flight Path</span>
+                   <div className="w-10 border-t-2 border-dashed border-[#6366f1] opacity-70"></div>
+                   <span className="text-xs font-medium text-gray-700">{tr("Маршрутная сеть", "Route network")}</span>
                    </div>
                 </div>
              </div>
@@ -387,7 +544,7 @@ export function Routes() {
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-gray-900">{stats.destinationCount}</div>
-                    <div className="text-sm text-gray-500">Destinations</div>
+                    <div className="text-sm text-gray-500">{tr("Направления", "Destinations")}</div>
                   </div>
                 </CardContent>
               </Card>
@@ -399,7 +556,7 @@ export function Routes() {
                   </div>
                   <div>
                     <div className="text-2xl font-bold text-gray-900">{stats.dailyFlights}</div>
-                    <div className="text-sm text-gray-500">Daily Flights</div>
+                    <div className="text-sm text-gray-500">{tr("Рейсов в день", "Daily flights")}</div>
                   </div>
                 </CardContent>
               </Card>
@@ -411,18 +568,18 @@ export function Routes() {
                    </div>
                    <div>
                      <div className="text-2xl font-bold text-gray-900">{stats.majorHubs}</div>
-                     <div className="text-sm text-gray-500">Major Hubs</div>
+                     <div className="text-sm text-gray-500">{tr("Реальные хабы", "Real hubs")}</div>
                    </div>
                  </CardContent>
               </Card>
            </div>
 
            {isLoading ? (
-             <div className="text-gray-500 text-sm">Loading route network...</div>
+             <div className="text-gray-500 text-sm">{tr("Загрузка маршрутной сети...", "Loading route network...")}</div>
            ) : null}
 
            {hasError ? (
-             <div className="text-red-600 text-sm">Failed to load routes from API.</div>
+             <div className="text-red-600 text-sm">{tr("Не удалось загрузить маршруты из API.", "Failed to load routes from API.")}</div>
            ) : null}
         </div>
 

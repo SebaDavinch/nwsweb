@@ -35,6 +35,7 @@ export interface NewsFormData {
   alertStopShowing?: string | null;
   content: string;
   sendToDiscord: boolean;
+  sendToVK: boolean;
   status: "Published" | "Draft" | "Archived";
   date: string;
   author: string;
@@ -62,6 +63,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
   const [alertStopShowing, setAlertStopShowing] = useState("");
   const [content, setContent] = useState("");
   const [sendToDiscord, setSendToDiscord] = useState(false);
+  const [sendToVK, setSendToVK] = useState(false);
   const [status, setStatus] = useState<NewsFormData["status"]>("Published");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -80,6 +82,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
       setAlertStopShowing(String(initialData.alertStopShowing || ""));
       setContent(String(initialData.content || ""));
       setSendToDiscord(Boolean(initialData.sendToDiscord));
+      setSendToVK(Boolean(initialData.sendToVK));
       setStatus(initialData.status || "Published");
     } else {
       setTitle("");
@@ -95,6 +98,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
       setAlertStopShowing("");
       setContent("");
       setSendToDiscord(false);
+      setSendToVK(false);
       setStatus("Published");
     }
   }, [initialData, open]);
@@ -121,6 +125,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
         alertStopShowing: alertStopShowing || null,
         content,
         sendToDiscord,
+        sendToVK,
         status,
         date: new Date().toISOString().split('T')[0],
         author: "Admin"
@@ -138,6 +143,7 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
       setAlertStopShowing("");
       setContent("");
       setSendToDiscord(false);
+      setSendToVK(false);
       setStatus("Published");
     } finally {
       setIsSubmitting(false);
@@ -325,6 +331,25 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
               </p>
             </div>
             <Send className="ml-auto h-4 w-4 text-indigo-500" />
+          </div>
+
+          <div className="flex items-center space-x-2 rounded-lg border p-4 bg-emerald-50 border-emerald-100">
+            <Checkbox
+              id="vk"
+              checked={sendToVK}
+              onCheckedChange={(checked) => setSendToVK(checked as boolean)}
+            />
+            <div className="grid gap-1.5 leading-none">
+              <Label
+                htmlFor="vk"
+                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-emerald-900"
+              >
+                Отправить в VK
+              </Label>
+              <p className="text-xs text-emerald-700">
+                Публикует новость в сообщество VK и дублирует ее в Telegram, если backend настроен.
+              </p>
+            </div>
           </div>
           
           <DialogFooter className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-between">

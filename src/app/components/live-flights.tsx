@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "../context/language-context";
-import { Plane, MapPin, Clock, Filter, LayoutGrid, Map as MapIcon, Table as TableIcon } from "lucide-react";
+import { Plane, Clock, ChevronLeft, ChevronRight, Radio } from "lucide-react";
 import { LiveMap } from "./live-map";
 
 interface Flight {
@@ -176,11 +176,12 @@ const toRecord = (value: unknown): JsonRecord =>
   value && typeof value === "object" ? (value as JsonRecord) : {};
 
 export function LiveFlights() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const ru = language === "ru";
+  const tr = (r: string, e: string) => (ru ? r : e);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [selectedVAC, setSelectedVAC] = useState<"ALL" | "NWS" | "KAR" | "STW">("ALL");
-  const [viewMode, setViewMode] = useState<"grid" | "map">("grid");
-  const [completedViewMode, setCompletedViewMode] = useState<"gallery" | "list">("gallery");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedFlight, setSelectedFlight] = useState<Flight | null>(null);
   const [activeFlights, setActiveFlights] = useState<Flight[]>([]);
   const [targetActiveFlights, setTargetActiveFlights] = useState<Flight[]>([]);
@@ -478,557 +479,288 @@ export function LiveFlights() {
     }
   }, [activeFlights, selectedFlight]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "Boarding":
-        return "bg-blue-100 text-blue-700";
-      case "Climbing":
-        return "bg-green-100 text-green-700";
-      case "En Route":
-        return "bg-yellow-100 text-yellow-700";
-      case "Approach":
-        return "bg-orange-100 text-orange-700";
-      case "Completed":
-        return "bg-gray-100 text-gray-700";
-      default:
-        return "bg-gray-100 text-gray-700";
-    }
-  };
 
-  const formatTime = (date: Date) => {
-    const hours = date.getUTCHours().toString().padStart(2, '0');
-    const minutes = date.getUTCMinutes().toString().padStart(2, '0');
-    const seconds = date.getUTCSeconds().toString().padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
-  };
+  const filteredActiveFlights = selectedVAC === "ALL"
+    ? activeFlights
+    : activeFlights.filter(f => f.vac === selectedVAC);
 
-  const getVACName = (vac: string) => {
-    switch (vac) {
-      case "NWS":
-        return "Nordwind Airlines";
-      case "KAR":
-        return "IKAR";
-      case "STW":
-        return "Southwind";
-      default:
-        return "";
-    }
+  const filteredCompletedFlights = selectedVAC === "ALL"
+    ? completedFlights
+    : completedFlights.filter(f => f.vac === selectedVAC);
+
+  const handleFlightSelect = (flight: Flight) => {
+    setSelectedFlight(flight);
+    setSidebarOpen(true);
   };
 
   const getVACColor = (vac: string) => {
-    switch (vac) {
-      case "NWS":
-        return "bg-[#E31E24] hover:bg-[#c41a1f]";
-      case "KAR":
-        return "bg-green-600 hover:bg-green-700";
-      case "STW":
-        return "bg-purple-600 hover:bg-purple-700";
-      default:
-        return "bg-gray-600 hover:bg-gray-700";
-    }
+    if (vac === "NWS") return "#E31E24";
+    if (vac === "KAR") return "#2563eb";
+    if (vac === "STW") return "#ea580c";
+    return "#6b7280";
   };
 
-  // Get VAC primary color (for icons, progress bars, etc.)
-  const getVACPrimaryColor = (vac: string) => {
-    switch (vac) {
-      case "NWS":
-        return "#E31E24";
-      case "KAR":
-        return "#16a34a"; // green-600
-      case "STW":
-        return "#9333ea"; // purple-600
-      default:
-        return "#6b7280"; // gray-600
-    }
-  };
-
-  // Get VAC background color for icons
-  const getVACBgClass = (vac: string) => {
-    switch (vac) {
-      case "NWS":
-        return "bg-[#E31E24]";
-      case "KAR":
-        return "bg-green-600";
-      case "STW":
-        return "bg-purple-600";
-      default:
-        return "bg-gray-600";
-    }
-  };
-
-  // Get VAC text color
-  const getVACTextClass = (vac: string) => {
-    switch (vac) {
-      case "NWS":
-        return "text-[#E31E24]";
-      case "KAR":
-        return "text-green-600";
-      case "STW":
-        return "text-purple-600";
-      default:
-        return "text-gray-600";
-    }
-  };
-
-  // Filter flights based on selected VAC
-  const filteredActiveFlights = selectedVAC === "ALL" 
-    ? activeFlights 
-    : activeFlights.filter(f => f.vac === selectedVAC);
-
-  const filteredCompletedFlights = selectedVAC === "ALL" 
-    ? completedFlights 
-    : completedFlights.filter(f => f.vac === selectedVAC);
-
-  // Handle flight selection
-  const handleFlightSelect = (flight: Flight) => {
-    setSelectedFlight(flight);
-    // If we're in grid view, selecting a flight switches to map view
-    if (viewMode === "grid") {
-        setViewMode("map");
-    }
-  };
-
-  const getPilotMetaLabel = (flight: Flight) => {
-    const callsign = String(flight.callsign || "").trim().toUpperCase();
-    if (callsign) {
-      return callsign;
-    }
-    return String(flight.pilotId || "—").trim() || "—";
-  };
+  const utcTime = currentTime.toUTCString().slice(17, 25);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Hero Section */}
-      <div className="bg-gradient-to-r from-[#E31E24] to-[#c41a1f] text-white py-16">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+    <div className="flex flex-col h-[calc(100svh-68px)] bg-[#0d1117] overflow-hidden">
+      {/* ── Top: sidebar + map ── */}
+      <div className="flex flex-1 overflow-hidden relative">
+      {/* ── Left Sidebar ── */}
+      <aside
+        className={`relative flex flex-col bg-[#111318] border-r border-white/6 transition-all duration-300 shrink-0 ${sidebarOpen ? "w-72" : "w-0"} overflow-hidden`}
+      >
+        <div className="flex flex-col h-full w-72">
+          {/* Sidebar header */}
+          <div className="flex items-center justify-between px-4 py-4 border-b border-white/6">
             <div>
-              <h1 className="text-5xl font-bold mb-4">{t("live.title")}</h1>
-              <p className="text-xl text-white/90">{t("live.subtitle")}</p>
-            </div>
-            
-            {/* UTC Clock */}
-            <div className="bg-white/10 backdrop-blur-sm border-2 border-white/30 rounded-2xl px-8 py-6 text-center shadow-xl">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <Clock className="text-white" size={24} />
-                <p className="text-sm uppercase tracking-wide font-medium text-white/90">
-                  {t("live.currentTime")} UTC
-                </p>
+              <div className="text-white font-bold text-sm" style={{ fontFamily: "var(--font-display)" }}>
+                {tr("Живые полёты", "Live Flights")}
               </div>
-              <div className="text-5xl font-bold font-mono tracking-wider">
-                {formatTime(currentTime)}
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#E31E24] opacity-75" />
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#E31E24]" />
+                </span>
+                <span className="text-white/40 text-[11px]">{filteredActiveFlights.length} {tr("рейсов", "flights")}</span>
               </div>
             </div>
           </div>
+
+          {/* VAC filter */}
+          <div className="flex gap-1 px-3 py-2 border-b border-white/6">
+            {(["ALL", "NWS", "KAR", "STW"] as const).map((vac) => (
+              <button
+                key={vac}
+                type="button"
+                onClick={() => setSelectedVAC(vac)}
+                className={`flex-1 text-[10px] font-bold uppercase tracking-wide rounded-lg py-1.5 transition-all ${
+                  selectedVAC === vac
+                    ? "bg-white/12 text-white"
+                    : "text-white/35 hover:text-white/60 hover:bg-white/6"
+                }`}
+                style={selectedVAC === vac && vac !== "ALL" ? { color: getVACColor(vac) } : undefined}
+              >
+                {vac}
+              </button>
+            ))}
+          </div>
+
+          {/* Flight list */}
+          <div className="flex-1 overflow-y-auto">
+            {isLoadingFlights ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="w-5 h-5 border-2 border-[#E31E24] border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : filteredActiveFlights.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 gap-2">
+                <Plane className="h-8 w-8 text-white/15" />
+                <div className="text-white/25 text-xs text-center px-4">
+                  {tr("Нет активных полётов", "No active flights")}
+                </div>
+              </div>
+            ) : (
+              <div className="divide-y divide-white/4">
+                {filteredActiveFlights.map((flight) => {
+                  const isSelected = selectedFlight?.flightNumber === flight.flightNumber && selectedFlight?.pilotId === flight.pilotId;
+                  const color = getVACColor(flight.vac);
+                  return (
+                    <button
+                      key={`${flight.flightNumber}-${String(flight.pilotId)}`}
+                      type="button"
+                      onClick={() => handleFlightSelect(flight)}
+                      className={`w-full text-left px-4 py-3 transition-all hover:bg-white/5 ${isSelected ? "bg-white/8" : ""}`}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-1 h-4 rounded-full" style={{ backgroundColor: color }} />
+                          <span className="text-white font-bold text-sm" style={{ fontFamily: "var(--font-display)" }}>
+                            {flight.callsign || flight.flightNumber}
+                          </span>
+                        </div>
+                        <span className="text-white/35 text-[10px] font-mono">{flight.aircraft}</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-white/50 text-[11px] mb-2">
+                        <span>{flight.departure}</span>
+                        <svg width="16" height="6" viewBox="0 0 16 6" fill="none">
+                          <line x1="0" y1="3" x2="12" y2="3" stroke="currentColor" strokeWidth="1"/>
+                          <path d="M10 1L12 3L10 5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                        </svg>
+                        <span>{flight.destination}</span>
+                        {flight.network && (
+                          <span className="ml-auto text-[9px] border border-white/15 px-1 rounded">{flight.network}</span>
+                        )}
+                      </div>
+                      <div className="w-full h-0.5 rounded-full bg-white/8 overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{ width: `${Math.min(100, flight.progress)}%`, backgroundColor: color }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-white/25 text-[10px]">{Math.round(flight.progress)}%</span>
+                        {flight.altitude ? (
+                          <span className="text-white/25 text-[10px]">
+                            {flight.altitude >= 1000 ? `FL${Math.round(flight.altitude / 100)}` : `${Math.round(flight.altitude)} ft`}
+                          </span>
+                        ) : null}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+          </div>
+
+          {/* UTC Clock at bottom */}
+          <div className="flex items-center gap-2 px-4 py-3 border-t border-white/6">
+            <Clock className="h-3.5 w-3.5 text-white/25" />
+            <span className="text-white/40 text-[10px] uppercase tracking-[0.15em]">UTC</span>
+            <span className="text-white font-mono font-bold text-sm ml-auto">{utcTime}</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* Sidebar toggle button */}
+      <button
+        type="button"
+        onClick={() => setSidebarOpen((v) => !v)}
+        className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-5 h-12 bg-[#111318] border border-white/10 rounded-r-lg text-white/40 hover:text-white/70 transition-all"
+        style={{ left: sidebarOpen ? "288px" : "0px" }}
+      >
+        {sidebarOpen ? <ChevronLeft className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+      </button>
+
+      {/* ── Map ── */}
+      <div className="flex-1 relative overflow-hidden">
+        <LiveMap
+          flights={filteredActiveFlights}
+          selectedFlight={selectedFlight}
+          onFlightSelect={handleFlightSelect}
+          onCloseDetail={() => setSelectedFlight(null)}
+          className="w-full h-full bg-[#0d1117]"
+        />
+
+        {/* Top-right overlay: VAC legend + live indicator */}
+        <div className="absolute top-3 right-3 z-[1000] flex items-center gap-2">
+          {hasFlightsError && (
+            <div className="flex items-center gap-1.5 rounded-lg bg-red-900/80 px-3 py-1.5 text-[11px] text-red-200 backdrop-blur-sm border border-red-500/20">
+              <Radio className="h-3 w-3" />
+              {tr("Ошибка загрузки", "Load error")}
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 rounded-lg bg-black/50 px-3 py-1.5 text-[11px] text-white/60 backdrop-blur-sm border border-white/8">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#E31E24] opacity-75" />
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#E31E24]" />
+            </span>
+            {tr("В воздухе", "Airborne")}: <span className="text-white font-semibold ml-1">{filteredActiveFlights.length}</span>
+          </div>
+          <div className="rounded-lg bg-black/50 px-3 py-1.5 text-[11px] font-mono text-white/60 backdrop-blur-sm border border-white/8">
+            {utcTime} <span className="text-white/35">UTC</span>
+          </div>
+        </div>
+
+        {/* VAC colour legend — top-left below controls */}
+        <div className="absolute top-12 left-3 z-[1000] flex flex-col gap-1">
+          {[
+            { vac: "NWS", label: "Nordwind" },
+            { vac: "KAR", label: "IKAR" },
+            { vac: "STW", label: "Southwind" },
+          ].map(({ vac, label }) => (
+            <div key={vac} className="flex items-center gap-2 rounded-lg bg-black/50 px-2.5 py-1 text-[10px] backdrop-blur-sm border border-white/6">
+              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: getVACColor(vac) }} />
+              <span className="text-white/50">{vac}</span>
+              <span className="text-white/25">{label}</span>
+            </div>
+          ))}
         </div>
       </div>
+      </div>{/* end top flex row */}
 
-      {/* Main Content Area */}
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        
-        {/* Active Flights Header and Controls */}
-        <div className="mb-8">
-            <div className="flex items-center justify-between mb-6">
-            <div>
-                <h2 className="text-3xl font-bold text-gray-900 mb-2">
-                {t("live.activeFlights")} <span className="text-[#E31E24]">({filteredActiveFlights.length})</span>
-                </h2>
-                <p className="text-gray-600">{t("live.activeFlightsSubtitle")}</p>
-            </div>
-            
-            {/* View Mode Switcher */}
-            <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-                <button
-                onClick={() => {
-                    setViewMode("grid");
-                    setSelectedFlight(null); // Clear selection when switching to grid
-                }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                    viewMode === "grid"
-                    ? "bg-white text-[#E31E24] shadow-md"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-                >
-                <LayoutGrid size={20} />
-                <span>{t("live.gridView")}</span>
-                </button>
-                <button
-                onClick={() => setViewMode("map")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                    viewMode === "map"
-                    ? "bg-white text-[#E31E24] shadow-md"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-                >
-                <MapIcon size={20} />
-                <span>{t("live.mapView")}</span>
-                </button>
-            </div>
-            </div>
-        </div>
-
-        {/* Filter Bar */}
-        <div className="mb-8 bg-gray-50 rounded-lg p-4 border border-gray-200">
-            <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 text-gray-700">
-                <Filter size={20} />
-                <span className="font-medium">{t("live.filterByVAC")}:</span>
-            </div>
-            <button
-                onClick={() => setSelectedVAC("ALL")}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                selectedVAC === "ALL"
-                    ? "bg-gray-800 text-white shadow-md"
-                    : "bg-white text-gray-700 border border-gray-300 hover:border-gray-400"
-                }`}
-            >
-                {t("live.allAirlines")} ({activeFlights.length + completedFlights.length})
-            </button>
-            <button
-                onClick={() => setSelectedVAC("NWS")}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                selectedVAC === "NWS"
-                    ? getVACColor("NWS") + " text-white shadow-md"
-                    : "bg-white text-gray-700 border border-gray-300 hover:border-[#E31E24]"
-                }`}
-            >
-                Nordwind Airlines (NWS)
-            </button>
-            <button
-                onClick={() => setSelectedVAC("KAR")}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                selectedVAC === "KAR"
-                    ? getVACColor("KAR") + " text-white shadow-md"
-                    : "bg-white text-gray-700 border border-gray-300 hover:border-blue-600"
-                }`}
-            >
-                IKAR (KAR)
-            </button>
-            <button
-                onClick={() => setSelectedVAC("STW")}
-                className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                selectedVAC === "STW"
-                    ? getVACColor("STW") + " text-white shadow-md"
-                    : "bg-white text-gray-700 border border-gray-300 hover:border-orange-600"
-                }`}
-            >
-                Southwind (STW)
-            </button>
-            </div>
-        </div>
-
-        {isLoadingFlights && !activeFlights.length ? (
-          <div className="mb-8 rounded-lg border border-gray-200 bg-white p-4 text-gray-600">Loading live telemetry...</div>
-        ) : null}
-
-        {hasFlightsError ? (
-          <div className="mb-8 rounded-lg border border-red-200 bg-red-50 p-4 text-red-700">
-            Failed to refresh flight telemetry. Showing last available data.
+      {/* ── Completed Flights Table ── */}
+      <div className="shrink-0 border-t border-white/8 bg-[#0a0d12] flex flex-col" style={{ maxHeight: 220 }}>
+          {/* Table header */}
+          <div className="flex items-center gap-4 px-4 py-2 border-b border-white/6 shrink-0">
+            <span className="text-white/35 text-[10px] uppercase tracking-[0.18em]">
+              {tr("Завершённые полёты", "Completed flights")}
+            </span>
+            <span className="text-white/20 text-[10px]">({filteredCompletedFlights.length})</span>
           </div>
-        ) : null}
-
-        {/* Grid View */}
-        {viewMode === "grid" && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-16">
-            {filteredActiveFlights.map((flight, index) => (
-                <div
-                key={index}
-                onClick={() => handleFlightSelect(flight)}
-                className="bg-white rounded-lg p-6 border-2 border-gray-200 hover:border-[#E31E24] hover:shadow-lg transition-all cursor-pointer"
-                >
-                {/* Flight Header */}
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                    <div className={`${getVACBgClass(flight.vac)} p-2 rounded`}>
-                        <Plane className="text-white" size={20} />
-                    </div>
-                    <div>
-                        <div className="font-mono text-lg font-bold">{flight.flightNumber}</div>
-                        <div className="text-sm text-gray-600">{flight.aircraft}</div>
-                    </div>
-                    </div>
-                    <span
-                    className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                        flight.status
-                    )}`}
+          <div className="overflow-y-auto" style={{ scrollbarWidth: "thin" }}>
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="border-b border-white/5">
+                  {[
+                    tr("Рейс", "Flight"),
+                    tr("Маршрут", "Route"),
+                    tr("Пилот", "Pilot"),
+                    tr("ВС", "Aircraft"),
+                    tr("Сеть", "Network"),
+                    tr("Время", "Time"),
+                  ].map((col) => (
+                    <th key={col} className="text-left px-4 py-2 text-white/25 font-medium uppercase tracking-[0.12em] whitespace-nowrap">
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredCompletedFlights.map((flight, i) => {
+                  const color = getVACColor(flight.vac);
+                  return (
+                    <tr
+                      key={`comp-${flight.flightNumber}-${String(flight.pilotId)}-${i}`}
+                      className="border-b border-white/4 hover:bg-white/3 transition-colors"
                     >
-                    {flight.status}
-                    </span>
-                </div>
-
-                {/* Route */}
-                <div className="flex items-center justify-between mb-4">
-                    <div className="flex-1">
-                    <div className="text-xs text-gray-500 mb-1">
-                        <MapPin className="inline" size={12} /> {t("live.departure")}
-                    </div>
-                    <div className="font-bold text-lg">{flight.departure}</div>
-                    <div className="text-sm text-gray-600">{flight.departureCity}</div>
-                    </div>
-                    <div className="px-4">
-                    <Plane className={getVACTextClass(flight.vac)} size={20} />
-                    </div>
-                    <div className="flex-1 text-right">
-                    <div className="text-xs text-gray-500 mb-1">
-                        <MapPin className="inline" size={12} /> {t("live.arrival")}
-                    </div>
-                    <div className="font-bold text-lg">{flight.destination}</div>
-                    <div className="text-sm text-gray-600">{flight.destinationCity}</div>
-                    </div>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="mb-4">
-                    <div className="flex justify-between text-xs text-gray-600 mb-1">
-                    <span>{t("live.progress")}</span>
-                    <span>{flight.progress}%</span>
-                    </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                    <div
-                        className="h-2 rounded-full transition-all"
-                        style={{ 
-                        width: `${flight.progress}%`,
-                        backgroundColor: getVACPrimaryColor(flight.vac)
-                        }}
-                    ></div>
-                    </div>
-                </div>
-
-                {/* Pilot Info */}
-                <div className="flex items-center gap-2 pt-3 border-t border-gray-200 mb-3">
-                    <div className="text-xl">
-                    👨‍✈️
-                    </div>
-                    <div className="text-sm text-gray-600">
-                    {t("live.pilot")}: <span className="text-gray-900 font-medium">{flight.pilot} - {getPilotMetaLabel(flight)}</span>
-                    </div>
-                </div>
-
-                {/* ETD, ETE, ETA */}
-                {flight.etd && flight.ete && flight.eta && (
-                    <div className="grid grid-cols-3 gap-2 bg-gray-50 rounded-lg p-3 border border-gray-100">
-                    <div className="text-center">
-                        <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">ETD</div>
-                        <div className="text-sm font-mono font-semibold text-gray-900">{flight.etd}</div>
-                    </div>
-                    <div className="text-center border-x border-gray-200">
-                        <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">ETE</div>
-                        <div className="text-sm font-mono font-semibold text-[#E31E24]">{flight.ete}</div>
-                    </div>
-                    <div className="text-center">
-                        <div className="text-[10px] text-gray-500 uppercase tracking-wide mb-1">ETA</div>
-                        <div className="text-sm font-mono font-semibold text-gray-900">{flight.eta}</div>
-                    </div>
-                    </div>
-                )}
-                </div>
-            ))}
-            </div>
-        )}
-
-        {/* Map View */}
-        {viewMode === "map" && (
-            <div className="mb-16">
-            <LiveMap 
-                flights={filteredActiveFlights}
-                selectedFlight={selectedFlight}
-                onFlightSelect={(flight) => setSelectedFlight(flight)}
-                onCloseDetail={() => setSelectedFlight(null)}
-            />
-            </div>
-        )}
-
-        {/* Completed Flights Section */}
-        <div className="mb-8">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div>
-              <h2 className="text-3xl font-bold text-gray-900 mb-2">
-                {t("live.completedFlights")} <span className="text-[#E31E24]">({filteredCompletedFlights.length})</span>
-              </h2>
-              <p className="text-gray-600">{t("live.completedFlightsSubtitle")}</p>
-            </div>
-
-            {/* View Mode Switcher for Completed Flights */}
-            <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
-              <button
-                onClick={() => setCompletedViewMode("gallery")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                  completedViewMode === "gallery"
-                    ? "bg-white text-[#E31E24] shadow-md"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <LayoutGrid size={20} />
-                <span>{t("live.galleryView") || "Gallery"}</span>
-              </button>
-              <button
-                onClick={() => setCompletedViewMode("list")}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                  completedViewMode === "list"
-                    ? "bg-white text-[#E31E24] shadow-md"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}
-              >
-                <TableIcon size={20} />
-                <span>{t("live.gridView") || "Grid"}</span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {completedViewMode === "gallery" ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {filteredCompletedFlights.map((flight, index) => (
-            <div
-                key={index}
-                className="group bg-white rounded-xl p-6 border border-gray-200 hover:border-[#E31E24] hover:shadow-xl transition-all duration-300 relative overflow-hidden"
-            >
-                {/* Decorative gradient overlay */}
-                <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-gray-100 to-transparent rounded-bl-full opacity-50"></div>
-                
-                {/* Flight Header */}
-                <div className="flex items-start justify-between mb-5 relative z-10">
-                <div className="flex items-center gap-3">
-                    <div className="bg-gradient-to-br from-gray-400 to-gray-500 p-3 rounded-lg shadow-md group-hover:scale-110 transition-transform">
-                    <Plane className="text-white" size={20} />
-                    </div>
-                    <div>
-                    <div className="font-mono text-xl font-bold text-gray-900">{flight.flightNumber}</div>
-                    <div className="text-sm text-gray-500 flex items-center gap-1 mt-1">
-                        <span className="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
-                        {flight.aircraft}
-                    </div>
-                    </div>
-                </div>
-                <div className="text-right bg-gray-50 rounded-lg px-3 py-2">
-                    <div className="text-xs font-medium text-green-700 mb-1">✓ {flight.status}</div>
-                    <div className="text-xs text-gray-600 font-semibold">{flight.completedDate}</div>
-                    <div className="text-xs text-gray-500 font-mono mt-0.5">{flight.completedTime} UTC</div>
-                </div>
-                </div>
-
-                {/* Route - Horizontal Layout */}
-                <div className="bg-gradient-to-r from-gray-50 to-white rounded-lg p-4 mb-4 border border-gray-100">
-                <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                    <div className="flex items-center gap-1 text-xs text-gray-500 mb-1">
-                        <MapPin size={12} className="text-[#E31E24]" />
-                        <span className="uppercase tracking-wide">{t("live.departure")}</span>
-                    </div>
-                    <div className="font-bold text-lg text-gray-900">{flight.departure}</div>
-                    <div className="text-sm text-gray-600">{flight.departureCity}</div>
-                    </div>
-                    
-                    <div className="px-4 flex flex-col items-center">
-                    <Plane className="text-gray-400 transform rotate-90" size={20} />
-                    <div className="w-16 h-0.5 bg-gradient-to-r from-gray-300 via-[#E31E24] to-gray-300 my-1"></div>
-                    </div>
-                    
-                    <div className="flex-1 text-right">
-                    <div className="flex items-center justify-end gap-1 text-xs text-gray-500 mb-1">
-                        <MapPin size={12} className="text-green-600" />
-                        <span className="uppercase tracking-wide">{t("live.arrival")}</span>
-                    </div>
-                    <div className="font-bold text-lg text-gray-900">{flight.destination}</div>
-                    <div className="text-sm text-gray-600">{flight.destinationCity}</div>
-                    </div>
-                </div>
-                </div>
-
-                {/* Duration */}
-                <div className="flex items-center gap-2 mb-4 bg-blue-50 rounded-lg px-3 py-2 border border-blue-100">
-                <Clock className="text-blue-600" size={16} />
-                <div className="text-sm text-gray-700">
-                    <span className="text-gray-500">{t("live.duration")}:</span>{" "}
-                    <span className="font-bold text-blue-700">{flight.duration}</span>
-                </div>
-                </div>
-
-                {/* Pilot Info */}
-                <div className="flex items-center gap-3 pt-4 border-t border-gray-200">
-                <div className="text-2xl">👨‍✈️</div>
-                <div>
-                    <div className="text-xs text-gray-500 uppercase tracking-wide mb-0.5">{t("live.pilot")}</div>
-                    <div className="text-sm font-semibold text-gray-900">
-                    {flight.pilot} <span className="text-[#E31E24]">• {getPilotMetaLabel(flight)}</span>
-                    </div>
-                </div>
-                </div>
-            </div>
-            ))}
-        </div>
-        ) : (
-          <div className="overflow-hidden bg-white rounded-xl border border-gray-200 shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("live.flight") || "Flight"}</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("live.route") || "Route"}</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("live.aircraft") || "Aircraft"}</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("live.pilot") || "Pilot"}</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("live.date") || "Date"}</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">{t("live.duration") || "Duration"}</th>
-                    <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">{t("live.status") || "Status"}</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {filteredCompletedFlights.map((flight, index) => (
-                    <tr key={index} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-2 h-8 rounded-full ${getVACBgClass(flight.vac)}`}></div>
-                          <div>
-                            <div className="font-mono font-bold text-gray-900">{flight.flightNumber}</div>
-                            <div className="text-xs text-gray-500">{getVACName(flight.vac)}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-gray-900">{flight.departure}</span>
-                          <span className="text-gray-400">→</span>
-                          <span className="font-bold text-gray-900">{flight.destination}</span>
-                        </div>
-                        <div className="text-xs text-gray-500">{flight.departureCity} - {flight.destinationCity}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{flight.aircraft}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{flight.pilot}</div>
-                        <div className="text-xs text-gray-500">{getPilotMetaLabel(flight)}</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">{flight.completedDate}</div>
-                        <div className="text-xs text-gray-500 font-mono">{flight.completedTime} UTC</div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-sm text-gray-700">
-                          <Clock size={14} className="text-gray-400" />
-                          <span className="font-medium">{flight.duration}</span>
+                          <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
+                          <span className="text-white font-semibold" style={{ fontFamily: "var(--font-display)" }}>
+                            {flight.callsign || flight.flightNumber}
+                          </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-right">
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          {flight.status}
-                        </span>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5 text-white/60">
+                          <span>{flight.departure}</span>
+                          <svg width="12" height="4" viewBox="0 0 12 4" fill="none">
+                            <line x1="0" y1="2" x2="9" y2="2" stroke="currentColor" strokeWidth="1"/>
+                            <path d="M7 0.5L9 2L7 3.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                          </svg>
+                          <span>{flight.destination}</span>
+                          {flight.departureCity && flight.destinationCity && (
+                            <span className="text-white/25 hidden lg:inline">
+                              ({flight.departureCity} – {flight.destinationCity})
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-white/50 whitespace-nowrap">{flight.pilot || "—"}</td>
+                      <td className="px-4 py-2.5 text-white/40 whitespace-nowrap font-mono">{flight.aircraft || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {flight.network ? (
+                          <span className="text-[10px] border border-white/12 text-white/40 px-1.5 py-0.5 rounded">
+                            {flight.network}
+                          </span>
+                        ) : <span className="text-white/20">—</span>}
+                      </td>
+                      <td className="px-4 py-2.5 text-white/30 whitespace-nowrap font-mono">
+                        {flight.completedTime || flight.eta || "—"}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  );
+                })}
+              </tbody>
+            </table>
+          {filteredCompletedFlights.length === 0 && (
+            <div className="flex items-center justify-center py-5 text-white/20 text-xs">
+              {tr("Завершённых рейсов нет", "No completed flights")}
             </div>
+          )}
           </div>
-        )}
-
-        {/* Footer note */}
-        <div className="mt-12 text-center">
-            <div className="inline-block bg-blue-50 border border-blue-200 rounded-lg px-6 py-4">
-            <p className="text-gray-700">{t("live.note")}</p>
-            </div>
         </div>
-      </div>
     </div>
   );
 }

@@ -64,6 +64,12 @@ const CATEGORY_META: Record<NotificationCategory, {
     accentClass: "text-violet-600",
     badgeClass: "border-violet-200 bg-violet-50 text-violet-700",
   },
+  challenge: {
+    labelKey: "notifications.category.challenge",
+    icon: Trophy,
+    accentClass: "text-indigo-600",
+    badgeClass: "border-indigo-200 bg-indigo-50 text-indigo-700",
+  },
   badge: {
     labelKey: "notifications.category.badge",
     icon: Trophy,
@@ -110,8 +116,8 @@ const NotificationCard = ({
   locale,
 }: {
   item: NotificationItem;
-  onRead: (notificationId: string) => void;
-  onDelete: (notificationId: string) => void;
+  onRead: (item: NotificationItem) => void;
+  onDelete: (item: NotificationItem) => void;
   onAction: (item: NotificationItem) => void;
   t: (key: string) => string;
   locale: string;
@@ -139,7 +145,7 @@ const NotificationCard = ({
               <div className="text-xs text-gray-400">{formatNotificationTime(item.createdAt, locale)}</div>
               <div className="flex flex-wrap gap-2">
                 {!item.isRead ? (
-                  <Button variant="outline" size="sm" onClick={() => onRead(item.id)}>
+                  <Button variant="outline" size="sm" onClick={() => onRead(item)}>
                     <Check className="mr-2 h-4 w-4" />
                     {t("notifications.read")}
                   </Button>
@@ -149,15 +155,17 @@ const NotificationCard = ({
                     {t(item.actionLabelKey || "notifications.open")}
                   </Button>
                 ) : null}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                  onClick={() => onDelete(item.id)}
-                >
-                  <Trash2 className="mr-2 h-4 w-4" />
-                  {t("notifications.delete")}
-                </Button>
+                {item.category !== "challenge" ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => onDelete(item)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {t("notifications.delete")}
+                  </Button>
+                ) : null}
               </div>
             </div>
           </div>
@@ -172,6 +180,7 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   const [isTicketLoading, setIsTicketLoading] = useState(false);
   const [staffTicketUnreadCount, setStaffTicketUnreadCount] = useState(0);
   const [staffTickets, setStaffTickets] = useState<StaffTicketPreview[]>([]);
+  const [challengeNotifications, setChallengeNotifications] = useState<NotificationItem[]>([]);
   const navigate = useNavigate();
   const { isAuthenticated, isAdmin, isStaff } = useAuth();
   const { t, language } = useLanguage();
@@ -185,7 +194,59 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   } = useNotifications();
   const locale = language === "ru" ? "ru-RU" : "en-US";
   const canViewStaffNotifications = isAuthenticated && (isAdmin || isStaff);
-  const totalUnreadCount = unreadCount + staffTicketUnreadCount;
+  const challengeUnreadCount = challengeNotifications.filter((item) => !item.isRead).length;
+  const totalUnreadCount = unreadCount + challengeUnreadCount + staffTicketUnreadCount;
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setChallengeNotifications([]);
+      return;
+    }
+
+    let active = true;
+    const loadChallengeNotifications = async () => {
+      try {
+        const lang = language === "ru" ? "ru" : "en";
+        const response = await fetch(`/api/pilot/challenges/notifications?lang=${lang}`, { credentials: "include" });
+        const payload = await response.json().catch(() => null);
+        if (!active) {
+          return;
+        }
+        if (!response.ok || !payload?.ok) {
+          setChallengeNotifications([]);
+          return;
+        }
+
+        const parsed = Array.isArray(payload?.notifications)
+          ? payload.notifications.map((item: any) => ({
+              id: `challenge:${String(item?.id || "")}`,
+              category: "challenge" as const,
+              title: String(item?.title || ""),
+              description: String(item?.message || ""),
+              createdAt: String(item?.createdAt || ""),
+              isRead: Boolean(item?.readAt),
+              dedupeKey: String(item?.code || "") || undefined,
+            })).filter((item: NotificationItem) => item.id !== "challenge:")
+          : [];
+
+        setChallengeNotifications(parsed);
+      } catch {
+        if (active) {
+          setChallengeNotifications([]);
+        }
+      }
+    };
+
+    void loadChallengeNotifications();
+    const timer = window.setInterval(() => {
+      void loadChallengeNotifications();
+    }, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [isAuthenticated, language]);
 
   useEffect(() => {
     if (!canViewStaffNotifications) {
@@ -230,23 +291,98 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
     };
   }, [canViewStaffNotifications]);
 
+  const allNotifications = useMemo(
+    () => [...challengeNotifications, ...notifications]
+      .slice()
+      .sort((left, right) => String(right?.createdAt || "").localeCompare(String(left?.createdAt || ""))),
+    [challengeNotifications, notifications]
+  );
+
   const groupedNotifications = useMemo(() => {
     const groups = new Map<NotificationCategory, NotificationItem[]>();
-    notifications.forEach((item) => {
+    allNotifications.forEach((item) => {
       const current = groups.get(item.category) || [];
       current.push(item);
       groups.set(item.category, current);
     });
 
     return Array.from(groups.entries());
-  }, [notifications]);
+  }, [allNotifications]);
+
+  const markChallengeNotificationRead = async (item: NotificationItem) => {
+    const match = String(item.id || "").match(/^challenge:(.+)$/);
+    const challengeId = String(match?.[1] || "").trim();
+    if (!challengeId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/pilot/challenges/notifications/${encodeURIComponent(challengeId)}/read`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        return;
+      }
+      setChallengeNotifications((current) =>
+        current.map((entry) => (entry.id === item.id ? { ...entry, isRead: true } : entry))
+      );
+    } catch {
+      // network errors are ignored, the next poll will refresh state
+    }
+  };
+
+  const handleMarkAsRead = (item: NotificationItem) => {
+    if (item.category === "challenge") {
+      void markChallengeNotificationRead(item);
+      return;
+    }
+    markAsRead(item.id);
+  };
+
+  const handleDelete = (item: NotificationItem) => {
+    if (item.category === "challenge") {
+      return;
+    }
+    deleteNotification(item.id);
+  };
+
+  const handleMarkAllAsRead = async () => {
+    markAllAsRead();
+
+    const unreadChallengeItems = challengeNotifications.filter((item) => !item.isRead);
+    if (!unreadChallengeItems.length) {
+      return;
+    }
+
+    await Promise.all(
+      unreadChallengeItems.map(async (item) => {
+        const match = String(item.id || "").match(/^challenge:(.+)$/);
+        const challengeId = String(match?.[1] || "").trim();
+        if (!challengeId) {
+          return;
+        }
+        try {
+          await fetch(`/api/pilot/challenges/notifications/${encodeURIComponent(challengeId)}/read`, {
+            method: "POST",
+            credentials: "include",
+          });
+        } catch {
+          // ignored intentionally
+        }
+      })
+    );
+
+    setChallengeNotifications((current) => current.map((item) => ({ ...item, isRead: true })));
+  };
 
   const handleAction = (item: NotificationItem) => {
     if (!item.actionUrl) {
       return;
     }
 
-    markAsRead(item.id);
+    handleMarkAsRead(item);
     setOpen(false);
     navigate(item.actionUrl);
   };
@@ -256,7 +392,7 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
     navigate("/admin/tickets");
   };
 
-  const hasAnyNotifications = notifications.length > 0 || staffTickets.length > 0;
+  const hasAnyNotifications = allNotifications.length > 0 || staffTickets.length > 0;
   const showStaffSection = canViewStaffNotifications && (isTicketLoading || staffTickets.length > 0);
   const buttonClass = variant === "header"
     ? "relative h-10 w-10 rounded-full border border-white/10 bg-transparent text-[#E31E24] hover:bg-white/10 hover:text-white"
@@ -299,7 +435,7 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
             {totalUnreadCount > 0 ? `${totalUnreadCount} ${t("notifications.unreadSuffix")}` : t("notifications.allRead")}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={markAllAsRead} disabled={!notifications.length || unreadCount === 0}>
+            <Button variant="outline" size="sm" onClick={() => { void handleMarkAllAsRead(); }} disabled={totalUnreadCount === 0}>
               <CheckCheck className="mr-2 h-4 w-4" />
               {t("notifications.readAll")}
             </Button>
@@ -390,8 +526,8 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
                         <NotificationCard
                           key={item.id}
                           item={item}
-                          onRead={markAsRead}
-                          onDelete={deleteNotification}
+                          onRead={handleMarkAsRead}
+                          onDelete={handleDelete}
                           onAction={handleAction}
                           t={t}
                           locale={locale}

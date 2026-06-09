@@ -1,0 +1,14 @@
+{
+  "name": "nordwind-vk-bot",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Separate VK community bot linked to the Nordwind backend",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

@@ -119,6 +119,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     flights?: number;
     joinedAt?: string;
     avatar?: string;
+    location?: string;
+    locationLabel?: string;
     honoraryRank?: string;
     honorary_rank_name?: string;
     honoraryRankName?: string;
@@ -148,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       totalHours: Number(user.hours || 0) || 0,
       totalFlights: Number(user.flights || 0) || 0,
       joinDate: String(user.joinedAt || new Date().toISOString().slice(0, 10)),
-      location: "",
+      location: String(user.location || user.locationLabel || "").trim(),
       avatar: user.avatar || undefined,
     };
   };

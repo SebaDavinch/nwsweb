@@ -52,6 +52,10 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const DISCORD_OAUTH_REDIRECT_URI = process.env.DISCORD_OAUTH_REDIRECT_URI || "";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN || "";
+const VK_BOT_CONFIG_TOKEN = process.env.VK_BOT_CONFIG_TOKEN || "";
+const WEBSITE_BASE_URL = String(
+  process.env.WEBSITE_BASE_URL || process.env.PUBLIC_WEBSITE_URL || process.env.APP_BASE_URL || process.env.SITE_URL || ""
+).trim();
 const DISCORD_NEWS_CHANNEL_ID = process.env.DISCORD_NEWS_CHANNEL_ID || "";
 const DISCORD_OAUTH_SUCCESS_URL = process.env.DISCORD_OAUTH_SUCCESS_URL || "/login?discord=success";
 const DISCORD_OAUTH_FAILURE_URL = process.env.DISCORD_OAUTH_FAILURE_URL || "/login?discord=error";
@@ -61,6 +65,7 @@ const VAMSYS_OAUTH_FAILURE_URL = process.env.VAMSYS_OAUTH_FAILURE_URL || "/login
 const VAMSYS_OAUTH_SCOPE = String(process.env.VAMSYS_OAUTH_SCOPE || "").trim();
 const PILOT_API_BASE = process.env.PILOT_API_BASE || "https://vamsys.io/api/v3/pilot";
 const PILOT_API_CLIENT_ID = process.env.PILOT_API_CLIENT_ID || "";
+const PILOT_API_CLIENT_SECRET = process.env.PILOT_API_CLIENT_SECRET || "";
 const PILOT_API_REDIRECT_URI = process.env.PILOT_API_REDIRECT_URI || "";
 const PILOT_API_SCOPE = String(process.env.PILOT_API_SCOPE || "").trim();
 const PILOT_API_SUCCESS_URL =
@@ -125,6 +130,8 @@ if (!AUTH_STORE_FILE) {
 // Pilots roster persistence file (stored alongside the auth store)
 const PILOTS_ROSTER_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilots-roster.json");
 const FLEET_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "fleet-snapshot.json");
+const STREAM_TOKENS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "stream-tokens.json");
+const STREAM_SETTINGS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "stream-settings.json");
 const DASHBOARD_CATALOG_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "dashboard-catalog-snapshot.json");
 const ADMIN_CONTENT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-content.json");
 const ADMIN_AUDIT_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-audit-log.json");
@@ -134,6 +141,7 @@ const SOCIAL_GALLERY_FILE = path.join(path.dirname(AUTH_STORE_FILE), "social-gal
 const SOCIAL_GALLERY_PICKS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-picks.json");
 const EVENT_COINS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "event-coins.json");
 const PILOT_BALANCE_ADJUSTMENTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-balance-adjustments.json");
+const PILOT_CHALLENGES_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-challenges.json");
 const SOCIAL_GALLERY_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-assets");
 const BANNER_GENERATOR_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "banner-generator-assets");
 const ADMIN_AUDIT_MAX_ENTRIES = Math.max(Number(process.env.ADMIN_AUDIT_MAX_ENTRIES || 5000) || 5000, 500);
@@ -155,6 +163,10 @@ const VAMSYS_SESSION_REFRESH_MS =
   Math.max(Number(process.env.VAMSYS_SESSION_REFRESH_MS || 5 * 60 * 1000) || 5 * 60 * 1000, 30 * 1000);
 const PILOT_API_PROFILE_REFRESH_MS = Math.max(
   Number(process.env.PILOT_API_PROFILE_REFRESH_MS || 15 * 60 * 1000) || 15 * 60 * 1000,
+  60 * 1000
+);
+const PILOT_API_LOCATION_SYNC_MS = Math.max(
+  Number(process.env.PILOT_API_LOCATION_SYNC_MS || 3 * 60 * 1000) || 3 * 60 * 1000,
   60 * 1000
 );
 const VAMSYS_OAUTH_PROFILE_PROBE_ENABLED =
@@ -576,11 +588,138 @@ const DEFAULT_TELEGRAM_BOT_SETTINGS = {
   },
   commands: {
     start: true,
+    menu: true,
+    link: true,
     help: true,
     ping: true,
+    profile: true,
+    booking: true,
     news: true,
     notams: true,
+    events: true,
+    roster: true,
+    metar: true,
+    taf: true,
+    settings: true,
     ticket: true,
+  },
+  updatedAt: null,
+};
+
+const DEFAULT_VK_BOT_SETTINGS = {
+  enabled: true,
+  groupId: "",
+  accessToken: "",
+  sync: {
+    news: true,
+    telegramMirror: true,
+  },
+  telegramMirrorChatId: "",
+  faqEnabled: true,
+  menuEnabled: true,
+  longPollWaitSeconds: 25,
+  welcomeMessage: "Привет! Это VK-бот сообщества Nordwind Virtual. Нажмите «Меню» или задайте вопрос в сообщении.",
+  fallbackMessage: "Я пока не нашёл ответ. Нажмите «Меню» или задайте вопрос о вступлении, новостях, тикетах и поддержке.",
+  menuTitle: "Меню сообщества Nordwind VK",
+  autoMessages: {
+    start: "Привет! Рад видеть вас в сообществе Nordwind Virtual.",
+    menu: "Открыл меню. Выберите нужный пункт ниже.",
+    faqMiss: "Не нашёл подходящий ответ. Нажмите «Меню» или задайте вопрос иначе.",
+  },
+  faqItems: [
+    {
+      id: "join",
+      question: "Как вступить в Nordwind Virtual?",
+      answer: "Откройте страницу /join на сайте, заполните заявку и дождитесь подтверждения профиля в vAMSYS.",
+      keywords: ["вступить", "регистрация", "join", "как вступить"],
+      enabled: true,
+      order: 10,
+    },
+    {
+      id: "tickets",
+      question: "Куда писать по проблемам и вопросам?",
+      answer: "Используйте тикеты на сайте: /tickets. Там можно быстро получить ответ от staff и сохранить историю обращения.",
+      keywords: ["тикет", "поддержка", "help", "support", "проблема"],
+      enabled: true,
+      order: 20,
+    },
+    {
+      id: "discord",
+      question: "Где живое общение сообщества?",
+      answer: "Для живого общения и оперативных обсуждений используйте Discord. Для публичной ленты и анонсов используем VK.",
+      keywords: ["discord", "чат", "сообщество", "общение"],
+      enabled: true,
+      order: 30,
+    },
+  ],
+  menuItems: [
+    { id: "faq-join", label: "Как вступить", action: "faq", value: "join", enabled: true, order: 10 },
+    { id: "faq-tickets", label: "Поддержка и тикеты", action: "faq", value: "tickets", enabled: true, order: 20 },
+    { id: "url-news", label: "Новости сайта", action: "url", value: "/activities", enabled: true, order: 30 },
+    { id: "url-tickets", label: "Открыть тикеты", action: "url", value: "/tickets", enabled: true, order: 40 },
+  ],
+  replyTemplates: [
+    {
+      id: "join-flow",
+      title: "Вступление в VA",
+      matchMode: "contains",
+      trigger: "вступ",
+      response: "Для вступления перейдите на {{websiteUrl}}/join и заполните заявку. Если появятся вопросы, ответьте на это сообщение.",
+      enabled: true,
+      order: 10,
+    },
+    {
+      id: "support-flow",
+      title: "Поддержка",
+      matchMode: "contains",
+      trigger: "поддерж",
+      response: "Для поддержки используйте тикеты: {{websiteUrl}}/tickets. Укажите проблему и приложите детали полёта.",
+      enabled: true,
+      order: 20,
+    },
+  ],
+  dialogMenu: {
+    enabled: true,
+    oneTime: false,
+    inline: false,
+    buttons: [
+      { id: "menu-join", label: "Как вступить", type: "faq", value: "join", enabled: true, order: 10 },
+      { id: "menu-tickets", label: "Тикеты", type: "url", value: "/tickets", enabled: true, order: 20 },
+      { id: "menu-news", label: "Новости", type: "url", value: "/activities", enabled: true, order: 30 },
+      { id: "menu-main", label: "Текстовое меню", type: "menu", value: "", enabled: true, order: 40 },
+    ],
+  },
+  announcementTemplates: {
+    default: {
+      id: "default",
+      title: "Общий шаблон",
+      enabled: true,
+      text: "[{{category}}] {{title}}\n\n{{content}}\n\n{{linkLine}}\n\nАвтор: {{author}}",
+    },
+    news: {
+      id: "news",
+      title: "Новости",
+      enabled: true,
+      text: "[НОВОСТИ] {{title}}\n\n{{content}}\n\n{{linkLine}}\n\nАвтор: {{author}}",
+    },
+    event: {
+      id: "event",
+      title: "Ивенты",
+      enabled: true,
+      text: "[ИВЕНТ] {{title}}\n\n{{content}}\n\n{{linkLine}}\n\nАвтор: {{author}}",
+    },
+    notam: {
+      id: "notam",
+      title: "NOTAM",
+      enabled: true,
+      text: "[NOTAM] {{title}}\n\n{{content}}\n\n{{linkLine}}\n\nАвтор: {{author}}",
+    },
+    alert: {
+      id: "alert",
+      title: "Оповещения",
+      enabled: true,
+      text: "[ALERT] {{title}}\n\n{{content}}\n\n{{linkLine}}\n\nАвтор: {{author}}",
+    },
   },
   updatedAt: null,
 };
@@ -942,6 +1081,9 @@ const buildDefaultAdminContent = () => {
       primaryColor: "#E31E24",
       accentColor: "#2A2A2A",
       bannerGeneratorUrl: "",
+      vkCommunityUrl: "",
+      vkWidgetUrl: "",
+      vkCommunityName: "Nordwind Virtual VK",
       headerLogoDataUrl: "",
       footerLogoDataUrl: "",
       loginLogoDataUrl: "",
@@ -993,6 +1135,7 @@ const buildDefaultAdminContent = () => {
     tickets: [],
     discordBotSettings: DEFAULT_DISCORD_BOT_SETTINGS,
     telegramBotSettings: DEFAULT_TELEGRAM_BOT_SETTINGS,
+    vkBotSettings: DEFAULT_VK_BOT_SETTINGS,
   };
 };
 
@@ -1174,6 +1317,1438 @@ const setPilotBalanceAdjustment = (pilotId, value) => {
   store[String(normalizedPilotId)] = nextEntry;
   writePilotBalanceAdjustmentsStore(store);
   return nextEntry;
+};
+
+const CHALLENGE_EVENTS_MAX = Math.max(Number(process.env.CHALLENGE_EVENTS_MAX || 3000) || 3000, 500);
+const CHALLENGE_NOTIFICATIONS_MAX = Math.max(Number(process.env.CHALLENGE_NOTIFICATIONS_MAX || 500) || 500, 50);
+const CHALLENGE_RARE_TEMPLATE_MOD = Math.max(Number(process.env.CHALLENGE_RARE_TEMPLATE_MOD || 8) || 8, 2);
+
+const CHALLENGE_ROUTE_KEYS = [
+  "UUEE-ULLI",
+  "UUEE-URSS",
+  "UUEE-UWKD",
+  "UUEE-UNNT",
+  "UUEE-USSS",
+  "ULLI-UUEE",
+  "URSS-UUEE",
+  "UWKD-UUEE",
+];
+
+const CHALLENGE_AIRCRAFT_TYPES = ["B738", "A21N", "B77W", "B752", "A320"];
+const CHALLENGE_RARE_REGISTRATIONS = ["RA-73136", "RA-73186", "RA-73254", "RA-73258"];
+
+const DAILY_CHALLENGE_TEMPLATES = [
+  {
+    id: "daily_flights_2",
+    requirement: { kind: "event_count", eventType: "flight_completed", target: 2 },
+    rewardPoints: 28,
+    title: { ru: "2 рейса за сутки", en: "2 flights today" },
+    description: { ru: "Выполните 2 рейса за текущие сутки.", en: "Complete 2 flights today." },
+  },
+  {
+    id: "daily_minutes_120",
+    requirement: { kind: "event_value_sum", eventType: "flight_minutes", target: 120 },
+    rewardPoints: 32,
+    title: { ru: "120 минут налета", en: "120 flight minutes" },
+    description: { ru: "Наберите 120 минут налета за сутки.", en: "Log 120 flight minutes today." },
+  },
+  {
+    id: "daily_event_participation",
+    requirement: { kind: "event_count", eventType: "event_participation", target: 1 },
+    rewardPoints: 26,
+    title: { ru: "Участие в ивенте", en: "Event participation" },
+    description: { ru: "Примите участие хотя бы в одном ивенте за сутки.", en: "Participate in at least one event today." },
+  },
+  {
+    id: "daily_vamsys_points_150",
+    requirement: { kind: "event_value_sum", eventType: "vamsys_points", target: 150 },
+    rewardPoints: 30,
+    title: { ru: "150 points vAMSYS", en: "150 vAMSYS points" },
+    description: { ru: "Наберите 150 points vAMSYS за сутки.", en: "Earn 150 vAMSYS points today." },
+  },
+  {
+    id: "daily_route_uuee_ulli",
+    requirement: {
+      kind: "flight_route_completed",
+      eventType: "flight_completed",
+      routeKey: "UUEE-ULLI",
+      requireScheduled: true,
+      target: 1,
+    },
+    rewardPoints: 34,
+    title: { ru: "Слетать UUEE -> ULLI", en: "Fly UUEE -> ULLI" },
+    description: { ru: "Выполните рейс по направлению из расписания UUEE -> ULLI.", en: "Complete scheduled route UUEE -> ULLI." },
+  },
+  {
+    id: "daily_aircraft_b738",
+    requirement: {
+      kind: "aircraft_type_completed",
+      eventType: "flight_completed",
+      aircraftType: "B738",
+      requireScheduled: true,
+      target: 1,
+    },
+    rewardPoints: 30,
+    title: { ru: "Рейс на B738", en: "Fly on B738" },
+    description: { ru: "Выполните рейс из расписания на B738.", en: "Complete a scheduled flight using B738." },
+  },
+  {
+    id: "daily_quality_vs200_g11",
+    requirement: {
+      kind: "quality_flight_completed",
+      eventType: "flight_completed",
+      maxVerticalSpeed: 200,
+      maxGForce: 1.1,
+      target: 1,
+    },
+    rewardPoints: 36,
+    title: { ru: "Мягкая посадка: VS<=200 и G<=1.1", en: "Soft landing: VS<=200 and G<=1.1" },
+    description: {
+      ru: "Выполните рейс с вертикалкой не выше 200 fpm и перегрузкой не выше 1.1.",
+      en: "Complete a flight with vertical speed not over 200 fpm and g-force not over 1.1.",
+    },
+  },
+];
+
+const WEEKLY_CHALLENGE_TEMPLATES = [
+  {
+    id: "weekly_flights_8",
+    requirement: { kind: "event_count", eventType: "flight_completed", target: 8 },
+    rewardPoints: 145,
+    title: { ru: "8 рейсов за неделю", en: "8 flights this week" },
+    description: { ru: "Выполните 8 рейсов за текущую неделю.", en: "Complete 8 flights this week." },
+  },
+  {
+    id: "weekly_minutes_900",
+    requirement: { kind: "event_value_sum", eventType: "flight_minutes", target: 900 },
+    rewardPoints: 150,
+    title: { ru: "15 часов налета", en: "15 flight hours" },
+    description: { ru: "Наберите 900 минут налета за текущую неделю.", en: "Log 900 flight minutes this week." },
+  },
+  {
+    id: "weekly_events_2",
+    requirement: { kind: "event_count", eventType: "event_participation", target: 2 },
+    rewardPoints: 110,
+    title: { ru: "2 ивента за неделю", en: "2 events this week" },
+    description: { ru: "Примите участие в двух ивентах за неделю.", en: "Participate in 2 events this week." },
+  },
+  {
+    id: "weekly_vamsys_points_900",
+    requirement: { kind: "event_value_sum", eventType: "vamsys_points", target: 900 },
+    rewardPoints: 155,
+    title: { ru: "900 points vAMSYS", en: "900 vAMSYS points" },
+    description: { ru: "Наберите 900 points vAMSYS за неделю.", en: "Earn 900 vAMSYS points this week." },
+  },
+  {
+    id: "weekly_vamsys_points_1500",
+    requirement: { kind: "event_value_sum", eventType: "vamsys_points", target: 1500 },
+    rewardPoints: 210,
+    title: { ru: "1500 points vAMSYS", en: "1500 vAMSYS points" },
+    description: { ru: "Наберите 1500 points vAMSYS за неделю.", en: "Earn 1500 vAMSYS points this week." },
+  },
+  {
+    id: "weekly_route_uuee_urss",
+    requirement: {
+      kind: "flight_route_completed",
+      eventType: "flight_completed",
+      routeKey: "UUEE-URSS",
+      requireScheduled: true,
+      target: 2,
+    },
+    rewardPoints: 160,
+    title: { ru: "Маршрут UUEE -> URSS x2", en: "Route UUEE -> URSS x2" },
+    description: { ru: "Выполните 2 рейса по направлению UUEE -> URSS из расписания.", en: "Complete 2 scheduled flights on UUEE -> URSS." },
+  },
+  {
+    id: "weekly_aircraft_a21n",
+    requirement: {
+      kind: "aircraft_type_completed",
+      eventType: "flight_completed",
+      aircraftType: "A21N",
+      requireScheduled: true,
+      target: 3,
+    },
+    rewardPoints: 150,
+    title: { ru: "3 рейса на A21N", en: "3 flights on A21N" },
+    description: { ru: "Выполните 3 рейса из расписания на A21N.", en: "Complete 3 scheduled flights using A21N." },
+  },
+  {
+    id: "weekly_quality_vs200_g11_x3",
+    requirement: {
+      kind: "quality_flight_completed",
+      eventType: "flight_completed",
+      maxVerticalSpeed: 200,
+      maxGForce: 1.1,
+      target: 3,
+    },
+    rewardPoints: 185,
+    title: { ru: "3 мягкие посадки: VS<=200 и G<=1.1", en: "3 soft landings: VS<=200 and G<=1.1" },
+    description: {
+      ru: "Сделайте 3 рейса за неделю с вертикалкой до 200 fpm и перегрузкой до 1.1.",
+      en: "Complete 3 flights this week with vertical speed up to 200 fpm and g-force up to 1.1.",
+    },
+  },
+  {
+    id: "weekly_specific_registration_rare",
+    rarity: "rare",
+    requirement: {
+      kind: "aircraft_registration_completed",
+      eventType: "flight_completed",
+      registration: CHALLENGE_RARE_REGISTRATIONS[0],
+      requireScheduled: true,
+      target: 1,
+    },
+    rewardPoints: 210,
+    title: {
+      ru: `Редкое: рейс на борте ${CHALLENGE_RARE_REGISTRATIONS[0]}`,
+      en: `Rare: flight on tail ${CHALLENGE_RARE_REGISTRATIONS[0]}`,
+    },
+    description: {
+      ru: `Редкое задание. Выполните рейс из расписания на борте ${CHALLENGE_RARE_REGISTRATIONS[0]}.`,
+      en: `Rare challenge. Complete a scheduled flight using tail number ${CHALLENGE_RARE_REGISTRATIONS[0]}.`,
+    },
+  },
+];
+
+const PREMIUM_CHALLENGE_TEMPLATES = [
+  {
+    id: "premium_vamsys_points_2200",
+    requirement: { kind: "event_value_sum", eventType: "vamsys_points", target: 2200 },
+    rewardPoints: 300,
+    costCoins: 120,
+    title: { ru: "Премиум: 2200 points vAMSYS", en: "Premium: 2200 vAMSYS points" },
+    description: { ru: "Купите задание и наберите 2200 points vAMSYS за неделю.", en: "Buy this challenge and earn 2200 vAMSYS points this week." },
+  },
+  {
+    id: "premium_route_uuee_unnt_x3",
+    requirement: {
+      kind: "flight_route_completed",
+      eventType: "flight_completed",
+      routeKey: "UUEE-UNNT",
+      requireScheduled: true,
+      target: 3,
+    },
+    rewardPoints: 370,
+    costCoins: 180,
+    title: { ru: "Премиум: UUEE -> UNNT x3", en: "Premium: UUEE -> UNNT x3" },
+    description: { ru: "Купите задание и выполните 3 рейса по UUEE -> UNNT из расписания.", en: "Buy this challenge and complete 3 scheduled flights UUEE -> UNNT." },
+  },
+  {
+    id: "premium_aircraft_b77w_x2",
+    requirement: {
+      kind: "aircraft_type_completed",
+      eventType: "flight_completed",
+      aircraftType: "B77W",
+      requireScheduled: true,
+      target: 2,
+    },
+    rewardPoints: 360,
+    costCoins: 170,
+    title: { ru: "Премиум: 2 рейса на B77W", en: "Premium: 2 flights on B77W" },
+    description: { ru: "Купите задание и выполните 2 рейса из расписания на B77W.", en: "Buy this challenge and complete 2 scheduled flights using B77W." },
+  },
+];
+
+const CHALLENGE_EVENT_TYPES = new Set([
+  "visit_site",
+  "open_dashboard",
+  "flight_completed",
+  "flight_minutes",
+  "schedule_pick",
+  "open_balance",
+  "longhaul_minutes",
+  "longhaul_completed",
+  "event_participation",
+  "vamsys_points",
+]);
+
+const buildDefaultPilotChallengesStore = () => ({
+  version: 1,
+  users: {},
+});
+
+const normalizeChallengeLanguage = (value = "") =>
+  String(value || "").trim().toLowerCase() === "ru" ? "ru" : "en";
+
+const normalizeChallengeEvent = (value = {}) => {
+  const entry = value && typeof value === "object" ? value : {};
+  return {
+    id: String(entry.id || randomUUID()).trim() || randomUUID(),
+    type: String(entry.type || "").trim().toLowerCase(),
+    value: Number.isFinite(Number(entry.value)) ? Number(entry.value) : 1,
+    at: String(entry.at || new Date().toISOString()).trim() || new Date().toISOString(),
+    meta: entry.meta && typeof entry.meta === "object" ? entry.meta : {},
+  };
+};
+
+const normalizeChallengeNotification = (value = {}) => {
+  const entry = value && typeof value === "object" ? value : {};
+  const titleRu = String(entry?.title?.ru || entry?.titleRu || entry?.title || "").trim();
+  const titleEn = String(entry?.title?.en || entry?.titleEn || entry?.title || "").trim();
+  const messageRu = String(entry?.message?.ru || entry?.messageRu || entry?.message || "").trim();
+  const messageEn = String(entry?.message?.en || entry?.messageEn || entry?.message || "").trim();
+  return {
+    id: String(entry.id || randomUUID()).trim() || randomUUID(),
+    code: String(entry.code || "").trim() || null,
+    type: String(entry.type || "info").trim().toLowerCase() || "info",
+    title: {
+      ru: titleRu || titleEn || "Уведомление",
+      en: titleEn || titleRu || "Notification",
+    },
+    message: {
+      ru: messageRu || messageEn || "",
+      en: messageEn || messageRu || "",
+    },
+    createdAt: String(entry.createdAt || new Date().toISOString()).trim() || new Date().toISOString(),
+    readAt: String(entry.readAt || "").trim() || null,
+    meta: entry.meta && typeof entry.meta === "object" ? entry.meta : {},
+  };
+};
+
+const normalizePilotChallengeUserEntry = (value = {}) => {
+  const entry = value && typeof value === "object" ? value : {};
+  const points = Math.max(0, Number(entry.points || 0) || 0);
+  const claimedRewards = entry.claimedRewards && typeof entry.claimedRewards === "object" ? entry.claimedRewards : {};
+  const premiumUnlocks = entry.premiumUnlocks && typeof entry.premiumUnlocks === "object" ? entry.premiumUnlocks : {};
+  const eventLog = Array.isArray(entry.eventLog) ? entry.eventLog.map((item) => normalizeChallengeEvent(item)) : [];
+  const notifications = Array.isArray(entry.notifications)
+    ? entry.notifications.map((item) => normalizeChallengeNotification(item)).slice(-CHALLENGE_NOTIFICATIONS_MAX)
+    : [];
+  const profile = entry.profile && typeof entry.profile === "object" ? entry.profile : {};
+  return {
+    points,
+    claimedRewards,
+    premiumUnlocks,
+    eventLog: eventLog.slice(-CHALLENGE_EVENTS_MAX),
+    notifications,
+    profile: {
+      pilotId: Number(profile?.pilotId || 0) || 0,
+      username: String(profile?.username || "").trim() || "",
+      name: String(profile?.name || "").trim() || "",
+      updatedAt: String(profile?.updatedAt || "").trim() || null,
+    },
+  };
+};
+
+let pilotChallengesCache = null;
+
+const readPilotChallengesStore = () => {
+  if (pilotChallengesCache) {
+    return pilotChallengesCache;
+  }
+
+  const base = buildDefaultPilotChallengesStore();
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(PILOT_CHALLENGES_FILE)) {
+      fs.writeFileSync(PILOT_CHALLENGES_FILE, `${JSON.stringify(base, null, 2)}\n`, "utf8");
+      pilotChallengesCache = base;
+      return pilotChallengesCache;
+    }
+
+    const raw = fs.readFileSync(PILOT_CHALLENGES_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    const users = parsed?.users && typeof parsed.users === "object" ? parsed.users : {};
+    pilotChallengesCache = {
+      version: 1,
+      users: Object.fromEntries(
+        Object.entries(users)
+          .map(([pilotId, value]) => [String(Number(pilotId || 0) || 0), normalizePilotChallengeUserEntry(value)])
+          .filter(([pilotId]) => Number(pilotId) > 0)
+      ),
+    };
+  } catch {
+    pilotChallengesCache = base;
+  }
+
+  return pilotChallengesCache;
+};
+
+const writePilotChallengesStore = (value) => {
+  const next = value && typeof value === "object" ? value : buildDefaultPilotChallengesStore();
+  try {
+    ensureAuthStoreDir();
+    const tempPath = `${PILOT_CHALLENGES_FILE}.tmp`;
+    fs.writeFileSync(tempPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+    fs.renameSync(tempPath, PILOT_CHALLENGES_FILE);
+    pilotChallengesCache = next;
+  } catch (error) {
+    logger.error("[pilot-challenges] write_failed", { err: String(error) });
+  }
+};
+
+const resolveUtcDayKey = (input = new Date()) => {
+  const date = input instanceof Date ? input : new Date(input);
+  if (!Number.isFinite(date.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  return date.toISOString().slice(0, 10);
+};
+
+const resolveUtcWeekStartDate = (input = new Date()) => {
+  const date = input instanceof Date ? input : new Date(input);
+  const safe = Number.isFinite(date.getTime()) ? date : new Date();
+  const start = new Date(Date.UTC(safe.getUTCFullYear(), safe.getUTCMonth(), safe.getUTCDate(), 0, 0, 0, 0));
+  const day = start.getUTCDay();
+  const delta = day === 0 ? 6 : day - 1;
+  start.setUTCDate(start.getUTCDate() - delta);
+  return start;
+};
+
+const resolveUtcWeekKey = (input = new Date()) => resolveUtcDayKey(resolveUtcWeekStartDate(input));
+
+const resolveChallengePeriodsUtc = (input = new Date()) => {
+  const now = input instanceof Date ? input : new Date(input);
+  const current = Number.isFinite(now.getTime()) ? now : new Date();
+
+  const dayStart = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth(), current.getUTCDate(), 0, 0, 0, 0));
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+  const weekStart = resolveUtcWeekStartDate(current);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+
+  return {
+    daily: {
+      type: "daily",
+      key: resolveUtcDayKey(dayStart),
+      startAt: dayStart.toISOString(),
+      endAt: dayEnd.toISOString(),
+    },
+    weekly: {
+      type: "weekly",
+      key: resolveUtcWeekKey(weekStart),
+      startAt: weekStart.toISOString(),
+      endAt: weekEnd.toISOString(),
+    },
+  };
+};
+
+const hashChallengeSeed = (value = "") => {
+  const digest = createHash("sha1").update(String(value || "")).digest("hex");
+  return Number.parseInt(digest.slice(0, 8), 16) || 0;
+};
+
+const pickTemplatesBySeed = (templates = [], count = 1, seed = "") => {
+  const source = Array.isArray(templates) ? templates : [];
+  if (source.length <= count) {
+    return source;
+  }
+
+  return [...source]
+    .sort((left, right) => {
+      const a = hashChallengeSeed(`${seed}:${left.id}`);
+      const b = hashChallengeSeed(`${seed}:${right.id}`);
+      if (a !== b) {
+        return a - b;
+      }
+      return String(left.id || "").localeCompare(String(right.id || ""));
+    })
+    .slice(0, Math.max(0, Number(count || 0) || 0));
+};
+
+const isChallengeTemplateAvailable = ({ template = {}, pilotId, scope = "daily", periodKey = "" } = {}) => {
+  const rarity = String(template?.rarity || "common").trim().toLowerCase();
+  if (rarity !== "rare") {
+    return true;
+  }
+
+  const seed = `${scope}:${String(periodKey || "").trim()}:${String(pilotId || "0")}:rare:${String(template?.id || "")}`;
+  return (hashChallengeSeed(seed) % CHALLENGE_RARE_TEMPLATE_MOD) === 0;
+};
+
+const parseChallengeDate = (value = "") => {
+  const parsed = new Date(String(value || ""));
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+};
+
+const filterChallengeEventsByPeriod = (events = [], period = null) => {
+  if (!period) {
+    return [];
+  }
+  const startMs = Date.parse(String(period.startAt || ""));
+  const endMs = Date.parse(String(period.endAt || ""));
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return [];
+  }
+
+  return (Array.isArray(events) ? events : []).filter((entry) => {
+    const parsed = parseChallengeDate(entry?.at);
+    if (!parsed) {
+      return false;
+    }
+    const ts = parsed.getTime();
+    return ts >= startMs && ts < endMs;
+  });
+};
+
+const evaluateChallengeProgress = (template = {}, events = [], period = null) => {
+  const requirement = template?.requirement && typeof template.requirement === "object" ? template.requirement : {};
+  const kind = String(requirement.kind || "event_count").trim().toLowerCase() || "event_count";
+  const eventType = String(requirement.eventType || "").trim().toLowerCase();
+  const target = Math.max(1, Number(requirement.target || 1) || 1);
+  const scoped = filterChallengeEventsByPeriod(events, period);
+  const matched = scoped.filter((item) => String(item?.type || "").trim().toLowerCase() === eventType);
+
+  const normalizeRouteKey = (value = "") => String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  const normalizeAircraftType = (value = "") => String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const normalizeRegistration = (value = "") => String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  const resolveEventRouteKey = (meta = {}) => {
+    const source = meta && typeof meta === "object" ? meta : {};
+    const direct = normalizeRouteKey(source.routeKey || source.route || source.direction || "");
+    if (direct && direct.includes("-")) {
+      return direct;
+    }
+    const from = normalizeRouteKey(source.from || source.fromIcao || source.departure || source.departureIcao || "");
+    const to = normalizeRouteKey(source.to || source.toIcao || source.arrival || source.arrivalIcao || "");
+    if (from && to) {
+      return `${from}-${to}`;
+    }
+    return "";
+  };
+  const resolveEventAircraftType = (meta = {}) => {
+    const source = meta && typeof meta === "object" ? meta : {};
+    return normalizeAircraftType(
+      source.aircraftType || source.aircraft || source.aircraftIcao || source.icao || source.type || ""
+    );
+  };
+  const resolveEventRegistration = (meta = {}) => {
+    const source = meta && typeof meta === "object" ? meta : {};
+    return normalizeRegistration(
+      source.registration || source.tailNumber || source.tail || source.aircraftRegistration || ""
+    );
+  };
+  const resolveEventVerticalSpeed = (meta = {}) => {
+    const source = meta && typeof meta === "object" ? meta : {};
+    const candidates = [
+      source.verticalSpeed,
+      source.vertical_speed,
+      source.landingRate,
+      source.landing_rate,
+      source.vs,
+      source.vspeed,
+    ];
+    for (const candidate of candidates) {
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric)) {
+        return Math.abs(numeric);
+      }
+    }
+    return null;
+  };
+  const resolveEventGForce = (meta = {}) => {
+    const source = meta && typeof meta === "object" ? meta : {};
+    const candidates = [
+      source.gForce,
+      source.g_force,
+      source.maxG,
+      source.max_g,
+      source.loadFactor,
+      source.load_factor,
+      source.overload,
+    ];
+    for (const candidate of candidates) {
+      const numeric = Number(candidate);
+      if (Number.isFinite(numeric)) {
+        return numeric;
+      }
+    }
+    return null;
+  };
+  const resolveIsScheduledEvent = (meta = {}) => {
+    const source = meta && typeof meta === "object" ? meta : {};
+    if (source.bookedFromSchedule === true || source.fromSchedule === true) {
+      return true;
+    }
+    const marker = String(source.source || source.routeSource || source.origin || "").trim().toLowerCase();
+    return marker === "schedule" || marker === "booking_schedule";
+  };
+
+  if (kind === "event_value_sum") {
+    const current = Math.max(0, matched.reduce((sum, item) => sum + (Number(item?.value) || 0), 0));
+    return { current, target, completed: current >= target, kind };
+  }
+
+  if (kind === "flight_route_completed") {
+    const requiredRoute = normalizeRouteKey(requirement.routeKey || "");
+    const requireScheduled = requirement.requireScheduled !== false;
+    const current = matched.filter((item) => {
+      if (requireScheduled && !resolveIsScheduledEvent(item?.meta)) {
+        return false;
+      }
+      const routeKey = resolveEventRouteKey(item?.meta);
+      return requiredRoute ? routeKey === requiredRoute : Boolean(routeKey);
+    }).length;
+    return { current, target, completed: current >= target, kind };
+  }
+
+  if (kind === "aircraft_type_completed") {
+    const requiredType = normalizeAircraftType(requirement.aircraftType || "");
+    const requireScheduled = requirement.requireScheduled !== false;
+    const current = matched.filter((item) => {
+      if (requireScheduled && !resolveIsScheduledEvent(item?.meta)) {
+        return false;
+      }
+      const aircraftType = resolveEventAircraftType(item?.meta);
+      return requiredType ? aircraftType === requiredType : Boolean(aircraftType);
+    }).length;
+    return { current, target, completed: current >= target, kind };
+  }
+
+  if (kind === "aircraft_registration_completed") {
+    const requiredRegistration = normalizeRegistration(requirement.registration || "");
+    const requireScheduled = requirement.requireScheduled !== false;
+    const current = matched.filter((item) => {
+      if (requireScheduled && !resolveIsScheduledEvent(item?.meta)) {
+        return false;
+      }
+      const registration = resolveEventRegistration(item?.meta);
+      return requiredRegistration ? registration === requiredRegistration : Boolean(registration);
+    }).length;
+    return { current, target, completed: current >= target, kind };
+  }
+
+  if (kind === "quality_flight_completed") {
+    const maxVerticalSpeed = Math.max(0, Number(requirement.maxVerticalSpeed || requirement.maxVs || 0) || 0);
+    const maxGForce = Math.max(0, Number(requirement.maxGForce || requirement.maxG || requirement.maxLoadFactor || 0) || 0);
+    const current = matched.filter((item) => {
+      const verticalSpeed = resolveEventVerticalSpeed(item?.meta);
+      const gForce = resolveEventGForce(item?.meta);
+      if (!Number.isFinite(verticalSpeed) || !Number.isFinite(gForce)) {
+        return false;
+      }
+      if (maxVerticalSpeed > 0 && verticalSpeed > maxVerticalSpeed) {
+        return false;
+      }
+      if (maxGForce > 0 && gForce > maxGForce) {
+        return false;
+      }
+      return true;
+    }).length;
+    return { current, target, completed: current >= target, kind };
+  }
+
+  if (kind === "unique_days_with_event") {
+    const uniqueDays = new Set(matched.map((item) => resolveUtcDayKey(item?.at)).filter(Boolean));
+    const current = uniqueDays.size;
+    return { current, target, completed: current >= target, kind };
+  }
+
+  const current = matched.length;
+  return { current, target, completed: current >= target, kind: "event_count" };
+};
+
+const buildChallengeInstanceId = ({ scope = "daily", periodKey = "", templateId = "" } = {}) =>
+  `${String(scope || "daily").trim().toLowerCase()}:${String(periodKey || "").trim()}:${String(templateId || "").trim()}`;
+
+const parseChallengeInstanceId = (value = "") => {
+  const normalized = String(value || "").trim();
+  const [scope, periodKey, ...rest] = normalized.split(":");
+  const templateId = rest.join(":");
+  if (!scope || !periodKey || !templateId) {
+    return null;
+  }
+  return {
+    scope: String(scope || "").trim().toLowerCase(),
+    periodKey: String(periodKey || "").trim(),
+    templateId: String(templateId || "").trim(),
+    instanceId: normalized,
+  };
+};
+
+const ensurePilotChallengeUser = ({ store, pilotId, sessionUser = {} }) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return null;
+  }
+  const key = String(normalizedPilotId);
+  const current = store.users?.[key] || {};
+  const normalized = normalizePilotChallengeUserEntry(current);
+  normalized.profile = {
+    pilotId: normalizedPilotId,
+    username: String(sessionUser?.username || normalized?.profile?.username || "").trim(),
+    name: String(sessionUser?.name || normalized?.profile?.name || "").trim(),
+    updatedAt: new Date().toISOString(),
+  };
+  store.users[key] = normalized;
+  return store.users[key];
+};
+
+const pushChallengeNotification = (entry, value = {}) => {
+  const notification = normalizeChallengeNotification(value);
+  if (notification?.code) {
+    const duplicate = entry.notifications.find((item) => String(item?.code || "") === notification.code);
+    if (duplicate) {
+      return duplicate;
+    }
+  }
+  entry.notifications.push(notification);
+  if (entry.notifications.length > CHALLENGE_NOTIFICATIONS_MAX) {
+    entry.notifications = entry.notifications.slice(entry.notifications.length - CHALLENGE_NOTIFICATIONS_MAX);
+  }
+  return notification;
+};
+
+const trackPilotChallengeEvent = (entry, value = {}, { dedupePerDay = false } = {}) => {
+  const event = normalizeChallengeEvent(value);
+  if (!CHALLENGE_EVENT_TYPES.has(event.type)) {
+    return null;
+  }
+
+  if (dedupePerDay) {
+    const dayKey = resolveUtcDayKey(event.at);
+    const hasSameDayEvent = entry.eventLog.some((item) =>
+      String(item?.type || "") === event.type && resolveUtcDayKey(item?.at) === dayKey
+    );
+    if (hasSameDayEvent) {
+      return null;
+    }
+  }
+
+  entry.eventLog.push(event);
+  if (entry.eventLog.length > CHALLENGE_EVENTS_MAX) {
+    entry.eventLog = entry.eventLog.slice(entry.eventLog.length - CHALLENGE_EVENTS_MAX);
+  }
+  return event;
+};
+
+const buildChallengeInstancesForScope = ({
+  pilotId,
+  period,
+  scope = "daily",
+  templates = [],
+  pickCount = 1,
+  entry,
+}) => {
+  const availableTemplates = (Array.isArray(templates) ? templates : []).filter((template) =>
+    isChallengeTemplateAvailable({
+      template,
+      pilotId,
+      scope,
+      periodKey: period?.key || "",
+    })
+  );
+
+  const selected = pickTemplatesBySeed(
+    availableTemplates,
+    pickCount,
+    `${scope}:${period?.key || ""}:${String(pilotId || "0")}`
+  );
+
+  return selected.map((template) => {
+    const instanceId = buildChallengeInstanceId({
+      scope,
+      periodKey: period?.key || "",
+      templateId: template.id,
+    });
+    const progress = evaluateChallengeProgress(template, entry?.eventLog || [], period);
+    const claimed = Boolean(entry?.claimedRewards?.[instanceId]);
+    const unlocked =
+      scope !== "premium"
+        ? true
+        : Boolean(entry?.premiumUnlocks?.[String(period?.key || "")]?.[String(template.id || "")]);
+
+    return {
+      id: instanceId,
+      templateId: template.id,
+      scope,
+      periodKey: period?.key || "",
+      title: template.title,
+      description: template.description,
+      requirement: template.requirement,
+      reward: {
+        points: Math.max(0, Number(template.rewardPoints || 0) || 0),
+      },
+      premium: scope === "premium",
+      unlockCostCoins: scope === "premium" ? Math.max(0, Number(template.costCoins || 0) || 0) : 0,
+      unlocked,
+      unlockedAt:
+        scope === "premium"
+          ? String(entry?.premiumUnlocks?.[String(period?.key || "")]?.[String(template.id || "")]?.unlockedAt || "") || null
+          : null,
+      progress,
+      completed: Boolean(progress.completed),
+      claimed,
+      claimable: Boolean(progress.completed) && !claimed && unlocked,
+    };
+  });
+};
+
+const appendChallengeCompletionNotifications = ({ entry, instances = [] }) => {
+  (Array.isArray(instances) ? instances : []).forEach((item) => {
+    if (!item?.completed || item?.claimed) {
+      return;
+    }
+
+    const code = `challenge_completed:${String(item.id || "")}`;
+    pushChallengeNotification(entry, {
+      code,
+      type: "challenge_completed",
+      title: {
+        ru: "Задание выполнено",
+        en: "Challenge completed",
+      },
+      message: {
+        ru: `Вы завершили задание: ${String(item?.title?.ru || item?.title?.en || "")}`,
+        en: `You completed challenge: ${String(item?.title?.en || item?.title?.ru || "")}`,
+      },
+      meta: {
+        challengeId: item.id,
+      },
+    });
+  });
+};
+
+const buildPilotChallengeSections = ({ pilotId, periods, entry }) => {
+  const daily = buildChallengeInstancesForScope({
+    pilotId,
+    period: periods.daily,
+    scope: "daily",
+    templates: DAILY_CHALLENGE_TEMPLATES,
+    pickCount: 3,
+    entry,
+  });
+  const weekly = buildChallengeInstancesForScope({
+    pilotId,
+    period: periods.weekly,
+    scope: "weekly",
+    templates: WEEKLY_CHALLENGE_TEMPLATES,
+    pickCount: 3,
+    entry,
+  });
+  const premium = buildChallengeInstancesForScope({
+    pilotId,
+    period: periods.weekly,
+    scope: "premium",
+    templates: PREMIUM_CHALLENGE_TEMPLATES,
+    pickCount: 2,
+    entry,
+  });
+  return { daily, weekly, premium };
+};
+
+const buildChallengeProgressMap = (instances = []) => {
+  const source = Array.isArray(instances) ? instances : [];
+  return Object.fromEntries(
+    source.map((item) => {
+      const current = Math.max(0, Number(item?.progress?.current || 0) || 0);
+      const target = Math.max(1, Number(item?.progress?.target || 1) || 1);
+      return [String(item?.id || ""), {
+        id: String(item?.id || ""),
+        current,
+        target,
+        ratio: Math.max(0, Math.min(1, current / target)),
+        completed: Boolean(item?.completed),
+        claimed: Boolean(item?.claimed),
+        unlocked: Boolean(item?.unlocked),
+        premium: Boolean(item?.premium),
+        title: item?.title || { ru: "", en: "" },
+      }];
+    }).filter(([id]) => Boolean(id))
+  );
+};
+
+const appendChallengeProgressNotifications = ({ entry, beforeMap = {}, afterInstances = [] }) => {
+  const thresholds = [0.25, 0.5, 0.75];
+  const afterMap = buildChallengeProgressMap(afterInstances);
+  Object.values(afterMap).forEach((after) => {
+    if (!after || !after.id) {
+      return;
+    }
+    if (after.premium && !after.unlocked) {
+      return;
+    }
+    if (after.completed) {
+      return;
+    }
+
+    const before = beforeMap[after.id] || {
+      ratio: 0,
+      current: 0,
+      target: after.target,
+    };
+
+    thresholds.forEach((threshold) => {
+      if (before.ratio >= threshold || after.ratio < threshold) {
+        return;
+      }
+
+      const percent = Math.round(threshold * 100);
+      pushChallengeNotification(entry, {
+        code: `challenge_progress:${after.id}:${percent}`,
+        type: "challenge_progress",
+        title: {
+          ru: "Прогресс задания",
+          en: "Challenge progress",
+        },
+        message: {
+          ru: `${String(after?.title?.ru || after?.title?.en || "Задание")}: ${after.current}/${after.target} (${percent}%)`,
+          en: `${String(after?.title?.en || after?.title?.ru || "Challenge")}: ${after.current}/${after.target} (${percent}%)`,
+        },
+        meta: {
+          challengeId: after.id,
+          percent,
+          current: after.current,
+          target: after.target,
+        },
+      });
+    });
+  });
+};
+
+const buildPilotChallengesOverview = ({ pilotId, sessionUser = {}, store = null }) => {
+  const resolvedStore = store || readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store: resolvedStore, pilotId, sessionUser });
+  if (!entry) {
+    return null;
+  }
+
+  trackPilotChallengeEvent(entry, {
+    type: "visit_site",
+    value: 1,
+    at: new Date().toISOString(),
+    meta: { source: "api_overview" },
+  }, { dedupePerDay: true });
+
+  const periods = resolveChallengePeriodsUtc(new Date());
+  const { daily, weekly, premium } = buildPilotChallengeSections({ pilotId, periods, entry });
+
+  appendChallengeCompletionNotifications({ entry, instances: [...daily, ...weekly, ...premium] });
+
+  const stats = {
+    totalPoints: Math.max(0, Number(entry.points || 0) || 0),
+    dailyCompleted: daily.filter((item) => item.completed).length,
+    weeklyCompleted: weekly.filter((item) => item.completed).length,
+    premiumCompleted: premium.filter((item) => item.completed && item.unlocked).length,
+  };
+
+  return {
+    periods,
+    stats,
+    daily,
+    weekly,
+    premium,
+    notifications: entry.notifications,
+  };
+};
+
+const buildChallengeLeaderboard = ({ periodType = "weekly", limit = 20, store = null }) => {
+  const resolvedStore = store || readPilotChallengesStore();
+  const periods = resolveChallengePeriodsUtc(new Date());
+  const targetPeriod = periodType === "daily" ? periods.daily : periods.weekly;
+
+  const rows = Object.entries(resolvedStore?.users || {})
+    .map(([pilotId, value]) => {
+      const entry = normalizePilotChallengeUserEntry(value);
+      const daily = buildChallengeInstancesForScope({
+        pilotId,
+        period: periods.daily,
+        scope: "daily",
+        templates: DAILY_CHALLENGE_TEMPLATES,
+        pickCount: 3,
+        entry,
+      });
+      const weekly = buildChallengeInstancesForScope({
+        pilotId,
+        period: periods.weekly,
+        scope: "weekly",
+        templates: WEEKLY_CHALLENGE_TEMPLATES,
+        pickCount: 3,
+        entry,
+      });
+      const premium = buildChallengeInstancesForScope({
+        pilotId,
+        period: periods.weekly,
+        scope: "premium",
+        templates: PREMIUM_CHALLENGE_TEMPLATES,
+        pickCount: 2,
+        entry,
+      });
+
+      const selectedInstances = periodType === "daily" ? daily : [...weekly, ...premium.filter((item) => item.unlocked)];
+      const completed = selectedInstances.filter((item) => item.completed);
+      const score = completed.reduce((sum, item) => sum + (Number(item?.reward?.points || 0) || 0), 0);
+
+      return {
+        pilotId: Number(pilotId || 0) || 0,
+        name:
+          String(entry?.profile?.name || "").trim() ||
+          String(entry?.profile?.username || "").trim() ||
+          `Pilot #${Number(pilotId || 0) || 0}`,
+        score,
+        completedCount: completed.length,
+      };
+    })
+    .filter((item) => item.pilotId > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (right.completedCount !== left.completedCount) {
+        return right.completedCount - left.completedCount;
+      }
+      return String(left.name || "").localeCompare(String(right.name || ""));
+    })
+    .slice(0, Math.max(1, Math.min(100, Number(limit || 20) || 20)))
+    .map((item, index) => ({
+      rank: index + 1,
+      ...item,
+    }));
+
+  return {
+    periodType: periodType === "daily" ? "daily" : "weekly",
+    periodKey: targetPeriod.key,
+    rows,
+  };
+};
+
+const isCompletedChallengePirep = (pirep = {}) => {
+  const status = String(pirep?.status || "").trim().toLowerCase();
+  if (["accepted", "auto_accepted", "approved", "completed"].includes(status)) {
+    return true;
+  }
+  return Boolean(pirep?.arrival_time || pirep?.in_time || pirep?.completed_at || pirep?.landing_time);
+};
+
+const normalizeChallengePirepCode = (value = "") => String(value || "").trim().toUpperCase();
+const normalizeChallengePirepRegistration = (value = "") =>
+  String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+const normalizeChallengePirepAircraftType = (value = "") =>
+  String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+const resolveChallengePirepEventTime = (pirep = {}) => {
+  const values = [
+    pirep?.arrival_time,
+    pirep?.in_time,
+    pirep?.completed_at,
+    pirep?.landing_time,
+    pirep?.submitted_at,
+    pirep?.created_at,
+  ];
+  for (const value of values) {
+    const parsed = new Date(String(value || ""));
+    if (Number.isFinite(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+  return new Date().toISOString();
+};
+
+const resolveChallengePirepFlightMinutes = (pirep = {}) => {
+  const minutes = Number(pirep?.flight_time || pirep?.flight_minutes || 0);
+  if (Number.isFinite(minutes) && minutes > 0) {
+    return Math.max(0, Math.round(minutes));
+  }
+  const seconds = Number(pirep?.flight_length || pirep?.flight_seconds || 0);
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.max(0, Math.round(seconds / 60));
+  }
+  return 0;
+};
+
+const resolveChallengePirepRouteKey = (pirep = {}) => {
+  const departure = normalizeChallengePirepCode(
+    pirep?.departure_airport?.icao || pirep?.departure_airport?.iata || pirep?.departure_icao || pirep?.departure_iata || ""
+  );
+  const arrival = normalizeChallengePirepCode(
+    pirep?.arrival_airport?.icao || pirep?.arrival_airport?.iata || pirep?.arrival_icao || pirep?.arrival_iata || ""
+  );
+  return departure && arrival ? `${departure}-${arrival}` : "";
+};
+
+const resolveChallengePirepRegistration = (pirep = {}) =>
+  normalizeChallengePirepRegistration(
+    pirep?.aircraft_registration ||
+    pirep?.registration ||
+    pirep?.aircraft?.registration ||
+    pirep?.aircraft?.reg ||
+    pirep?.booking?.aircraft?.registration ||
+    ""
+  );
+
+const resolveChallengePirepAircraftType = (pirep = {}) =>
+  normalizeChallengePirepAircraftType(
+    pirep?.aircraft_type ||
+    pirep?.aircraft?.aircraft_type ||
+    pirep?.aircraft?.aircraftType ||
+    pirep?.aircraft?.icao ||
+    pirep?.aircraft?.type ||
+    pirep?.aircraft ||
+    ""
+  );
+
+const resolveChallengePirepVerticalSpeed = (pirep = {}) => {
+  const candidates = [
+    pirep?.landing_rate,
+    pirep?.landingRate,
+    pirep?.touchdown_rate,
+    pirep?.touchdownRate,
+    pirep?.vertical_speed,
+    pirep?.verticalSpeed,
+  ];
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric)) {
+      return Math.abs(numeric);
+    }
+  }
+  return null;
+};
+
+const resolveChallengePirepGForce = (pirep = {}) => {
+  const candidates = [
+    pirep?.g_force,
+    pirep?.gForce,
+    pirep?.max_g,
+    pirep?.maxG,
+    pirep?.load_factor,
+    pirep?.loadFactor,
+    pirep?.overload,
+  ];
+  for (const candidate of candidates) {
+    const numeric = Number(candidate);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  return null;
+};
+
+const resolveChallengePirepVamsysPoints = (pirep = {}) => {
+  const base = Number(pirep?.points || 0);
+  const bonus = Number(pirep?.bonus_points || pirep?.bonusPoints || 0);
+  const total = (Number.isFinite(base) ? base : 0) + (Number.isFinite(bonus) ? bonus : 0);
+  if (total > 0) {
+    return total;
+  }
+  const fallback = Number(pirep?.score || 0);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
+};
+
+const hasChallengePirepEvent = (entry, type, pirepId) => {
+  const normalizedType = String(type || "").trim().toLowerCase();
+  const normalizedPirepId = Number(pirepId || 0) || 0;
+  if (!normalizedType || normalizedPirepId <= 0) {
+    return false;
+  }
+  return (Array.isArray(entry?.eventLog) ? entry.eventLog : []).some((event) =>
+    String(event?.type || "").trim().toLowerCase() === normalizedType &&
+    (Number(event?.meta?.pirepId || 0) || 0) === normalizedPirepId
+  );
+};
+
+const ingestCompletedPirepIntoChallenges = ({ pirep = {}, sessionUser = null } = {}) => {
+  try {
+    if (!isCompletedChallengePirep(pirep)) {
+      return false;
+    }
+
+    const pilotId = Number(pirep?.pilot_id || pirep?.pilot?.id || pirep?.user_id || 0) || 0;
+    const pirepId = Number(pirep?.id || 0) || 0;
+    if (pilotId <= 0 || pirepId <= 0) {
+      return false;
+    }
+
+    const store = readPilotChallengesStore();
+    const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: sessionUser || {} });
+    if (!entry) {
+      return false;
+    }
+
+    const periods = resolveChallengePeriodsUtc(new Date());
+    const beforeSections = buildPilotChallengeSections({ pilotId, periods, entry });
+    const beforeProgressMap = buildChallengeProgressMap([
+      ...(beforeSections.daily || []),
+      ...(beforeSections.weekly || []),
+      ...(beforeSections.premium || []),
+    ]);
+
+    const at = resolveChallengePirepEventTime(pirep);
+    const flightMinutes = resolveChallengePirepFlightMinutes(pirep);
+    const routeKey = resolveChallengePirepRouteKey(pirep);
+    const registration = resolveChallengePirepRegistration(pirep);
+    const aircraftType = resolveChallengePirepAircraftType(pirep);
+    const verticalSpeed = resolveChallengePirepVerticalSpeed(pirep);
+    const gForce = resolveChallengePirepGForce(pirep);
+    const vamsysPoints = resolveChallengePirepVamsysPoints(pirep);
+    const fromSchedule = (Number(pirep?.booking_id || 0) || 0) > 0;
+
+    const baseMeta = {
+      pirepId,
+      source: "pirep_completed",
+      routeKey,
+      registration,
+      aircraftType,
+      fromSchedule,
+      bookedFromSchedule: fromSchedule,
+      verticalSpeed,
+      gForce,
+      landingRate: verticalSpeed,
+      loadFactor: gForce,
+    };
+
+    if (!hasChallengePirepEvent(entry, "flight_completed", pirepId)) {
+      trackPilotChallengeEvent(entry, {
+        type: "flight_completed",
+        value: 1,
+        at,
+        meta: baseMeta,
+      });
+    }
+
+    if (flightMinutes > 0 && !hasChallengePirepEvent(entry, "flight_minutes", pirepId)) {
+      trackPilotChallengeEvent(entry, {
+        type: "flight_minutes",
+        value: flightMinutes,
+        at,
+        meta: { ...baseMeta, flightMinutes },
+      });
+    }
+
+    if (flightMinutes >= 240 && !hasChallengePirepEvent(entry, "longhaul_minutes", pirepId)) {
+      trackPilotChallengeEvent(entry, {
+        type: "longhaul_minutes",
+        value: flightMinutes,
+        at,
+        meta: { ...baseMeta, flightMinutes },
+      });
+      if (!hasChallengePirepEvent(entry, "longhaul_completed", pirepId)) {
+        trackPilotChallengeEvent(entry, {
+          type: "longhaul_completed",
+          value: 1,
+          at,
+          meta: { ...baseMeta, flightMinutes },
+        });
+      }
+    }
+
+    if (vamsysPoints > 0 && !hasChallengePirepEvent(entry, "vamsys_points", pirepId)) {
+      trackPilotChallengeEvent(entry, {
+        type: "vamsys_points",
+        value: vamsysPoints,
+        at,
+        meta: { ...baseMeta, points: vamsysPoints },
+      });
+    }
+
+    const afterSections = buildPilotChallengeSections({ pilotId, periods, entry });
+    const afterInstances = [
+      ...(afterSections.daily || []),
+      ...(afterSections.weekly || []),
+      ...(afterSections.premium || []),
+    ];
+
+    appendChallengeProgressNotifications({
+      entry,
+      beforeMap: beforeProgressMap,
+      afterInstances,
+    });
+    appendChallengeCompletionNotifications({ entry, instances: afterInstances });
+    writePilotChallengesStore(store);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const normalizeChallengeActivityType = (value = "") =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+
+const isChallengeOrTourActivityType = (value = "") => {
+  const normalized = normalizeChallengeActivityType(value);
+  return normalized.includes("tour") || normalized.includes("challenge");
+};
+
+const hasChallengeActivityParticipationEvent = (entry, activityId) => {
+  const normalizedActivityId = Number(activityId || 0) || 0;
+  if (normalizedActivityId <= 0) {
+    return false;
+  }
+  return (Array.isArray(entry?.eventLog) ? entry.eventLog : []).some((event) =>
+    String(event?.type || "").trim().toLowerCase() === "event_participation" &&
+    (Number(event?.meta?.activityId || 0) || 0) === normalizedActivityId
+  );
+};
+
+const syncPilotChallengeTourAndChallengeActivities = async ({ pilotId, sessionUser = {}, store = null } = {}) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return { changed: false, added: 0 };
+  }
+
+  const resolvedStore = store || readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store: resolvedStore, pilotId: normalizedPilotId, sessionUser });
+  if (!entry) {
+    return { changed: false, added: 0 };
+  }
+
+  const [registrations, liveCatalog] = await Promise.all([
+    fetchPilotApiCollectionPages({
+      pilotId: normalizedPilotId,
+      sessionUser,
+      path: "/activities/registrations?page[size]=100",
+      maxPages: 6,
+      pageSize: 100,
+    }).catch(() => []),
+    loadAdminActivitiesCatalog().catch(() => ({ activities: [] })),
+  ]);
+
+  const activityMap = new Map(
+    (Array.isArray(liveCatalog?.activities) ? liveCatalog.activities : [])
+      .map((activity) => [Number(activity?.originalId || 0) || 0, String(activity?.type || "").trim()])
+      .filter(([activityId]) => activityId > 0)
+  );
+
+  const periods = resolveChallengePeriodsUtc(new Date());
+  const beforeSections = buildPilotChallengeSections({ pilotId: normalizedPilotId, periods, entry });
+  const beforeProgressMap = buildChallengeProgressMap([
+    ...(beforeSections.daily || []),
+    ...(beforeSections.weekly || []),
+    ...(beforeSections.premium || []),
+  ]);
+
+  let added = 0;
+  const nowIso = new Date().toISOString();
+  for (const registration of Array.isArray(registrations) ? registrations : []) {
+    const activityId = Number(registration?.activity_id || registration?.activityId || 0) || 0;
+    if (activityId <= 0 || hasChallengeActivityParticipationEvent(entry, activityId)) {
+      continue;
+    }
+    const activityType = String(activityMap.get(activityId) || "").trim();
+    if (!isChallengeOrTourActivityType(activityType)) {
+      continue;
+    }
+
+    const eventAt = String(registration?.created_at || registration?.createdAt || "").trim() || nowIso;
+    trackPilotChallengeEvent(entry, {
+      type: "event_participation",
+      value: 1,
+      at: eventAt,
+      meta: {
+        activityId,
+        activityType,
+        source: "activity_registration_sync",
+      },
+    });
+    added += 1;
+  }
+
+  if (added <= 0) {
+    return { changed: false, added: 0 };
+  }
+
+  const afterSections = buildPilotChallengeSections({ pilotId: normalizedPilotId, periods, entry });
+  const afterInstances = [
+    ...(afterSections.daily || []),
+    ...(afterSections.weekly || []),
+    ...(afterSections.premium || []),
+  ];
+  appendChallengeProgressNotifications({
+    entry,
+    beforeMap: beforeProgressMap,
+    afterInstances,
+  });
+  appendChallengeCompletionNotifications({ entry, instances: afterInstances });
+  return { changed: true, added };
+};
+
+const CHALLENGE_SCHEDULER_INTERVAL_MS = Math.max(
+  30 * 1000,
+  Number(process.env.CHALLENGE_SCHEDULER_INTERVAL_MS || 60 * 1000) || 60 * 1000
+);
+
+let pilotChallengesSchedulerTimer = null;
+let pilotChallengesSchedulerSweepPromise = null;
+
+const sweepPilotChallengesScheduler = async () => {
+  if (pilotChallengesSchedulerSweepPromise) {
+    return pilotChallengesSchedulerSweepPromise;
+  }
+
+  pilotChallengesSchedulerSweepPromise = (async () => {
+    const store = readPilotChallengesStore();
+    const pilotIds = Object.keys(store?.users || {})
+      .map((value) => Number(value || 0) || 0)
+      .filter((value) => value > 0);
+
+    if (pilotIds.length <= 0) {
+      return;
+    }
+
+    let changed = false;
+    let syncedEvents = 0;
+
+    for (const pilotId of pilotIds) {
+      try {
+        const currentEntry = ensurePilotChallengeUser({
+          store,
+          pilotId,
+          sessionUser: store?.users?.[String(pilotId)]?.profile || {},
+        });
+        const beforeMarker = JSON.stringify(currentEntry || {});
+
+        const syncResult = await syncPilotChallengeTourAndChallengeActivities({
+          pilotId,
+          sessionUser: currentEntry?.profile || {},
+          store,
+        });
+        if (syncResult?.changed) {
+          syncedEvents += Number(syncResult?.added || 0) || 0;
+        }
+
+        buildPilotChallengesOverview({
+          pilotId,
+          sessionUser: currentEntry?.profile || {},
+          store,
+        });
+
+        const nextEntry = ensurePilotChallengeUser({
+          store,
+          pilotId,
+          sessionUser: currentEntry?.profile || {},
+        });
+        const afterMarker = JSON.stringify(nextEntry || {});
+        if (beforeMarker !== afterMarker) {
+          changed = true;
+        }
+      } catch (error) {
+        logger.warn("[pilot-challenges] scheduler_pilot_failed", {
+          pilotId,
+          err: String(error?.message || error),
+        });
+      }
+    }
+
+    if (changed) {
+      writePilotChallengesStore(store);
+      logger.info("[pilot-challenges] scheduler_updated", {
+        pilots: pilotIds.length,
+        syncedEvents,
+      });
+    }
+  })().finally(() => {
+    pilotChallengesSchedulerSweepPromise = null;
+  });
+
+  return pilotChallengesSchedulerSweepPromise;
+};
+
+const startPilotChallengesScheduler = () => {
+  if (pilotChallengesSchedulerTimer) {
+    return;
+  }
+
+  void sweepPilotChallengesScheduler().catch((error) => {
+    logger.warn("[pilot-challenges] scheduler_initial_failed", String(error?.message || error));
+  });
+
+  pilotChallengesSchedulerTimer = setInterval(() => {
+    void sweepPilotChallengesScheduler().catch((error) => {
+      logger.warn("[pilot-challenges] scheduler_tick_failed", String(error?.message || error));
+    });
+  }, CHALLENGE_SCHEDULER_INTERVAL_MS);
 };
 
 const readSocialGalleryStore = () => {
@@ -1754,6 +3329,23 @@ const readAdminContentStore = () => {
           ...(parsed?.telegramBotSettings?.commands && typeof parsed.telegramBotSettings.commands === "object" ? parsed.telegramBotSettings.commands : {}),
         },
       } : base.telegramBotSettings,
+      vkBotSettings: parsed?.vkBotSettings && typeof parsed.vkBotSettings === "object" ? {
+        ...base.vkBotSettings,
+        ...parsed.vkBotSettings,
+        sync: {
+          ...base.vkBotSettings.sync,
+          ...(parsed?.vkBotSettings?.sync && typeof parsed.vkBotSettings.sync === "object" ? parsed.vkBotSettings.sync : {}),
+        },
+        faqItems: Array.isArray(parsed?.vkBotSettings?.faqItems) ? parsed.vkBotSettings.faqItems : base.vkBotSettings.faqItems,
+        menuItems: Array.isArray(parsed?.vkBotSettings?.menuItems) ? parsed.vkBotSettings.menuItems : base.vkBotSettings.menuItems,
+        announcementTemplates:
+          parsed?.vkBotSettings?.announcementTemplates && typeof parsed.vkBotSettings.announcementTemplates === "object"
+            ? {
+                ...base.vkBotSettings.announcementTemplates,
+                ...parsed.vkBotSettings.announcementTemplates,
+              }
+            : base.vkBotSettings.announcementTemplates,
+      } : base.vkBotSettings,
       siteDesign: parsed?.siteDesign && typeof parsed.siteDesign === "object" ? {
         ...base.siteDesign,
         ...parsed.siteDesign,
@@ -2606,6 +4198,9 @@ const normalizeManagedAdminItem = (collection, payload = {}, existing = null) =>
       vamsysSyncStatus: normalizeAdminText(payload.vamsysSyncStatus || existing?.vamsysSyncStatus || "pending") || "pending",
       vamsysSyncError: normalizeAdminText(payload.vamsysSyncError || existing?.vamsysSyncError),
       vamsysSyncedAt: normalizeAdminText(payload.vamsysSyncedAt || existing?.vamsysSyncedAt),
+      vkPublishStatus: normalizeAdminText(payload.vkPublishStatus || existing?.vkPublishStatus),
+      vkPublishReason: normalizeAdminText(payload.vkPublishReason || existing?.vkPublishReason),
+      vkPublishedAt: normalizeAdminText(payload.vkPublishedAt || existing?.vkPublishedAt),
       updatedAt: now,
     };
   }
@@ -3387,6 +4982,9 @@ const normalizeSiteDesignPayload = (payload = {}, current = null) => {
     primaryColor: normalizeAdminText(payload.primaryColor ?? existing.primaryColor ?? "#E31E24") || "#E31E24",
     accentColor: normalizeAdminText(payload.accentColor ?? existing.accentColor ?? "#2A2A2A") || "#2A2A2A",
     bannerGeneratorUrl: normalizeAdminText(payload.bannerGeneratorUrl ?? existing.bannerGeneratorUrl ?? ""),
+    vkCommunityUrl: normalizeAdminText(payload.vkCommunityUrl ?? existing.vkCommunityUrl ?? ""),
+    vkWidgetUrl: normalizeAdminText(payload.vkWidgetUrl ?? existing.vkWidgetUrl ?? ""),
+    vkCommunityName: normalizeAdminText(payload.vkCommunityName ?? existing.vkCommunityName ?? "Nordwind Virtual VK") || "Nordwind Virtual VK",
     headerLogoDataUrl: normalizeAdminImageDataUrl(payload.headerLogoDataUrl, existing.headerLogoDataUrl),
     footerLogoDataUrl: normalizeAdminImageDataUrl(payload.footerLogoDataUrl, existing.footerLogoDataUrl),
     loginLogoDataUrl: normalizeAdminImageDataUrl(payload.loginLogoDataUrl, existing.loginLogoDataUrl),
@@ -3600,6 +5198,185 @@ const upsertTelegramBotSettingsStore = (payload = {}) => {
   return updated?.telegramBotSettings || getTelegramBotSettingsStore();
 };
 
+const normalizeVkBotFaqItem = (item = {}, index = 0) => ({
+  id: normalizeAdminText(item?.id || `faq-${index + 1}`) || `faq-${index + 1}`,
+  question: normalizeAdminText(item?.question || "") || `FAQ ${index + 1}`,
+  answer: normalizeAdminMultilineText(item?.answer || ""),
+  keywords: Array.isArray(item?.keywords)
+    ? item.keywords.map((value) => normalizeAdminText(value || "")).filter(Boolean)
+    : [],
+  enabled: normalizeAdminBoolean(item?.enabled, true),
+  order: Number(item?.order || (index + 1) * 10) || (index + 1) * 10,
+});
+
+const normalizeVkBotMenuItem = (item = {}, index = 0) => ({
+  id: normalizeAdminText(item?.id || `menu-${index + 1}`) || `menu-${index + 1}`,
+  label: normalizeAdminText(item?.label || "") || `Пункт ${index + 1}`,
+  action: ["faq", "url", "text"].includes(normalizeAdminText(item?.action || "").toLowerCase())
+    ? normalizeAdminText(item?.action || "").toLowerCase()
+    : "text",
+  value: normalizeAdminMultilineText(item?.value || ""),
+  enabled: normalizeAdminBoolean(item?.enabled, true),
+  order: Number(item?.order || (index + 1) * 10) || (index + 1) * 10,
+});
+
+const normalizeVkBotReplyTemplate = (item = {}, index = 0) => ({
+  id: normalizeAdminText(item?.id || `reply-${index + 1}`) || `reply-${index + 1}`,
+  title: normalizeAdminText(item?.title || "") || `Reply ${index + 1}`,
+  matchMode: ["contains", "exact", "regex"].includes(normalizeAdminText(item?.matchMode || "").toLowerCase())
+    ? normalizeAdminText(item?.matchMode || "").toLowerCase()
+    : "contains",
+  trigger: normalizeAdminText(item?.trigger || ""),
+  response: normalizeAdminMultilineText(item?.response || ""),
+  enabled: normalizeAdminBoolean(item?.enabled, true),
+  order: Number(item?.order || (index + 1) * 10) || (index + 1) * 10,
+});
+
+const normalizeVkBotDialogButton = (item = {}, index = 0) => ({
+  id: normalizeAdminText(item?.id || `button-${index + 1}`) || `button-${index + 1}`,
+  label: normalizeAdminText(item?.label || "") || `Кнопка ${index + 1}`,
+  type: ["text", "url", "faq", "menu"].includes(normalizeAdminText(item?.type || "").toLowerCase())
+    ? normalizeAdminText(item?.type || "").toLowerCase()
+    : "text",
+  value: normalizeAdminMultilineText(item?.value || ""),
+  enabled: normalizeAdminBoolean(item?.enabled, true),
+  order: Number(item?.order || (index + 1) * 10) || (index + 1) * 10,
+});
+
+const normalizeVkAnnouncementTemplate = (item = {}, fallback = {}) => ({
+  id: normalizeAdminText(item?.id || fallback?.id || "default") || "default",
+  title: normalizeAdminText(item?.title || fallback?.title || "Template") || "Template",
+  enabled: normalizeAdminBoolean(item?.enabled, normalizeAdminBoolean(fallback?.enabled, true)),
+  text: normalizeAdminMultilineText(item?.text || fallback?.text || ""),
+});
+
+const getVkBotSettingsStore = () => {
+  const store = readAdminContentStore();
+  const defaults = DEFAULT_VK_BOT_SETTINGS;
+  const existing = store?.vkBotSettings && typeof store.vkBotSettings === "object"
+    ? store.vkBotSettings
+    : {};
+
+  return {
+    ...defaults,
+    ...existing,
+    enabled: normalizeAdminBoolean(existing?.enabled, defaults.enabled),
+    groupId: normalizeAdminText(existing?.groupId || defaults.groupId),
+    accessToken: normalizeAdminText(existing?.accessToken || defaults.accessToken),
+    faqEnabled: normalizeAdminBoolean(existing?.faqEnabled, defaults.faqEnabled),
+    menuEnabled: normalizeAdminBoolean(existing?.menuEnabled, defaults.menuEnabled),
+    telegramMirrorChatId: normalizeAdminText(existing?.telegramMirrorChatId || defaults.telegramMirrorChatId),
+    longPollWaitSeconds: Math.min(90, Math.max(1, Number(existing?.longPollWaitSeconds || defaults.longPollWaitSeconds) || defaults.longPollWaitSeconds)),
+    welcomeMessage: normalizeAdminMultilineText(existing?.welcomeMessage || defaults.welcomeMessage),
+    fallbackMessage: normalizeAdminMultilineText(existing?.fallbackMessage || defaults.fallbackMessage),
+    menuTitle: normalizeAdminText(existing?.menuTitle || defaults.menuTitle),
+    autoMessages: {
+      start: normalizeAdminMultilineText(existing?.autoMessages?.start || defaults.autoMessages.start),
+      menu: normalizeAdminMultilineText(existing?.autoMessages?.menu || defaults.autoMessages.menu),
+      faqMiss: normalizeAdminMultilineText(existing?.autoMessages?.faqMiss || defaults.autoMessages.faqMiss),
+    },
+    sync: {
+      ...defaults.sync,
+      ...(existing?.sync && typeof existing.sync === "object" ? existing.sync : {}),
+      news: normalizeAdminBoolean(existing?.sync?.news, defaults.sync.news),
+      telegramMirror: normalizeAdminBoolean(existing?.sync?.telegramMirror, defaults.sync.telegramMirror),
+    },
+    faqItems: (Array.isArray(existing?.faqItems) ? existing.faqItems : defaults.faqItems)
+      .map((item, index) => normalizeVkBotFaqItem(item, index))
+      .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0)),
+    menuItems: (Array.isArray(existing?.menuItems) ? existing.menuItems : defaults.menuItems)
+      .map((item, index) => normalizeVkBotMenuItem(item, index))
+      .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0)),
+    replyTemplates: (Array.isArray(existing?.replyTemplates) ? existing.replyTemplates : defaults.replyTemplates)
+      .map((item, index) => normalizeVkBotReplyTemplate(item, index))
+      .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0)),
+    dialogMenu: {
+      enabled: normalizeAdminBoolean(existing?.dialogMenu?.enabled, defaults.dialogMenu.enabled),
+      oneTime: normalizeAdminBoolean(existing?.dialogMenu?.oneTime, defaults.dialogMenu.oneTime),
+      inline: normalizeAdminBoolean(existing?.dialogMenu?.inline, defaults.dialogMenu.inline),
+      buttons: (Array.isArray(existing?.dialogMenu?.buttons) ? existing.dialogMenu.buttons : defaults.dialogMenu.buttons)
+        .map((item, index) => normalizeVkBotDialogButton(item, index))
+        .sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0)),
+    },
+    announcementTemplates: {
+      default: normalizeVkAnnouncementTemplate(existing?.announcementTemplates?.default, defaults.announcementTemplates.default),
+      news: normalizeVkAnnouncementTemplate(existing?.announcementTemplates?.news, defaults.announcementTemplates.news),
+      event: normalizeVkAnnouncementTemplate(existing?.announcementTemplates?.event, defaults.announcementTemplates.event),
+      notam: normalizeVkAnnouncementTemplate(existing?.announcementTemplates?.notam, defaults.announcementTemplates.notam),
+      alert: normalizeVkAnnouncementTemplate(existing?.announcementTemplates?.alert, defaults.announcementTemplates.alert),
+    },
+  };
+};
+
+const upsertVkBotSettingsStore = (payload = {}) => {
+  const current = getVkBotSettingsStore();
+  const updated = withAdminContentUpdate((draft) => {
+    draft.vkBotSettings = {
+      ...current,
+      ...(payload && typeof payload === "object" ? payload : {}),
+      enabled: normalizeAdminBoolean(payload?.enabled, current.enabled),
+      groupId: payload?.groupId == null ? current.groupId : normalizeAdminText(payload.groupId),
+      accessToken: payload?.accessToken == null ? current.accessToken : normalizeAdminText(payload.accessToken),
+      faqEnabled: normalizeAdminBoolean(payload?.faqEnabled, current.faqEnabled),
+      menuEnabled: normalizeAdminBoolean(payload?.menuEnabled, current.menuEnabled),
+      telegramMirrorChatId: payload?.telegramMirrorChatId == null ? current.telegramMirrorChatId : normalizeAdminText(payload.telegramMirrorChatId),
+      longPollWaitSeconds: Math.min(90, Math.max(1, Number(payload?.longPollWaitSeconds || current.longPollWaitSeconds) || current.longPollWaitSeconds)),
+      welcomeMessage: payload?.welcomeMessage == null ? current.welcomeMessage : normalizeAdminMultilineText(payload.welcomeMessage),
+      fallbackMessage: payload?.fallbackMessage == null ? current.fallbackMessage : normalizeAdminMultilineText(payload.fallbackMessage),
+      menuTitle: payload?.menuTitle == null ? current.menuTitle : normalizeAdminText(payload.menuTitle),
+      autoMessages: {
+        ...current.autoMessages,
+        ...(payload?.autoMessages && typeof payload.autoMessages === "object" ? payload.autoMessages : {}),
+        start: payload?.autoMessages?.start == null ? current.autoMessages.start : normalizeAdminMultilineText(payload.autoMessages.start),
+        menu: payload?.autoMessages?.menu == null ? current.autoMessages.menu : normalizeAdminMultilineText(payload.autoMessages.menu),
+        faqMiss: payload?.autoMessages?.faqMiss == null ? current.autoMessages.faqMiss : normalizeAdminMultilineText(payload.autoMessages.faqMiss),
+      },
+      sync: {
+        ...current.sync,
+        ...(payload?.sync && typeof payload.sync === "object" ? payload.sync : {}),
+        news: normalizeAdminBoolean(payload?.sync?.news, current.sync.news),
+        telegramMirror: normalizeAdminBoolean(payload?.sync?.telegramMirror, current.sync.telegramMirror),
+      },
+      faqItems: Array.isArray(payload?.faqItems)
+        ? payload.faqItems.map((item, index) => normalizeVkBotFaqItem(item, index)).sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
+        : current.faqItems,
+      menuItems: Array.isArray(payload?.menuItems)
+        ? payload.menuItems.map((item, index) => normalizeVkBotMenuItem(item, index)).sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
+        : current.menuItems,
+      replyTemplates: Array.isArray(payload?.replyTemplates)
+        ? payload.replyTemplates.map((item, index) => normalizeVkBotReplyTemplate(item, index)).sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
+        : current.replyTemplates,
+      dialogMenu:
+        payload?.dialogMenu && typeof payload.dialogMenu === "object"
+          ? {
+              ...current.dialogMenu,
+              ...payload.dialogMenu,
+              enabled: normalizeAdminBoolean(payload?.dialogMenu?.enabled, current.dialogMenu.enabled),
+              oneTime: normalizeAdminBoolean(payload?.dialogMenu?.oneTime, current.dialogMenu.oneTime),
+              inline: normalizeAdminBoolean(payload?.dialogMenu?.inline, current.dialogMenu.inline),
+              buttons: Array.isArray(payload?.dialogMenu?.buttons)
+                ? payload.dialogMenu.buttons.map((item, index) => normalizeVkBotDialogButton(item, index)).sort((left, right) => Number(left?.order || 0) - Number(right?.order || 0))
+                : current.dialogMenu.buttons,
+            }
+          : current.dialogMenu,
+      announcementTemplates:
+        payload?.announcementTemplates && typeof payload.announcementTemplates === "object"
+          ? {
+              default: normalizeVkAnnouncementTemplate(payload.announcementTemplates.default, current.announcementTemplates.default),
+              news: normalizeVkAnnouncementTemplate(payload.announcementTemplates.news, current.announcementTemplates.news),
+              event: normalizeVkAnnouncementTemplate(payload.announcementTemplates.event, current.announcementTemplates.event),
+              notam: normalizeVkAnnouncementTemplate(payload.announcementTemplates.notam, current.announcementTemplates.notam),
+              alert: normalizeVkAnnouncementTemplate(payload.announcementTemplates.alert, current.announcementTemplates.alert),
+            }
+          : current.announcementTemplates,
+      updatedAt: new Date().toISOString(),
+    };
+    return draft;
+  });
+
+  return updated?.vkBotSettings || getVkBotSettingsStore();
+};
+
 const getTicketConfigStore = () => {
   const store = readAdminContentStore();
   const defaults = buildDefaultAdminContent();
@@ -3709,6 +5486,12 @@ const canActorAccessTicket = (ticket, actor) => {
     return true;
   }
   if (actor.discordId && normalizeAdminText(owner?.discordId) === normalizeAdminText(actor.discordId)) {
+    return true;
+  }
+  if (actor.telegramId && normalizeAdminText(owner?.telegramId) === normalizeAdminText(actor.telegramId)) {
+    return true;
+  }
+  if (actor.chatId && normalizeAdminText(owner?.telegramChatId) === normalizeAdminText(actor.chatId)) {
     return true;
   }
   if (actor.username && normalizeAdminText(owner?.username).toLowerCase() === actor.username.toLowerCase()) {
@@ -5625,6 +7408,12 @@ const loadAdminHubsCatalog = async () => {
 
     const result = (Array.isArray(hubs) ? hubs : []).map((hub) => {
       const airportIds = Array.isArray(hub?.airport_ids) ? hub.airport_ids.map((item) => Number(item || 0)).filter((item) => item > 0) : [];
+      const airportCodes = airportIds
+        .map((airportId) => {
+          const airport = airportsLookup.get(airportId) || null;
+          return airport ? String(airport.code || airport.icao || airport.iata || "").trim().toUpperCase() : "";
+        })
+        .filter(Boolean);
       const airportLabels = airportIds.map((airportId) => {
         const airport = airportsLookup.get(airportId) || null;
         return airport ? `${airport.code} - ${airport.name}` : String(airportId);
@@ -5639,6 +7428,7 @@ const loadAdminHubsCatalog = async () => {
         default: Boolean(hub?.default),
         pilotsCount: Number(hub?.pilots_count || 0) || 0,
         airportIds,
+        airportCodes,
         airportLabels,
         airportsText: airportLabels.join(", "),
         city: primaryAirport?.city || null,
@@ -5698,6 +7488,9 @@ const fetchAdminBootstrapPayload = async () => {
     data: payload,
     expiresAt: now + DASHBOARD_CATALOG_CACHE_MS,
   };
+
+  // Invalidate AI knowledge cache so next AI request gets fresh routes/fleet
+  aiKnowledgeCache = { text: "", builtAt: 0 };
 
   return payload;
 };
@@ -6562,7 +8355,28 @@ const loadTelemetrySnapshotFromDisk = () => {
   }
 };
 
+// Debounced async persist — batches rapid calls into a single write every 2s
+let _persistTimer = null;
+let _persistPending = false;
+
 const persistAuthStore = () => {
+  _persistPending = true;
+  if (_persistTimer) return; // already scheduled
+  _persistTimer = setTimeout(() => {
+    _persistTimer = null;
+    _persistPending = false;
+    _doWriteAuthStore();
+  }, 2000);
+};
+
+// Immediate persist for critical moments (login, logout)
+const persistAuthStoreNow = () => {
+  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+  _persistPending = false;
+  _doWriteAuthStore();
+};
+
+const _doWriteAuthStore = () => {
   logger.info('[auth] persist_start', { AUTH_STORE_FILE });
   const discordOauthStates = {};
   for (const [state, expiresAt] of discordOauthStateCache.entries()) {
@@ -6648,25 +8462,35 @@ const persistAuthStore = () => {
 
   ensureAuthStoreDir();
   const tempPath = `${AUTH_STORE_FILE}.tmp`;
-  try {
-    fs.writeFileSync(tempPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-    fs.renameSync(tempPath, AUTH_STORE_FILE);
-    logger.info('[auth] persist_success', { AUTH_STORE_FILE, vamsysSessions: Object.keys(vamsysSessions).length, discordSessions: Object.keys(discordSessions).length });
-  } catch (err) {
-    logger.error('[auth] persist_failed', String(err));
-    try {
-      // fallback to OS temp directory
-      const fallbackBase = path.join(os.tmpdir(), path.basename(AUTH_STORE_FILE));
-      const fallbackTemp = `${fallbackBase}.tmp`;
-      fs.writeFileSync(fallbackTemp, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
-      fs.renameSync(fallbackTemp, fallbackBase);
-      // switch AUTH_STORE_FILE to the fallback so future writes use it
-      AUTH_STORE_FILE = fallbackBase;
-      logger.warn('[auth] persist_fallback_to_tmp', AUTH_STORE_FILE);
-    } catch (err2) {
-      logger.error('[auth] persist_fallback_failed', String(err2));
+  const serialized = `${JSON.stringify(payload, null, 2)}\n`;
+
+  fs.writeFile(tempPath, serialized, "utf8", (writeErr) => {
+    if (writeErr) {
+      logger.error('[auth] persist_write_failed', String(writeErr));
+      // fallback to OS temp
+      try {
+        const fallbackBase = path.join(os.tmpdir(), path.basename(AUTH_STORE_FILE));
+        const fallbackTemp = `${fallbackBase}.tmp`;
+        fs.writeFileSync(fallbackTemp, serialized, "utf8");
+        fs.renameSync(fallbackTemp, fallbackBase);
+        AUTH_STORE_FILE = fallbackBase;
+        logger.warn('[auth] persist_fallback_to_tmp', AUTH_STORE_FILE);
+      } catch (err2) {
+        logger.error('[auth] persist_fallback_failed', String(err2));
+      }
+      return;
     }
-  }
+    fs.rename(tempPath, AUTH_STORE_FILE, (renameErr) => {
+      if (renameErr) {
+        logger.error('[auth] persist_rename_failed', String(renameErr));
+        return;
+      }
+      logger.info('[auth] persist_success', {
+        vamsysSessions: Object.keys(vamsysSessions).length,
+        discordSessions: Object.keys(discordSessions).length,
+      });
+    });
+  });
 };
 
 const updateAuthStoreLinks = ({ discordLink, vamsysLink } = {}) => {
@@ -6924,6 +8748,7 @@ const getPilotNotamReadState = (pilot = {}) => {
     entries: entries
       .map((item) => ({
         notamId: Number(item?.notamId || 0) || 0,
+        openedAt: String(item?.openedAt || "").trim() || null,
         readAt: String(item?.readAt || "").trim() || null,
         notifiedAt: String(item?.notifiedAt || "").trim() || null,
         dmMessageId: String(item?.dmMessageId || "").trim() || null,
@@ -6933,12 +8758,21 @@ const getPilotNotamReadState = (pilot = {}) => {
   };
 };
 
-const hasPilotReadNotam = (pilot = {}, notamId) => {
+const getPilotNotamStateEntry = (pilot = {}, notamId) => {
   const normalizedId = Number(notamId || 0) || 0;
   if (normalizedId <= 0) {
-    return false;
+    return null;
   }
-  return getPilotNotamReadState(pilot).entries.some((item) => item.notamId === normalizedId && item.readAt);
+
+  return getPilotNotamReadState(pilot).entries.find((item) => item.notamId === normalizedId) || null;
+};
+
+const hasPilotReadNotam = (pilot = {}, notamId) => {
+  return Boolean(getPilotNotamStateEntry(pilot, notamId)?.readAt);
+};
+
+const hasPilotOpenedNotam = (pilot = {}, notamId) => {
+  return Boolean(getPilotNotamStateEntry(pilot, notamId)?.openedAt);
 };
 
 const markPilotNotamState = (pilot = {}, notamId, patch = {}) => {
@@ -6950,7 +8784,9 @@ const markPilotNotamState = (pilot = {}, notamId, patch = {}) => {
   const current = getPilotNotamReadState(pilot);
   const nextEntries = [...current.entries];
   const entryIndex = nextEntries.findIndex((item) => item.notamId === normalizedId);
-  const existing = entryIndex >= 0 ? nextEntries[entryIndex] : { notamId: normalizedId, readAt: null, notifiedAt: null, dmMessageId: null };
+  const existing = entryIndex >= 0
+    ? nextEntries[entryIndex]
+    : { notamId: normalizedId, openedAt: null, readAt: null, notifiedAt: null, dmMessageId: null };
   const updated = {
     ...existing,
     ...patch,
@@ -7719,11 +9555,13 @@ const flushTelemetryOnExit = () => {
 
 process.on("SIGINT", () => {
   flushTelemetryOnExit();
+  if (_persistPending) _doWriteAuthStore(); // flush pending session writes
   process.exit(0);
 });
 
 process.on("SIGTERM", () => {
   flushTelemetryOnExit();
+  if (_persistPending) _doWriteAuthStore(); // flush pending session writes
   process.exit(0);
 });
 
@@ -7767,6 +9605,7 @@ const app = express();
 app.use(express.json());
 
 const VAMSYS_LOG_PREFIX = "[vamsys]";
+const VK_LOG_PREFIX = "[vk-bot]";
 
 const sanitizeLogValue = (value) => {
   if (value instanceof Error) {
@@ -7777,6 +9616,17 @@ const sanitizeLogValue = (value) => {
     };
   }
   return value;
+};
+
+const maskSensitiveValue = (value = "", visible = 4) => {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  if (text.length <= visible) {
+    return "*".repeat(text.length);
+  }
+  return `${text.slice(0, visible)}...`;
 };
 
 const truncateForLog = (value, maxLength = 400) => {
@@ -7892,6 +9742,16 @@ const logVamsys = (level, event, details = {}) => {
   logger(VAMSYS_LOG_PREFIX, JSON.stringify(payload, (_key, value) => sanitizeLogValue(value)));
 };
 
+const logVk = (level, event, details = {}) => {
+  const payload = {
+    ts: new Date().toISOString(),
+    event,
+    ...details,
+  };
+  const writer = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
+  writer(VK_LOG_PREFIX, JSON.stringify(payload, (_key, value) => sanitizeLogValue(value)));
+};
+
 const requestContext = (req) => ({
   method: req.method,
   path: req.originalUrl || req.url,
@@ -7919,15 +9779,29 @@ const parseCookieHeader = (cookieHeader = "") => {
   const cookies = {};
   cookieHeader.split(";").forEach((part) => {
     const [rawKey, ...rawValue] = part.trim().split("=");
-    if (!rawKey) {
-      return;
+    const key = rawKey.trim();
+    if (!key) return;
+    try {
+      cookies[key] = decodeURIComponent(rawValue.join("="));
+    } catch {
+      cookies[key] = rawValue.join("=");
     }
-    cookies[rawKey] = decodeURIComponent(rawValue.join("="));
   });
   return cookies;
 };
 
-const buildCookie = (name, value, maxAgeSeconds) => {
+// Secure flag: on in production, or when explicitly enabled, or when request comes over HTTPS
+const shouldUseSecureCookie = (req = null) => {
+  if (process.env.NODE_ENV === "production") return true;
+  if (process.env.COOKIE_SECURE === "true") return true;
+  if (req) {
+    const proto = String(req.headers["x-forwarded-proto"] || "").toLowerCase();
+    if (proto === "https") return true;
+  }
+  return false;
+};
+
+const buildCookie = (name, value, maxAgeSeconds, req = null) => {
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     "Path=/",
@@ -7935,26 +9809,65 @@ const buildCookie = (name, value, maxAgeSeconds) => {
     "SameSite=Lax",
     `Max-Age=${maxAgeSeconds}`,
   ];
-  if (process.env.NODE_ENV === "production") {
-    parts.push("Secure");
-  }
+  if (shouldUseSecureCookie(req)) parts.push("Secure");
   return parts.join("; ");
 };
 
-const clearCookie = (name) => {
+const clearCookie = (name, req = null) => {
   const parts = [
     `${name}=`,
     "Path=/",
     "HttpOnly",
     "SameSite=Lax",
     "Max-Age=0",
+    "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
   ];
-  if (process.env.NODE_ENV === "production") {
-    parts.push("Secure");
-  }
+  if (shouldUseSecureCookie(req)) parts.push("Secure");
   return parts.join("; ");
 };
 
+// ── Auth rate limiting ────────────────────────────────────────────────────────
+const AUTH_RATE_LIMIT_MS = 5000;        // min gap between auth attempts per IP
+const AUTH_RATE_MAX_BURST = 8;          // max attempts in sliding window
+const AUTH_RATE_WINDOW_MS = 60_000;     // 1 minute window
+const authRateMap = new Map();          // ip → [timestamps]
+
+const checkAuthRateLimit = (req) => {
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown")
+    .split(",")[0].trim();
+  const now = Date.now();
+  const times = (authRateMap.get(ip) || []).filter((t) => now - t < AUTH_RATE_WINDOW_MS);
+  if (times.length >= AUTH_RATE_MAX_BURST) return false;
+  times.push(now);
+  authRateMap.set(ip, times);
+  // Prune map to prevent unbounded growth
+  if (authRateMap.size > 5000) {
+    const oldest = authRateMap.keys().next().value;
+    authRateMap.delete(oldest);
+  }
+  return true;
+};
+
+// ── OAuth state cache size enforcement ───────────────────────────────────────
+const OAUTH_STATE_MAX = 500;
+
+const pruneOauthCache = (cache) => {
+  if (cache.size <= OAUTH_STATE_MAX) return;
+  const now = Date.now();
+  // First remove expired
+  for (const [key, val] of cache.entries()) {
+    const exp = typeof val === "number" ? val : Number(val?.expiresAt || 0);
+    if (exp && now >= exp) cache.delete(key);
+    if (cache.size <= OAUTH_STATE_MAX) return;
+  }
+  // Then remove oldest by insertion order until under limit
+  for (const key of cache.keys()) {
+    cache.delete(key);
+    if (cache.size <= OAUTH_STATE_MAX) break;
+  }
+};
+
+// ── Scheduled cache cleanup (every 5 min) ────────────────────────────────────
 const cleanupDiscordCaches = () => {
   const now = Date.now();
   let hasChanges = false;
@@ -7990,10 +9903,18 @@ const cleanupDiscordCaches = () => {
       hasChanges = true;
     }
   }
+  // Enforce size limits on OAuth state caches
+  pruneOauthCache(discordOauthStateCache);
+  pruneOauthCache(vamsysOauthStateCache);
+  pruneOauthCache(pilotApiOauthStateCache);
+
   if (hasChanges) {
     persistAuthStore();
   }
 };
+
+// Run cleanup every 5 minutes regardless of traffic
+setInterval(() => { try { cleanupDiscordCaches(); } catch {} }, 5 * 60 * 1000).unref();
 
 const isDiscordOAuthConfigured = () =>
   Boolean(DISCORD_CLIENT_ID && DISCORD_CLIENT_SECRET && DISCORD_OAUTH_REDIRECT_URI);
@@ -8455,6 +10376,168 @@ const claimTelegramLinkCode = ({ code, chatId, telegramId, username, name } = {}
   };
 };
 
+const resolveTelegramBotActorFromRequest = (req = {}) => {
+  const body = req?.body && typeof req.body === "object" ? req.body : {};
+  const query = req?.query && typeof req.query === "object" ? req.query : {};
+  const actor = body?.actor && typeof body.actor === "object" ? body.actor : {};
+  const pilotId = Number(body?.pilotId || query?.pilotId || actor?.pilotId || 0) || 0;
+
+  return {
+    pilotId: pilotId > 0 ? pilotId : null,
+    chatId:
+      normalizeAdminText(
+        body?.chatId || body?.telegramChatId || query?.chatId || query?.telegramChatId || actor?.chatId || ""
+      ) || null,
+    telegramId:
+      normalizeAdminText(body?.telegramId || query?.telegramId || actor?.telegramId || actor?.id || "") || null,
+    username: normalizeAdminText(actor?.username || body?.username || "") || null,
+    name: normalizeAdminText(actor?.name || body?.name || "") || null,
+  };
+};
+
+const resolveTelegramBotPilotTarget = (req = {}, { allowPilotId = false } = {}) => {
+  const actor = resolveTelegramBotActorFromRequest(req);
+  const linkedPilotId = findPilotIdByTelegramIdentity({
+    chatId: actor.chatId,
+    telegramId: actor.telegramId,
+  });
+  const pilotId = Number(linkedPilotId || (allowPilotId ? actor.pilotId : 0) || 0) || 0;
+
+  return {
+    ...actor,
+    pilotId: pilotId > 0 ? pilotId : null,
+  };
+};
+
+const buildTelegramBotPilotScope = ({ pilotId, username = "", name = "" } = {}) => ({
+  id: String(Number(pilotId || 0) || 0),
+  username: String(username || "").trim(),
+  name: String(name || "").trim(),
+  email: "",
+});
+
+const listTelegramBotAdminChatIds = () =>
+  (Array.isArray(getTelegramBotSettingsStore()?.adminChatIds) ? getTelegramBotSettingsStore().adminChatIds : [])
+    .map((item) => normalizeAdminText(item || ""))
+    .filter(Boolean);
+
+const isTelegramBotAdminChat = (chatId) => {
+  const normalizedChatId = normalizeAdminText(chatId || "");
+  if (!normalizedChatId) {
+    return false;
+  }
+
+  return listTelegramBotAdminChatIds().includes(normalizedChatId);
+};
+
+const resolveTelegramBotTicketActor = (req = {}) => {
+  const target = resolveTelegramBotPilotTarget(req, { allowPilotId: true });
+  const username = normalizeAdminText(target?.username || "") || "telegram-user";
+  const name = normalizeAdminText(target?.name || target?.username || "") || "Telegram User";
+
+  return {
+    pilotId: Number(target?.pilotId || 0) || null,
+    discordId: null,
+    telegramId: normalizeAdminText(target?.telegramId || "") || null,
+    chatId: normalizeAdminText(target?.chatId || "") || null,
+    username,
+    name,
+    provider: "telegram",
+    isAdmin: isTelegramBotAdminChat(target?.chatId),
+    discordSession: false,
+  };
+};
+
+const getTelegramBotTicketConfigView = () => {
+  const config = getTicketConfigStore();
+  return {
+    enabled: config.enabled,
+    categories: (Array.isArray(config?.categories) ? config.categories : []).filter((item) => normalizeAdminBoolean(item?.enabled, true)),
+  };
+};
+
+const serializeTelegramBotBooking = (booking = {}) => ({
+  id: Number(booking?.id || 0) || 0,
+  pilotId: Number(booking?.pilotId || 0) || null,
+  callsign: normalizeAdminText(booking?.callsign),
+  flightNumber: normalizeAdminText(booking?.callsign || booking?.flightNumber || booking?.routeLabel || "Booking") || "Booking",
+  route: normalizeAdminText(booking?.routeLabel || ""),
+  departure: normalizeAdminText(booking?.departure).toUpperCase(),
+  arrival: normalizeAdminText(booking?.arrival).toUpperCase(),
+  aircraft: normalizeAdminText(booking?.aircraftLabel),
+  aircraftLabel: normalizeAdminText(booking?.aircraftLabel),
+  departureTime: normalizeAdminText(booking?.departureTime),
+  createdAt: normalizeAdminText(booking?.createdAt),
+  etd: normalizeAdminText(booking?.etd || booking?.departureTime),
+  eta: normalizeAdminText(booking?.eta),
+  status: normalizeAdminText(booking?.status || "active") || "active",
+});
+
+const loadTelegramBotBookingByPilotId = async (pilotId) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return null;
+  }
+
+  const bookings = await loadAdminBookingsCatalog({ limit: 250 }).catch(() => []);
+  const candidates = (Array.isArray(bookings) ? bookings : [])
+    .filter((item) => Number(item?.pilotId || 0) === normalizedPilotId)
+    .filter((item) => {
+      const status = normalizeAdminText(item?.status || "active").toLowerCase() || "active";
+      return !["completed", "cancelled", "canceled", "closed", "rejected", "invalidated"].includes(status);
+    })
+    .slice()
+    .sort((left, right) => {
+      const leftTs = Date.parse(String(left?.departureTime || left?.createdAt || ""));
+      const rightTs = Date.parse(String(right?.departureTime || right?.createdAt || ""));
+      return (Number.isFinite(leftTs) ? leftTs : 0) - (Number.isFinite(rightTs) ? rightTs : 0);
+    });
+
+  return candidates[0] ? serializeTelegramBotBooking(candidates[0]) : null;
+};
+
+const loadTelegramBotRecentPirepsByPilotId = async (pilotId, { limit = 5 } = {}) => {
+  const normalizedPilotId = Number(pilotId || 0) || 0;
+  if (normalizedPilotId <= 0) {
+    return [];
+  }
+
+  const resolvedLimit = Math.max(1, Math.min(10, Number(limit || 5) || 5));
+  const [pirepsRaw, airportsMap] = await Promise.all([
+    fetchAllPages(`/pireps?page[size]=25&filter[pilot_id]=${normalizedPilotId}&sort=-updated_at`).catch(() => []),
+    loadAirportsLookup().catch(() => new Map()),
+  ]);
+
+  const pireps = Array.isArray(pirepsRaw)
+    ? pirepsRaw.filter((item) => Number(item?.pilot_id || 0) === normalizedPilotId)
+    : [];
+
+  const recent = [];
+  for (const pirep of pireps.slice(0, resolvedLimit)) {
+    const departure = airportsMap.get(pirep?.departure_airport_id) || {};
+    const arrival = airportsMap.get(pirep?.arrival_airport_id) || {};
+    const aircraft = await resolveAircraftLabelFromPirep(pirep).catch(() => "—");
+    const departureCode = normalizeAdminText(departure?.code || departure?.icao || pirep?.departure_id || "----").toUpperCase();
+    const arrivalCode = normalizeAdminText(arrival?.code || arrival?.icao || pirep?.arrival_id || "----").toUpperCase();
+
+    recent.push({
+      id: Number(pirep?.id || 0) || 0,
+      callsign: normalizeAdminText(pirep?.callsign || pirep?.flight_number || "") || null,
+      flightNumber: normalizeAdminText(pirep?.callsign || pirep?.flight_number || `PIREP ${pirep?.id || ""}`) || `PIREP ${pirep?.id || ""}`,
+      status: normalizeAdminText(pirep?.status || "pending") || "pending",
+      departure: departureCode,
+      arrival: arrivalCode,
+      route: `${departureCode} -> ${arrivalCode}`,
+      aircraft,
+      needReply: Boolean(pirep?.need_reply ?? pirep?.needReply ?? false),
+      createdAt: normalizeAdminText(pirep?.created_at || "") || null,
+      updatedAt: normalizeAdminText(pirep?.updated_at || pirep?.created_at || "") || null,
+    });
+  }
+
+  return recent;
+};
+
 const exchangePilotApiToken = async (body) => {
   const response = await fetch(TOKEN_URL, {
     method: "POST",
@@ -8517,13 +10600,16 @@ const refreshPilotApiConnection = async ({ pilotId, sessionUser = {}, connection
     return null;
   }
 
-  const payload = await exchangePilotApiToken(
-    new URLSearchParams({
-      client_id: PILOT_API_CLIENT_ID,
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    })
-  );
+  const tokenBody = new URLSearchParams({
+    client_id: PILOT_API_CLIENT_ID,
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+  });
+  if (PILOT_API_CLIENT_SECRET) {
+    tokenBody.set("client_secret", PILOT_API_CLIENT_SECRET);
+  }
+
+  const payload = await exchangePilotApiToken(tokenBody);
 
   const nextConnection = {
     ...connection,
@@ -8612,6 +10698,62 @@ const ensurePilotApiConnection = async ({ pilotId, sessionUser = {}, forceProfil
   });
 
   return connection;
+};
+
+const syncPilotApiLocationFromVamsys = async ({ pilotId, sessionUser = {}, connection = null, airportsMap = null } = {}) => {
+  const resolvedPilotId = Number(pilotId || sessionUser?.id || 0) || 0;
+  if (resolvedPilotId <= 0) {
+    return { connection, synced: false, airport: null };
+  }
+
+  const vamsysProfile = await loadPilotProfileById(resolvedPilotId, {
+    seedPilot: sessionUser,
+  }).catch(() => null);
+  const vamsysLocationId = Number(vamsysProfile?.locationId || 0) || 0;
+  if (vamsysLocationId <= 0) {
+    return { connection, synced: false, airport: null };
+  }
+
+  let nextConnection = connection;
+  if (!nextConnection) {
+    nextConnection = await ensurePilotApiConnection({
+      pilotId: resolvedPilotId,
+      sessionUser,
+      forceProfileRefresh: true,
+    });
+  }
+  if (!nextConnection) {
+    return { connection: null, synced: false, airport: null };
+  }
+
+  const currentPilotApiLocationId =
+    Number(nextConnection?.profile?.location_id || nextConnection?.profile?.locationId || 0) || 0;
+  const resolvedAirportsMap = airportsMap || (await loadAirportsLookup().catch(() => new Map()));
+  const airport = resolvedAirportsMap.get(vamsysLocationId) || null;
+
+  if (currentPilotApiLocationId !== vamsysLocationId) {
+    await pilotApiRequest({
+      pilotId: resolvedPilotId,
+      sessionUser,
+      path: "/location",
+      method: "PATCH",
+      body: {
+        airport_id: vamsysLocationId,
+      },
+    });
+
+    nextConnection = await ensurePilotApiConnection({
+      pilotId: resolvedPilotId,
+      sessionUser,
+      forceProfileRefresh: true,
+    });
+  }
+
+  return {
+    connection: nextConnection,
+    synced: currentPilotApiLocationId !== vamsysLocationId,
+    airport,
+  };
 };
 
 const createPilotApiError = (status, code, message, details = null) => {
@@ -9805,6 +11947,10 @@ const resolveLinkedVamsysPilotForDiscordUser = async (discordUser) => {
 };
 
 app.get("/api/auth/discord/login", (req, res) => {
+  if (!checkAuthRateLimit(req)) {
+    res.status(429).json({ error: "Too many login attempts, please wait" });
+    return;
+  }
   if (!isDiscordOAuthConfigured()) {
     res.status(500).json({
       error:
@@ -10109,9 +12255,11 @@ app.get("/api/auth/discord/callback", async (req, res) => {
 
     const successUrl =
       redirectTargets?.successUrl || resolveRedirectUrl(DISCORD_OAUTH_SUCCESS_URL, "/login?discord=success");
+    persistAuthStoreNow(); // login — persist immediately
+
     res.setHeader("Set-Cookie", [
-      clearCookie(DISCORD_STATE_COOKIE),
-      buildCookie(DISCORD_SESSION_COOKIE, sessionId, DISCORD_SESSION_TTL_MS / 1000),
+      clearCookie(DISCORD_STATE_COOKIE, req),
+      buildCookie(DISCORD_SESSION_COOKIE, sessionId, DISCORD_SESSION_TTL_MS / 1000, req),
     ]);
     recordAuthActivity({
       req,
@@ -10183,7 +12331,7 @@ app.post("/api/auth/discord/logout", (req, res) => {
   const session = sessionId ? discordSessionCache.get(sessionId) || null : null;
   if (sessionId) {
     discordSessionCache.delete(sessionId);
-    persistAuthStore();
+    persistAuthStoreNow(); // logout — immediate persist
   }
   recordAuthActivity({
     req,
@@ -10198,7 +12346,7 @@ app.post("/api/auth/discord/logout", (req, res) => {
       fallbackUsername: String(session?.user?.username || "").trim(),
     }),
   });
-  res.setHeader("Set-Cookie", clearCookie(DISCORD_SESSION_COOKIE));
+  res.setHeader("Set-Cookie", clearCookie(DISCORD_SESSION_COOKIE, req));
   res.json({ ok: true });
 });
 
@@ -10338,35 +12486,51 @@ const fetchVamsysOAuthProfile = async (accessToken) => {
   return null;
 };
 
+// Slide session TTL: if less than SESSION_RENEW_THRESHOLD_MS left, extend by SESSION_TTL_MS
+const SESSION_RENEW_THRESHOLD_MS = 24 * 60 * 60 * 1000; // renew when < 1 day left
+
 const getVamsysSessionFromRequest = (req) => {
-  cleanupDiscordCaches();
   const cookies = parseCookieHeader(req.headers.cookie || "");
   const sessionId = cookies[VAMSYS_SESSION_COOKIE] || "";
-  const session = sessionId ? vamsysSessionCache.get(sessionId) : null;
-  if (!session || Date.now() >= session.expiresAt) {
-    if (sessionId) {
-      vamsysSessionCache.delete(sessionId);
-      persistAuthStore();
-    }
-    logger.warn('[auth] vamsys_session_missing', { sessionId, hasSessionInCache: vamsysSessionCache.has(sessionId) });
+  if (!sessionId) return null;
+
+  const session = vamsysSessionCache.get(sessionId);
+  const now = Date.now();
+
+  if (!session || now >= session.expiresAt) {
+    if (session) vamsysSessionCache.delete(sessionId);
+    // Defer persist to scheduled cleanup — no blocking I/O on every expired cookie
     return null;
   }
-  logger.debug('[auth] vamsys_session_found', { sessionId, userId: session?.user?.id || session?.userId || null });
+
+  // Slide expiry when nearing end of TTL
+  if (session.expiresAt - now < SESSION_RENEW_THRESHOLD_MS) {
+    session.expiresAt = now + VAMSYS_SESSION_TTL_MS;
+    persistAuthStore(); // debounced — won't block
+  }
+
   return session;
 };
 
 const getDiscordSessionFromRequest = (req) => {
-  cleanupDiscordCaches();
   const cookies = parseCookieHeader(req.headers.cookie || "");
   const sessionId = cookies[DISCORD_SESSION_COOKIE] || "";
-  const session = sessionId ? discordSessionCache.get(sessionId) : null;
-  if (!session || Date.now() >= session.expiresAt) {
-    if (sessionId) {
-      discordSessionCache.delete(sessionId);
-      persistAuthStore();
-    }
+  if (!sessionId) return null;
+
+  const session = discordSessionCache.get(sessionId);
+  const now = Date.now();
+
+  if (!session || now >= session.expiresAt) {
+    if (session) discordSessionCache.delete(sessionId);
     return null;
   }
+
+  // Slide expiry when nearing end of TTL
+  if (session.expiresAt - now < SESSION_RENEW_THRESHOLD_MS) {
+    session.expiresAt = now + DISCORD_SESSION_TTL_MS;
+    persistAuthStore(); // debounced
+  }
+
   return session;
 };
 
@@ -10384,6 +12548,25 @@ const applyResolvedPilotToUser = (currentUser, pilot = {}) => {
       currentUser?.honorary_rank?.id ||
       0
   ) || 0;
+  const resolvedLocationId = Number(
+    pilot?.locationId ||
+      pilot?.location_id ||
+      pilot?.location?.id ||
+      currentUser?.locationId ||
+      currentUser?.location_id ||
+      currentUser?.location?.id ||
+      0
+  ) || 0;
+  const resolvedLocation = String(
+    pilot?.location ||
+      pilot?.locationLabel ||
+      currentUser?.location ||
+      currentUser?.locationLabel ||
+      ""
+  ).trim();
+  const resolvedLocationCode = String(pilot?.locationCode || currentUser?.locationCode || "")
+    .trim()
+    .toUpperCase();
 
   return {
     ...currentUser,
@@ -10395,6 +12578,11 @@ const applyResolvedPilotToUser = (currentUser, pilot = {}) => {
     hours: Number(pilot?.hours || currentUser?.hours || 0) || 0,
     flights: Number(pilot?.flights || currentUser?.flights || 0) || 0,
     joinedAt: String(pilot?.joinedAt || currentUser?.joinedAt || ""),
+    location: resolvedLocation,
+    locationLabel: resolvedLocation,
+    locationId: resolvedLocationId > 0 ? resolvedLocationId : 0,
+    location_id: resolvedLocationId > 0 ? resolvedLocationId : 0,
+    locationCode: resolvedLocationCode || "",
     honorary_rank_id: resolvedHonoraryRankId > 0 ? resolvedHonoraryRankId : 0,
     honoraryRankId: resolvedHonoraryRankId > 0 ? resolvedHonoraryRankId : 0,
     honorary_rank:
@@ -10531,6 +12719,10 @@ const enrichVamsysSessionUser = async ({ accessToken, baseUser = {}, forceRoster
 };
 
 app.get("/api/auth/vamsys/login", (req, res) => {
+  if (!checkAuthRateLimit(req)) {
+    res.status(429).json({ error: "Too many login attempts, please wait" });
+    return;
+  }
   if (!isVamsysOAuthConfigured()) {
     logVamsys("error", "oauth_login_config_missing", requestContext(req));
     res.status(500).json({
@@ -10699,11 +12891,11 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
         },
       },
     });
-    persistAuthStore();
+    persistAuthStoreNow(); // login — persist immediately
 
     res.setHeader("Set-Cookie", [
-      clearCookie(VAMSYS_STATE_COOKIE),
-      buildCookie(VAMSYS_SESSION_COOKIE, sessionId, VAMSYS_SESSION_TTL_MS / 1000),
+      clearCookie(VAMSYS_STATE_COOKIE, req),
+      buildCookie(VAMSYS_SESSION_COOKIE, sessionId, VAMSYS_SESSION_TTL_MS / 1000, req),
     ]);
 
     logVamsys("info", "oauth_callback_success", {
@@ -10809,6 +13001,32 @@ app.get("/api/auth/vamsys/me", async (req, res) => {
     }
   }
 
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  const lastLocationSyncAt = Number(session?.pilotApiLocationSyncedAt || 0) || 0;
+  const shouldCheckPilotApiLocation =
+    pilotId > 0 &&
+    isPilotApiConfigured() &&
+    Date.now() - lastLocationSyncAt >= PILOT_API_LOCATION_SYNC_MS &&
+    Boolean(getStoredPilotApiConnectionByPilotId(pilotId));
+
+  if (shouldCheckPilotApiLocation) {
+    try {
+      await syncPilotApiLocationFromVamsys({
+        pilotId,
+        sessionUser: session.user || {},
+      });
+    } catch (error) {
+      logVamsys("warn", "pilot_location_periodic_sync_failed", {
+        ...requestContext(req),
+        pilotId,
+        error: String(error),
+      });
+    } finally {
+      session.pilotApiLocationSyncedAt = Date.now();
+      persistAuthStore();
+    }
+  }
+
   const preferences = getPilotPreferences(session?.user || {});
   const resolvedAvatar = resolvePilotAvatarFromPreferences(session?.user || {}, preferences);
 
@@ -10826,6 +13044,10 @@ app.get("/api/auth/vamsys/me", async (req, res) => {
 });
 
 app.get("/api/auth/pilot-api/connect", (req, res) => {
+  if (!checkAuthRateLimit(req)) {
+    res.status(429).json({ error: "Too many login attempts, please wait" });
+    return;
+  }
   cleanupDiscordCaches();
 
   const intent = String(req.query.intent || "").trim().toLowerCase() === "login" ? "login" : "connect";
@@ -10994,19 +13216,22 @@ app.get("/api/auth/pilot-api/callback", async (req, res) => {
       return;
     }
 
-    const tokenPayload = await exchangePilotApiToken(
-      new URLSearchParams({
-        client_id: PILOT_API_CLIENT_ID,
-        grant_type: "authorization_code",
-        code,
-        code_verifier: String(stateEntry?.codeVerifier || ""),
-        redirect_uri: PILOT_API_REDIRECT_URI,
-      })
-    );
+    const tokenBody = new URLSearchParams({
+      client_id: PILOT_API_CLIENT_ID,
+      grant_type: "authorization_code",
+      code,
+      code_verifier: String(stateEntry?.codeVerifier || ""),
+      redirect_uri: PILOT_API_REDIRECT_URI,
+    });
+    if (PILOT_API_CLIENT_SECRET) {
+      tokenBody.set("client_secret", PILOT_API_CLIENT_SECRET);
+    }
+
+    const tokenPayload = await exchangePilotApiToken(tokenBody);
 
     const accessToken = String(tokenPayload?.access_token || "").trim();
     const refreshToken = String(tokenPayload?.refresh_token || "").trim();
-    if (!accessToken || !refreshToken) {
+    if (!accessToken) {
       throw new Error("pilot_api_token_missing");
     }
 
@@ -11544,11 +13769,13 @@ app.post("/api/pilot/bookings", async (req, res) => {
     }
 
     try {
+      const notamPilotContext = await resolveCurrentPilotContext(req).catch(() => null);
+      const notamPilot = notamPilotContext?.pilot || session.user || {};
       const currentNotams = await fetchAllPages("/notams?page[size]=100");
       const serializedNotams = (Array.isArray(currentNotams) ? currentNotams : []).map((item) =>
         serializeVamsysNotam(item)
       );
-      const unreadNotams = getUnreadNotamsForPilot(session.user || {}, serializedNotams);
+      const unreadNotams = getUnreadNotamsForPilot(notamPilot, serializedNotams);
       if (unreadNotams.length > 0) {
         throw createUnreadNotamsBookingError(unreadNotams);
       }
@@ -11899,6 +14126,52 @@ app.post("/api/pilot/activities/:id/register", async (req, res) => {
     });
 
     const registration = getPilotApiItem(payload) || {};
+
+    try {
+      const pilotId = Number(session?.user?.id || 0) || 0;
+      if (pilotId > 0) {
+        const store = readPilotChallengesStore();
+        const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: session.user || {} });
+        if (entry) {
+          const periods = resolveChallengePeriodsUtc(new Date());
+          const beforeSections = buildPilotChallengeSections({ pilotId, periods, entry });
+          const beforeProgressMap = buildChallengeProgressMap([
+            ...(beforeSections.daily || []),
+            ...(beforeSections.weekly || []),
+            ...(beforeSections.premium || []),
+          ]);
+
+          const nowIso = new Date().toISOString();
+          trackPilotChallengeEvent(entry, {
+            type: "event_participation",
+            value: 1,
+            at: nowIso,
+            meta: {
+              activityId,
+              source: "activity_register",
+            },
+          });
+
+          const afterSections = buildPilotChallengeSections({ pilotId, periods, entry });
+          const afterInstances = [
+            ...(afterSections.daily || []),
+            ...(afterSections.weekly || []),
+            ...(afterSections.premium || []),
+          ];
+
+          appendChallengeProgressNotifications({
+            entry,
+            beforeMap: beforeProgressMap,
+            afterInstances,
+          });
+          appendChallengeCompletionNotifications({ entry, instances: afterInstances });
+          writePilotChallengesStore(store);
+        }
+      }
+    } catch {
+      // challenge tracking must not block successful activity registration
+    }
+
     res.status(201).json({
       ok: true,
       registration: {
@@ -12285,6 +14558,12 @@ app.get("/api/pilot/pireps/:id", async (req, res) => {
       res.status(404).json({ ok: false, error: "PIREP not found", code: "pirep_not_found" });
       return;
     }
+
+    // Keep challenge progress in sync when a completed PIREP is viewed.
+    ingestCompletedPirepIntoChallenges({
+      pirep: rawPirep,
+      sessionUser: session?.user || {},
+    });
 
     const enriched = enrichPilotApiPirep(rawPirep, references);
     const route = enriched.routeId ? references.routeIndex.get(enriched.routeId) || null : null;
@@ -12846,14 +15125,29 @@ app.get("/api/pilot/location", async (req, res) => {
 
   try {
     const pilotId = Number(session?.user?.id || 0) || 0;
-    const connection = await ensurePilotApiConnection({
+    let connection = await ensurePilotApiConnection({
       pilotId,
       sessionUser: session.user || {},
       forceProfileRefresh: true,
     });
 
-    const extracted = extractPilotApiProfile(connection?.profile || {}) || {};
     const airportsMap = await loadAirportsLookup().catch(() => new Map());
+    try {
+      const synced = await syncPilotApiLocationFromVamsys({
+        pilotId,
+        sessionUser: session.user || {},
+        connection,
+        airportsMap,
+      });
+      connection = synced?.connection || connection;
+    } catch (syncError) {
+      logVamsys("warn", "pilot_location_sync_failed", {
+        pilotId,
+        error: String(syncError),
+      });
+    }
+
+    const extracted = extractPilotApiProfile(connection?.profile || {}) || {};
     const locationId = Number(connection?.profile?.location_id || connection?.profile?.locationId || 0) || 0;
     let airport = locationId > 0 ? airportsMap.get(locationId) || null : null;
     let locationLabel = String(extracted?.location || "").trim() || null;
@@ -13532,7 +15826,7 @@ app.get("/api/auth/me", async (req, res) => {
 
     if (!vamsysSession && !discordSession) {
       // clear any stale cookies from both providers
-      res.setHeader("Set-Cookie", [clearCookie(VAMSYS_SESSION_COOKIE), clearCookie(DISCORD_SESSION_COOKIE)]);
+      res.setHeader("Set-Cookie", [clearCookie(VAMSYS_SESSION_COOKIE, req), clearCookie(DISCORD_SESSION_COOKIE, req)]);
       res.status(401).json({ authenticated: false });
       return;
     }
@@ -13586,7 +15880,7 @@ app.post("/api/auth/vamsys/logout", (req, res) => {
   const session = sessionId ? vamsysSessionCache.get(sessionId) || null : null;
   if (sessionId) {
     vamsysSessionCache.delete(sessionId);
-    persistAuthStore();
+    persistAuthStoreNow(); // logout — immediate persist
   }
   recordAuthActivity({
     req,
@@ -13596,7 +15890,7 @@ app.post("/api/auth/vamsys/logout", (req, res) => {
     message: "vAMSYS logout",
     actor: createAuthActivityActor({ provider: "vamsys", user: session?.user || null }),
   });
-  res.setHeader("Set-Cookie", clearCookie(VAMSYS_SESSION_COOKIE));
+  res.setHeader("Set-Cookie", clearCookie(VAMSYS_SESSION_COOKIE, req));
   res.json({ ok: true });
 });
 
@@ -15185,6 +17479,47 @@ const sendTelegramAdminNotification = async ({ text, force = false }) => {
   };
 };
 
+const buildTelegramTicketAdminNotificationText = ({ eventKey = "ticketUpdated", ticket = {}, actorName = "", content = "" } = {}) => {
+  const title = eventKey === "ticketCreated"
+    ? "Новый тикет из Telegram"
+    : eventKey === "ticketReply"
+      ? "Ответ в тикете из Telegram"
+      : eventKey === "ticketClosed"
+        ? "Тикет закрыт из Telegram"
+        : "Тикет обновлён из Telegram";
+  const subject = normalizeAdminText(ticket?.subject || "") || "Без темы";
+  const category = normalizeAdminText(ticket?.categoryName || ticket?.categoryId || "") || "—";
+  const priority = normalizeTicketPriority(ticket?.priority, "normal");
+  const status = normalizeTicketStatus(ticket?.status, "open");
+  const route = `#${Number(ticket?.number || 0) || "?"} • ${subject}`;
+  const author = normalizeAdminText(actorName || ticket?.owner?.name || ticket?.owner?.username || "") || "Telegram user";
+  const summary = normalizeAdminMultilineText(content || "").slice(0, 400);
+
+  return [
+    title,
+    route,
+    `Автор: ${author}`,
+    `Категория: ${category}`,
+    `Приоритет: ${priority}`,
+    `Статус: ${status}`,
+    summary ? `Сообщение: ${summary}` : null,
+  ].filter(Boolean).join("\n");
+};
+
+const sendTelegramTicketAdminNotification = async ({ eventKey = "ticketUpdated", ticket = {}, actorName = "", content = "" } = {}) => {
+  const settings = getTelegramBotSettingsStore();
+  if (settings?.enabled === false) {
+    return { sent: false, reason: "disabled", delivered: 0, total: 0 };
+  }
+  if (settings?.sync?.tickets === false) {
+    return { sent: false, reason: "ticket_sync_disabled", delivered: 0, total: 0 };
+  }
+
+  return sendTelegramAdminNotification({
+    text: buildTelegramTicketAdminNotificationText({ eventKey, ticket, actorName, content }),
+  });
+};
+
 const publishNewsToDiscord = async ({ title, content, category, author }) => {
   return sendDiscordBotNotification({
     eventKey: "newsCreated",
@@ -15200,6 +17535,454 @@ const publishNewsToDiscord = async ({ title, content, category, author }) => {
           : 0xe31e24,
     force: true,
   });
+};
+
+const isAbsoluteHttpUrl = (value = "") => /^https?:\/\//i.test(String(value || "").trim());
+
+const resolveVkPublishUrl = (value = "") => {
+  const normalized = normalizeAdminText(value || "");
+  if (!normalized) {
+    return "";
+  }
+  if (isAbsoluteHttpUrl(normalized)) {
+    return normalized;
+  }
+  if (!normalized.startsWith("/")) {
+    return "";
+  }
+
+  const base = String(WEBSITE_BASE_URL || "").trim().replace(/\/$/, "");
+  if (!base || !isAbsoluteHttpUrl(base)) {
+    return "";
+  }
+  return `${base}${normalized}`;
+};
+
+const renderVkTemplateString = (value = "", variables = {}) =>
+  String(value || "").replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key) => {
+    const resolved = variables?.[key];
+    return resolved == null ? "" : String(resolved);
+  });
+
+const buildCommunityNewsPostText = ({ title, content, category, author, linkUrl }) => {
+  const settings = getVkBotSettingsStore();
+  const normalizedTitle = normalizeAdminText(title || "") || "Untitled";
+  const normalizedCategory = normalizeAdminText(category || "News").toUpperCase() || "NEWS";
+  const normalizedCategoryKey = normalizeAdminText(category || "news").toLowerCase() || "news";
+  const normalizedAuthor = normalizeAdminText(author || "Admin") || "Admin";
+  const normalizedContent = normalizeAdminMultilineText(content || "");
+  const normalizedLink = resolveVkPublishUrl(linkUrl || "");
+  const templates = settings?.announcementTemplates && typeof settings.announcementTemplates === "object"
+    ? settings.announcementTemplates
+    : {};
+  const selectedTemplate = templates[normalizedCategoryKey] || templates.default || null;
+
+  if (selectedTemplate?.enabled !== false && normalizeAdminMultilineText(selectedTemplate?.text || "")) {
+    return renderVkTemplateString(selectedTemplate.text, {
+      title: normalizedTitle,
+      content: normalizedContent,
+      category: normalizedCategory,
+      author: normalizedAuthor,
+      link: normalizedLink,
+      linkLine: normalizedLink ? `Ссылка: ${normalizedLink}` : "",
+    })
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .slice(0, 4000);
+  }
+
+  return [
+    `[${normalizedCategory}] ${normalizedTitle}`,
+    normalizedContent,
+    normalizedLink ? `Ссылка: ${normalizedLink}` : null,
+    `Автор: ${normalizedAuthor}`,
+  ].filter(Boolean).join("\n\n").slice(0, 4000);
+};
+
+const uploadVkWallPhoto = async ({ groupId, accessToken, imageUrl }) => {
+  const normalizedImageUrl = resolveVkPublishUrl(imageUrl || "");
+  if (!normalizedImageUrl) {
+    logVk("warn", "media_upload_skipped", {
+      reason: "invalid_image_url",
+    });
+    return null;
+  }
+
+  logVk("info", "media_upload_start", {
+    groupId: Math.abs(Number(groupId || 0) || 0),
+    imageUrl: truncateForLog(normalizedImageUrl, 300),
+  });
+
+  const uploadServer = await callVkApi("photos.getWallUploadServer", {
+    group_id: Math.abs(Number(groupId || 0) || 0),
+  }, accessToken);
+
+  const uploadUrl = normalizeAdminText(uploadServer?.upload_url || "");
+  if (!uploadUrl) {
+    logVk("error", "media_upload_server_missing", {
+      groupId: Math.abs(Number(groupId || 0) || 0),
+    });
+    return null;
+  }
+
+  const imageResponse = await fetch(normalizedImageUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Failed to fetch banner image: ${imageResponse.status}`);
+  }
+
+  const contentType = normalizeAdminText(imageResponse.headers.get("content-type") || "image/jpeg") || "image/jpeg";
+  const extension = /png/i.test(contentType)
+    ? "png"
+    : /webp/i.test(contentType)
+      ? "webp"
+      : "jpg";
+  const bytes = await imageResponse.arrayBuffer();
+  const formData = new FormData();
+  formData.append("photo", new Blob([bytes], { type: contentType }), `banner.${extension}`);
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "POST",
+    body: formData,
+  });
+  const uploadPayload = await uploadResponse.json().catch(() => null);
+  if (!uploadResponse.ok || !uploadPayload?.photo || !uploadPayload?.server || !uploadPayload?.hash) {
+    logVk("error", "media_upload_failed", {
+      status: uploadResponse.status,
+      hasPhoto: Boolean(uploadPayload?.photo),
+      hasServer: Boolean(uploadPayload?.server),
+      hasHash: Boolean(uploadPayload?.hash),
+    });
+    throw new Error("Failed to upload banner image to VK");
+  }
+
+  const savedPayload = await callVkApi("photos.saveWallPhoto", {
+    group_id: Math.abs(Number(groupId || 0) || 0),
+    photo: uploadPayload.photo,
+    server: uploadPayload.server,
+    hash: uploadPayload.hash,
+  }, accessToken);
+  const savedPhoto = Array.isArray(savedPayload) ? savedPayload[0] : null;
+  const ownerId = Number(savedPhoto?.owner_id || 0) || 0;
+  const photoId = Number(savedPhoto?.id || 0) || 0;
+  if (!ownerId || !photoId) {
+    logVk("error", "media_save_failed", {
+      ownerId,
+      photoId,
+    });
+    return null;
+  }
+
+  logVk("info", "media_upload_success", {
+    attachment: `photo${ownerId}_${photoId}`,
+  });
+  return `photo${ownerId}_${photoId}`;
+};
+
+const callVkApi = async (method, params = {}, accessToken = "") => {
+  const normalizedToken = normalizeAdminText(accessToken || "");
+  if (!normalizedToken) {
+    logVk("error", "api_call_token_missing", {
+      method,
+    });
+    throw new Error("VK access token is not configured");
+  }
+
+  const startedAt = Date.now();
+
+  const body = new URLSearchParams();
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value == null || value === "") {
+      return;
+    }
+    body.set(key, String(value));
+  });
+  body.set("access_token", normalizedToken);
+  body.set("v", "5.199");
+
+  const response = await fetch(`https://api.vk.com/method/${method}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.error) {
+    const message = payload?.error?.error_msg || `VK API responded with ${response.status}`;
+    logVk("error", "api_call_failed", {
+      method,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+      message,
+      errorCode: payload?.error?.error_code || null,
+    });
+    throw new Error(String(message));
+  }
+
+  logVk("debug", "api_call_success", {
+    method,
+    status: response.status,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return payload?.response || null;
+};
+
+const sendVkMirrorToTelegram = async ({ text, force = false }) => {
+  const settings = getVkBotSettingsStore();
+  if (!force) {
+    if (settings?.enabled === false) {
+      logVk("info", "telegram_mirror_skipped", { reason: "disabled" });
+      return { sent: false, reason: "disabled" };
+    }
+    if (settings?.sync?.telegramMirror === false) {
+      logVk("info", "telegram_mirror_skipped", { reason: "telegram_mirror_disabled" });
+      return { sent: false, reason: "telegram_mirror_disabled" };
+    }
+  }
+
+  const chatId = normalizeAdminText(settings?.telegramMirrorChatId || "");
+  if (!chatId) {
+    logVk("warn", "telegram_mirror_skipped", { reason: "telegram_chat_not_configured" });
+    return { sent: false, reason: "telegram_chat_not_configured" };
+  }
+
+  const result = await sendTelegramPayload({ chatId, text });
+  logVk("info", "telegram_mirror_sent", {
+    chatIdMask: maskSensitiveValue(chatId),
+  });
+  return { sent: true, result };
+};
+
+const publishNewsToVk = async ({ title, content, category, author, linkUrl = "", bannerUrl = "", force = false }) => {
+  const settings = getVkBotSettingsStore();
+  logVk("info", "publish_start", {
+    category: normalizeAdminText(category || "").toUpperCase() || "NEWS",
+    force: Boolean(force),
+    hasBanner: Boolean(normalizeAdminText(bannerUrl || "")),
+    hasLink: Boolean(normalizeAdminText(linkUrl || "")),
+  });
+  if (!force) {
+    if (settings?.enabled === false) {
+      logVk("info", "publish_skipped", { reason: "disabled" });
+      return { sent: false, reason: "disabled" };
+    }
+    if (settings?.sync?.news === false) {
+      logVk("info", "publish_skipped", { reason: "news_sync_disabled" });
+      return { sent: false, reason: "news_sync_disabled" };
+    }
+  }
+
+  const groupId = Number(String(settings?.groupId || "").replace(/[^\d-]/g, "")) || 0;
+  if (groupId <= 0) {
+    logVk("warn", "publish_skipped", { reason: "group_not_configured" });
+    return { sent: false, reason: "group_not_configured" };
+  }
+
+  const resolvedLinkUrl = resolveVkPublishUrl(linkUrl || "");
+  const resolvedBannerUrl = resolveVkPublishUrl(bannerUrl || "");
+  const message = buildCommunityNewsPostText({ title, content, category, author, linkUrl: resolvedLinkUrl });
+  const attachments = [];
+  if (resolvedBannerUrl) {
+    const wallPhotoAttachment = await uploadVkWallPhoto({
+      groupId,
+      accessToken: settings?.accessToken,
+      imageUrl: resolvedBannerUrl,
+    }).catch(() => null);
+    if (!wallPhotoAttachment) {
+      logVk("error", "publish_skipped", {
+        reason: "banner_media_upload_failed",
+      });
+      return {
+        sent: false,
+        reason: "banner_media_upload_failed",
+      };
+    }
+    attachments.push(wallPhotoAttachment);
+  } else if (normalizeAdminText(bannerUrl || "")) {
+    logVk("error", "publish_skipped", {
+      reason: "banner_media_url_invalid",
+    });
+    return {
+      sent: false,
+      reason: "banner_media_url_invalid",
+    };
+  }
+  if (resolvedLinkUrl) {
+    attachments.push(resolvedLinkUrl);
+  }
+
+  const response = await callVkApi("wall.post", {
+    owner_id: -Math.abs(groupId),
+    from_group: 1,
+    message,
+    attachments: attachments.length > 0 ? attachments.join(",") : undefined,
+  }, settings?.accessToken);
+
+  const telegramMirror = await sendVkMirrorToTelegram({
+    text: message,
+    force,
+  }).catch((error) => ({ sent: false, reason: String(error?.message || error || "telegram_mirror_failed") }));
+
+  logVk("info", "publish_success", {
+    postId: Number(response?.post_id || 0) || null,
+    ownerId: Number(response?.owner_id || 0) || null,
+    attachmentsCount: attachments.length,
+    telegramMirrorSent: Boolean(telegramMirror?.sent),
+    telegramMirrorReason: telegramMirror?.sent ? "" : normalizeAdminText(telegramMirror?.reason || ""),
+  });
+
+  return {
+    sent: true,
+    postId: Number(response?.post_id || 0) || null,
+    ownerId: Number(response?.owner_id || 0) || null,
+    telegramMirror,
+  };
+};
+
+const resolveGalleryAssetPublicUrl = (media = {}) => {
+  const direct = resolveVkPublishUrl(media?.assetUrl || "");
+  if (direct) {
+    return direct;
+  }
+  const fileName = normalizeAdminText(media?.fileName || "");
+  if (!fileName) {
+    return "";
+  }
+  return resolveVkPublishUrl(`/api/public/social-gallery/assets/${fileName}`);
+};
+
+const buildGallerySocialPost = (media = {}, moderatorName = "") => {
+  const owner = normalizeAdminText(media?.ownerName || media?.ownerUsername || "Pilot") || "Pilot";
+  const title = normalizeAdminText(media?.title || "Screenshot") || "Screenshot";
+  const description = normalizeAdminMultilineText(media?.description || "");
+  const callsign = normalizeAdminText(media?.ownerCallsign || media?.ownerUsername || "");
+  const likes = Array.isArray(media?.likes) ? media.likes.length : 0;
+  const moderatedBy = normalizeAdminText(moderatorName || "") || "Moderator";
+  const content = [
+    `Новый скриншот из галереи пилотов Nordwind Virtual.`,
+    `Пилот: ${owner}${callsign ? ` (${callsign.toUpperCase()})` : ""}`,
+    description ? `Описание: ${description}` : null,
+    `Лайки: ${likes}`,
+    `Модератор: ${moderatedBy}`,
+  ].filter(Boolean).join("\n");
+
+  return {
+    title,
+    content,
+    category: "Gallery",
+    author: owner,
+    linkUrl: media?.assetUrl || "",
+    bannerUrl: media?.assetUrl || "",
+  };
+};
+
+const publishGalleryMediaToDiscord = async ({ media = {}, moderatorName = "" } = {}) => {
+  const settings = getDiscordBotSettingsStore();
+  if (!settings?.enabled) {
+    return { sent: false, reason: "disabled" };
+  }
+
+  const channelId = String(settings?.channels?.news || DISCORD_NEWS_CHANNEL_ID || "").trim();
+  const webhookUrl = String(settings?.webhookUrl || "").trim();
+  if (!channelId && !webhookUrl) {
+    return { sent: false, reason: "discord_not_configured" };
+  }
+
+  const post = buildGallerySocialPost(media, moderatorName);
+  const assetUrl = resolveGalleryAssetPublicUrl(media);
+  const payload = {
+    embeds: [
+      {
+        title: `Gallery: ${post.title}`.slice(0, 250),
+        description: post.content.slice(0, 4000),
+        color: 0xe31e24,
+        ...(assetUrl ? { image: { url: assetUrl } } : {}),
+        fields: [
+          { name: "Category", value: "GALLERY", inline: true },
+          { name: "Author", value: post.author, inline: true },
+          { name: "Moderated by", value: normalizeAdminText(moderatorName || "Moderator") || "Moderator", inline: true },
+        ],
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+
+  return sendDiscordPayload({
+    channelId,
+    webhookUrl,
+    payload,
+  });
+};
+
+const publishGalleryMediaToVk = async ({ media = {}, moderatorName = "" } = {}) => {
+  const post = buildGallerySocialPost(media, moderatorName);
+  return publishNewsToVk({
+    title: post.title,
+    content: post.content,
+    category: post.category,
+    author: post.author,
+    linkUrl: post.linkUrl,
+    bannerUrl: post.bannerUrl,
+    force: false,
+  });
+};
+
+const resolveManagedActivityVkLink = (item = {}) => {
+  const explicitLink = resolveVkPublishUrl(item?.linkUrl || "");
+  if (explicitLink) {
+    return explicitLink;
+  }
+  return resolveVkPublishUrl("/activities");
+};
+
+const getManagedActivityVkPublishPlan = (item = {}, payload = {}) => {
+  const wantsVk = normalizeAdminBoolean(payload?.sendToVK ?? payload?.publishToVK, true);
+  if (!wantsVk) {
+    return { attempted: false, reason: "not_requested", linkUrl: "" };
+  }
+
+  const category = normalizePublicActivityCategory(item?.category || item?.type);
+  if (!["News", "Event"].includes(category)) {
+    return { attempted: false, reason: "unsupported_category", linkUrl: "" };
+  }
+
+  const status = normalizePublicActivityStatus(item?.status || "Published");
+  const isPublished = normalizeAdminBoolean(item?.published, status === "Published");
+  if (!isPublished || status !== "Published") {
+    return { attempted: false, reason: "activity_not_published", linkUrl: "" };
+  }
+
+  return {
+    attempted: true,
+    reason: "",
+    linkUrl: resolveManagedActivityVkLink(item),
+  };
+};
+
+const buildManagedActivityVkStatePatch = (vkResult = {}, requested = false) => {
+  if (!requested) {
+    return null;
+  }
+  if (vkResult?.sent) {
+    return {
+      vkPublishStatus: "published",
+      vkPublishReason: "",
+      vkPublishedAt: new Date().toISOString(),
+    };
+  }
+  if (vkResult?.attempted) {
+    return {
+      vkPublishStatus: "failed",
+      vkPublishReason: normalizeAdminText(vkResult?.reason || "vk_publish_failed") || "vk_publish_failed",
+      vkPublishedAt: "",
+    };
+  }
+  return {
+    vkPublishStatus: "skipped",
+    vkPublishReason: normalizeAdminText(vkResult?.reason || "vk_publish_skipped") || "vk_publish_skipped",
+    vkPublishedAt: "",
+  };
 };
 
 const requireCredentials = (res) => {
@@ -16205,6 +18988,20 @@ const loadPilotProfileById = async (pilotId, { seedPilot = null } = {}) => {
       hours,
       flights,
       joinedAt: String(node?.created_at || node?.joined_at || '').trim(),
+      locationId: Number(node?.location_id || node?.locationId || node?.location?.id || seedPilot?.locationId || 0) || null,
+      locationCode: String(node?.location?.icao || node?.location?.iata || '').trim().toUpperCase() || null,
+      location: (() => {
+        const locationName = String(node?.location?.name || node?.location_name || node?.locationName || '').trim();
+        const locationCode = String(node?.location?.icao || node?.location?.iata || '').trim().toUpperCase();
+        const directLocation = String(typeof node?.location === 'string' ? node.location : '').trim();
+        if (locationName) {
+          return locationCode ? `${locationName} (${locationCode})` : locationName;
+        }
+        if (directLocation) {
+          return directLocation;
+        }
+        return locationCode || null;
+      })(),
     };
   } catch (e) {
     logVamsys('error', 'pilot_profile_fetch_error', { pilotId: key, url, error: String(e) });
@@ -19390,6 +22187,10 @@ const resolveCurrentPilotContext = async (req, { includeClaimsCount = false } = 
   let pilot = sessionUser && typeof sessionUser === "object" ? { ...sessionUser } : {};
   if (pilotId > 0) {
     pilot.id = String(pilotId);
+    // Preserve the session user_id as an alias key so cache lookups with the
+    // original session id still find entries written after roster enrichment
+    // (which may change pilot.id to the roster record id, e.g. 415451 vs 20393).
+    pilot.userId = String(pilotId);
   }
   if (!pilot.username && identity?.username) {
     pilot.username = identity.username;
@@ -19402,6 +22203,11 @@ const resolveCurrentPilotContext = async (req, { includeClaimsCount = false } = 
     const byIdProfile = await loadPilotProfileById(pilotId, { seedPilot: sessionUser }).catch(() => null);
     if (byIdProfile) {
       pilot = applyResolvedPilotToUser(pilot, byIdProfile);
+      // After enrichment pilot.id may change to the roster record id; keep
+      // the original session userId so all cache keys stay consistent.
+      if (!pilot.userId) {
+        pilot.userId = String(pilotId);
+      }
     }
   } else {
     const rosterPilot = await findPilotInRoster({
@@ -20520,13 +23326,122 @@ app.get("/api/admin/gallery/media", requireAdmin, (req, res) => {
       ownerName: normalizeAdminText(item?.ownerName || "Pilot") || "Pilot",
       ownerCallsign: normalizeAdminText(item?.ownerCallsign || item?.ownerUsername || "") || null,
       title: normalizeAdminText(item?.title || "") || null,
+      description: normalizeAdminText(item?.description || "") || null,
       assetUrl: normalizeAdminText(item?.assetUrl || "") || "",
       likeCount: Array.isArray(item?.likes) ? item.likes.length : 0,
       isFeatured: Boolean(item?.isFeatured),
       reportCount: reportsByMedia[String(item?.id || "")] || 0,
       createdAt: item?.createdAt || null,
+      socialPublishStatus: normalizeAdminText(item?.socialPublishStatus || "") || "pending",
+      socialPublishedToDiscordAt: normalizeAdminText(item?.socialPublishedToDiscordAt || "") || null,
+      socialPublishedToVkAt: normalizeAdminText(item?.socialPublishedToVkAt || "") || null,
+      socialPublishSkippedAt: normalizeAdminText(item?.socialPublishSkippedAt || "") || null,
+      socialPublishDecisionBy: normalizeAdminText(item?.socialPublishDecisionBy || "") || null,
     }));
   res.json({ items, total: items.length });
+});
+
+app.post("/api/admin/gallery/media/:id/publish", requireAdmin, express.json({ limit: "256kb" }), async (req, res) => {
+  const mediaId = normalizeAdminText(req.params.id || "");
+  if (!mediaId) {
+    res.status(400).json({ error: "Media ID is required" });
+    return;
+  }
+
+  const publishToDiscord = normalizeAdminBoolean(req.body?.publishToDiscord, false);
+  const publishToVk = normalizeAdminBoolean(req.body?.publishToVk, false);
+  const skip = normalizeAdminBoolean(req.body?.skip, false);
+  if (!skip && !publishToDiscord && !publishToVk) {
+    res.status(400).json({ error: "Select at least one destination or skip" });
+    return;
+  }
+
+  const store = readSocialGalleryStore();
+  const media = (Array.isArray(store?.media) ? store.media : []).find((item) => String(item?.id || "") === mediaId);
+  if (!media) {
+    res.status(404).json({ error: "Screenshot not found" });
+    return;
+  }
+  if (String(media?.visibility || "public") === "private") {
+    res.status(403).json({ error: "Private screenshots cannot be published to social channels" });
+    return;
+  }
+
+  const actorName = normalizeAdminText(req.adminUser?.name || req.adminUser?.username || "Moderator") || "Moderator";
+  const nowIso = new Date().toISOString();
+
+  const results = {
+    discord: { sent: false, reason: "not_requested" },
+    vk: { sent: false, reason: "not_requested" },
+  };
+
+  if (!skip && publishToDiscord) {
+    try {
+      const discordResult = await publishGalleryMediaToDiscord({ media, moderatorName: actorName });
+      results.discord = discordResult?.sent
+        ? { sent: true, via: discordResult?.via || "unknown" }
+        : { sent: false, reason: normalizeAdminText(discordResult?.reason || "discord_failed") || "discord_failed" };
+    } catch (error) {
+      results.discord = { sent: false, reason: String(error?.message || error || "discord_failed") };
+    }
+  }
+
+  if (!skip && publishToVk) {
+    try {
+      const vkResult = await publishGalleryMediaToVk({ media, moderatorName: actorName });
+      results.vk = vkResult?.sent
+        ? { sent: true, postId: vkResult?.postId || null }
+        : { sent: false, reason: normalizeAdminText(vkResult?.reason || "vk_failed") || "vk_failed" };
+    } catch (error) {
+      results.vk = { sent: false, reason: String(error?.message || error || "vk_failed") };
+    }
+  }
+
+  let updatedMedia = null;
+  withSocialGalleryUpdate((current) => {
+    current.media = (Array.isArray(current.media) ? current.media : []).map((item) => {
+      if (String(item?.id || "") !== mediaId) {
+        return item;
+      }
+
+      const nextItem = {
+        ...item,
+        socialPublishStatus: skip
+          ? "skipped"
+          : (publishToDiscord && results.discord.sent) || (publishToVk && results.vk.sent)
+            ? "published"
+            : "failed",
+        socialPublishDecisionBy: actorName,
+        socialPublishDecisionAt: nowIso,
+        socialPublishSkippedAt: skip ? nowIso : item?.socialPublishSkippedAt || null,
+        socialPublishedToDiscordAt: results.discord.sent ? nowIso : item?.socialPublishedToDiscordAt || null,
+        socialPublishedToVkAt: results.vk.sent ? nowIso : item?.socialPublishedToVkAt || null,
+      };
+
+      updatedMedia = nextItem;
+      return nextItem;
+    });
+
+    appendSocialGalleryActivity(current, {
+      type: skip ? "media_publish_skipped" : "media_published_social",
+      actorPilotId: Number(req.adminUser?.pilotId || 0) || null,
+      actorUsername: normalizeAdminText(req.adminUser?.username || "") || "admin",
+      actorName,
+      mediaId,
+      visibility: "public",
+      title: skip ? "Screenshot skipped for social publication" : "Screenshot published to social channels",
+      summary: skip
+        ? `${actorName} skipped social publication for ${normalizeAdminText(media?.title || "screenshot") || "screenshot"}`
+        : `${actorName} published ${normalizeAdminText(media?.title || "screenshot") || "screenshot"}${publishToDiscord ? " to Discord" : ""}${publishToVk ? `${publishToDiscord ? " and" : " to"} VK` : ""}`,
+    });
+    return current;
+  });
+
+  res.json({
+    ok: true,
+    media: updatedMedia,
+    results,
+  });
 });
 
 // ── Admin: delete gallery media ───────────────────────────────────────────────
@@ -20798,6 +23713,381 @@ app.post("/api/pilot/balance/reset", express.json({ limit: "256kb" }), async (re
   } catch (error) {
     respondWithPilotApiError(res, error, "Failed to reset balance");
   }
+});
+
+// ── Pilot: challenges foundation (daily/weekly/premium) ──────────────────────
+app.get("/api/pilot/challenges", async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot id is required", code: "pilot_id_required" });
+    return;
+  }
+
+  const store = readPilotChallengesStore();
+  try {
+    await syncPilotChallengeTourAndChallengeActivities({
+      pilotId,
+      sessionUser: session.user || {},
+      store,
+    });
+  } catch {
+    // sync issues must not block challenge overview
+  }
+  const overview = buildPilotChallengesOverview({ pilotId, sessionUser: session.user || {}, store });
+  if (!overview) {
+    res.status(500).json({ ok: false, error: "Failed to build challenges overview" });
+    return;
+  }
+
+  writePilotChallengesStore(store);
+  res.json({ ok: true, ...overview });
+});
+
+app.get("/api/pilot/challenges/leaderboard", async (req, res) => {
+  const periodType = String(req.query.period || "weekly").trim().toLowerCase() === "daily" ? "daily" : "weekly";
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20) || 20));
+  const leaderboard = buildChallengeLeaderboard({ periodType, limit, store: readPilotChallengesStore() });
+  res.json({ ok: true, leaderboard });
+});
+
+app.post("/api/pilot/challenges/events", express.json({ limit: "256kb" }), async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot id is required", code: "pilot_id_required" });
+    return;
+  }
+
+  const type = String(req.body?.type || "").trim().toLowerCase();
+  if (!CHALLENGE_EVENT_TYPES.has(type)) {
+    res.status(400).json({ ok: false, error: "Unsupported challenge event type", code: "event_type_invalid" });
+    return;
+  }
+
+  const value = Number.isFinite(Number(req.body?.value)) ? Number(req.body.value) : 1;
+  const store = readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: session.user || {} });
+  if (!entry) {
+    res.status(500).json({ ok: false, error: "Failed to access pilot challenges" });
+    return;
+  }
+
+  const periods = resolveChallengePeriodsUtc(new Date());
+  const beforeSections = buildPilotChallengeSections({ pilotId, periods, entry });
+  const beforeProgressMap = buildChallengeProgressMap([
+    ...(beforeSections.daily || []),
+    ...(beforeSections.weekly || []),
+    ...(beforeSections.premium || []),
+  ]);
+
+  const event = trackPilotChallengeEvent(entry, {
+    type,
+    value,
+    at: new Date().toISOString(),
+    meta: req.body?.meta && typeof req.body.meta === "object" ? req.body.meta : {},
+  });
+
+  if (!event) {
+    res.status(400).json({ ok: false, error: "Challenge event rejected", code: "event_rejected" });
+    return;
+  }
+
+  const afterSections = buildPilotChallengeSections({ pilotId, periods, entry });
+  appendChallengeProgressNotifications({
+    entry,
+    beforeMap: beforeProgressMap,
+    afterInstances: [
+      ...(afterSections.daily || []),
+      ...(afterSections.weekly || []),
+      ...(afterSections.premium || []),
+    ],
+  });
+
+  const overview = buildPilotChallengesOverview({ pilotId, sessionUser: session.user || {}, store });
+  writePilotChallengesStore(store);
+  res.json({ ok: true, event, overview });
+});
+
+app.post("/api/pilot/challenges/:instanceId/unlock", express.json({ limit: "256kb" }), async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot id is required", code: "pilot_id_required" });
+    return;
+  }
+
+  const parsed = parseChallengeInstanceId(req.params.instanceId || "");
+  if (!parsed || parsed.scope !== "premium") {
+    res.status(400).json({ ok: false, error: "Premium challenge instance id is required", code: "challenge_instance_invalid" });
+    return;
+  }
+
+  const periods = resolveChallengePeriodsUtc(new Date());
+  if (parsed.periodKey !== periods.weekly.key) {
+    res.status(400).json({ ok: false, error: "Only active weekly premium challenges can be unlocked", code: "challenge_period_inactive" });
+    return;
+  }
+
+  const template = PREMIUM_CHALLENGE_TEMPLATES.find((item) => String(item?.id || "") === parsed.templateId);
+  if (!template) {
+    res.status(404).json({ ok: false, error: "Challenge template not found", code: "challenge_template_not_found" });
+    return;
+  }
+
+  const store = readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: session.user || {} });
+  if (!entry) {
+    res.status(500).json({ ok: false, error: "Failed to access pilot challenges" });
+    return;
+  }
+
+  const existingUnlock = entry?.premiumUnlocks?.[periods.weekly.key]?.[template.id] || null;
+  if (existingUnlock) {
+    res.json({ ok: true, unlocked: true, alreadyUnlocked: true, unlock: existingUnlock });
+    return;
+  }
+
+  try {
+    const balanceSnapshot = await loadPilotBalanceSnapshot({
+      pilotId,
+      sessionUser: session.user || {},
+      applyStoredAdjustment: true,
+    });
+    const costCoins = Math.max(0, Number(template.costCoins || 0) || 0);
+    if (balanceSnapshot.balance < costCoins) {
+      res.status(400).json({
+        ok: false,
+        error: "Not enough coins to unlock this challenge",
+        code: "insufficient_coins",
+        required: costCoins,
+        available: balanceSnapshot.balance,
+      });
+      return;
+    }
+
+    const targetBalance = roundPilotCoinValue(balanceSnapshot.balance - costCoins);
+    const adjustment = setPilotBalanceAdjustment(pilotId, {
+      amount: roundPilotCoinValue(targetBalance - balanceSnapshot.grossBalance),
+      reason: `Unlock premium challenge ${template.id}`,
+      updatedAt: new Date().toISOString(),
+      updatedBy: String(session?.user?.username || session?.user?.name || `pilot-${pilotId}`),
+    });
+
+    if (!entry.premiumUnlocks || typeof entry.premiumUnlocks !== "object") {
+      entry.premiumUnlocks = {};
+    }
+    if (!entry.premiumUnlocks[periods.weekly.key] || typeof entry.premiumUnlocks[periods.weekly.key] !== "object") {
+      entry.premiumUnlocks[periods.weekly.key] = {};
+    }
+
+    entry.premiumUnlocks[periods.weekly.key][template.id] = {
+      unlockedAt: new Date().toISOString(),
+      costCoins,
+      adjustmentAmount: adjustment?.amount || 0,
+    };
+
+    pushChallengeNotification(entry, {
+      code: `premium_unlock:${parsed.instanceId}`,
+      type: "premium_unlocked",
+      title: {
+        ru: "Премиум-задание открыто",
+        en: "Premium challenge unlocked",
+      },
+      message: {
+        ru: `Открыто задание: ${String(template?.title?.ru || template?.title?.en || template.id)}`,
+        en: `Unlocked challenge: ${String(template?.title?.en || template?.title?.ru || template.id)}`,
+      },
+      meta: {
+        challengeId: parsed.instanceId,
+        costCoins,
+      },
+    });
+
+    const overview = buildPilotChallengesOverview({ pilotId, sessionUser: session.user || {}, store });
+    writePilotChallengesStore(store);
+
+    const nextBalance = await loadPilotBalanceSnapshot({
+      pilotId,
+      sessionUser: session.user || {},
+      applyStoredAdjustment: true,
+    });
+
+    res.json({
+      ok: true,
+      unlocked: true,
+      costCoins,
+      balance: nextBalance.balance,
+      overview,
+    });
+  } catch (error) {
+    respondWithPilotApiError(res, error, "Failed to unlock premium challenge");
+  }
+});
+
+app.post("/api/pilot/challenges/:instanceId/claim", express.json({ limit: "256kb" }), async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot id is required", code: "pilot_id_required" });
+    return;
+  }
+
+  const parsed = parseChallengeInstanceId(req.params.instanceId || "");
+  if (!parsed) {
+    res.status(400).json({ ok: false, error: "Invalid challenge instance id", code: "challenge_instance_invalid" });
+    return;
+  }
+
+  const periods = resolveChallengePeriodsUtc(new Date());
+  const expectedKey = parsed.scope === "daily" ? periods.daily.key : periods.weekly.key;
+  if (parsed.periodKey !== expectedKey) {
+    res.status(400).json({ ok: false, error: "Challenge period is not active", code: "challenge_period_inactive" });
+    return;
+  }
+
+  const store = readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: session.user || {} });
+  if (!entry) {
+    res.status(500).json({ ok: false, error: "Failed to access pilot challenges" });
+    return;
+  }
+
+  const overview = buildPilotChallengesOverview({ pilotId, sessionUser: session.user || {}, store });
+  const allChallenges = [...(overview?.daily || []), ...(overview?.weekly || []), ...(overview?.premium || [])];
+  const challenge = allChallenges.find((item) => String(item?.id || "") === parsed.instanceId);
+  if (!challenge) {
+    res.status(404).json({ ok: false, error: "Challenge instance not found", code: "challenge_not_found" });
+    return;
+  }
+  if (challenge.claimed) {
+    res.status(400).json({ ok: false, error: "Challenge reward already claimed", code: "challenge_already_claimed" });
+    return;
+  }
+  if (!challenge.completed) {
+    res.status(400).json({ ok: false, error: "Challenge is not completed yet", code: "challenge_not_completed" });
+    return;
+  }
+  if (challenge.premium && !challenge.unlocked) {
+    res.status(400).json({ ok: false, error: "Premium challenge must be unlocked first", code: "premium_not_unlocked" });
+    return;
+  }
+
+  if (!entry.claimedRewards || typeof entry.claimedRewards !== "object") {
+    entry.claimedRewards = {};
+  }
+  entry.claimedRewards[challenge.id] = {
+    claimedAt: new Date().toISOString(),
+    pointsAwarded: Math.max(0, Number(challenge?.reward?.points || 0) || 0),
+  };
+  entry.points = Math.max(0, Number(entry.points || 0) || 0) + Math.max(0, Number(challenge?.reward?.points || 0) || 0);
+
+  pushChallengeNotification(entry, {
+    code: `challenge_claimed:${challenge.id}`,
+    type: "challenge_reward_claimed",
+    title: {
+      ru: "Награда получена",
+      en: "Reward claimed",
+    },
+    message: {
+      ru: `+${Math.max(0, Number(challenge?.reward?.points || 0) || 0)} points за ${String(challenge?.title?.ru || challenge?.title?.en || "задание")}`,
+      en: `+${Math.max(0, Number(challenge?.reward?.points || 0) || 0)} points for ${String(challenge?.title?.en || challenge?.title?.ru || "challenge")}`,
+    },
+    meta: {
+      challengeId: challenge.id,
+      pointsAwarded: Math.max(0, Number(challenge?.reward?.points || 0) || 0),
+    },
+  });
+
+  const nextOverview = buildPilotChallengesOverview({ pilotId, sessionUser: session.user || {}, store });
+  writePilotChallengesStore(store);
+
+  res.json({
+    ok: true,
+    reward: {
+      points: Math.max(0, Number(challenge?.reward?.points || 0) || 0),
+    },
+    totalPoints: Math.max(0, Number(entry.points || 0) || 0),
+    overview: nextOverview,
+  });
+});
+
+app.get("/api/pilot/challenges/notifications", async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot id is required", code: "pilot_id_required" });
+    return;
+  }
+
+  const language = normalizeChallengeLanguage(req.query.lang || req.query.language || "en");
+  const store = readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: session.user || {} });
+  if (!entry) {
+    res.status(500).json({ ok: false, error: "Failed to access pilot challenges" });
+    return;
+  }
+
+  writePilotChallengesStore(store);
+  const notifications = (entry.notifications || [])
+    .slice()
+    .sort((left, right) => String(right?.createdAt || "").localeCompare(String(left?.createdAt || "")))
+    .map((item) => ({
+      id: item.id,
+      type: item.type,
+      code: item.code,
+      title: language === "ru" ? item?.title?.ru : item?.title?.en,
+      message: language === "ru" ? item?.message?.ru : item?.message?.en,
+      createdAt: item.createdAt,
+      readAt: item.readAt,
+      meta: item.meta,
+    }));
+
+  res.json({ ok: true, language, notifications });
+});
+
+app.post("/api/pilot/challenges/notifications/:id/read", express.json({ limit: "64kb" }), async (req, res) => {
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
+
+  const pilotId = Number(session?.user?.id || 0) || 0;
+  if (pilotId <= 0) {
+    res.status(400).json({ ok: false, error: "Pilot id is required", code: "pilot_id_required" });
+    return;
+  }
+
+  const notificationId = String(req.params.id || "").trim();
+  if (!notificationId) {
+    res.status(400).json({ ok: false, error: "Notification id is required", code: "notification_id_required" });
+    return;
+  }
+
+  const store = readPilotChallengesStore();
+  const entry = ensurePilotChallengeUser({ store, pilotId, sessionUser: session.user || {} });
+  if (!entry) {
+    res.status(500).json({ ok: false, error: "Failed to access pilot challenges" });
+    return;
+  }
+
+  const notification = (entry.notifications || []).find((item) => String(item?.id || "") === notificationId);
+  if (!notification) {
+    res.status(404).json({ ok: false, error: "Notification not found", code: "notification_not_found" });
+    return;
+  }
+
+  notification.readAt = new Date().toISOString();
+  writePilotChallengesStore(store);
+  res.json({ ok: true, id: notification.id, readAt: notification.readAt });
 });
 
 // ── Pilot: passport (visited airports/countries) ──────────────────────────────
@@ -21088,8 +24378,11 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
 
   try {
     const session = getVamsysSessionFromRequest(req) || getDiscordSessionFromRequest(req);
-    const pilot = session?.user || {};
     const sessionUser = getVamsysSessionFromRequest(req)?.user || {};
+    // Use the fully enriched pilot context for NOTAM read checks so that
+    // the cache key includes both the session user_id and the roster id.
+    const pilotContext = await resolveCurrentPilotContext(req).catch(() => null);
+    const pilot = pilotContext?.pilot || session?.user || {};
 
     let pilotApiDashboard = null;
     if (isPilotApiConfigured()) {
@@ -21695,6 +24988,50 @@ app.get("/api/weather/metar/:icao", async (req, res) => {
   }
 });
 
+app.get("/api/weather/taf/:icao", async (req, res) => {
+  if (!requireCredentials(res)) {
+    return;
+  }
+
+  try {
+    const icao = String(req.params.icao || "").trim().toUpperCase();
+    if (!/^[A-Z]{4}$/.test(icao)) {
+      res.status(400).json({ error: "Invalid ICAO" });
+      return;
+    }
+
+    const awcUrl = `https://aviationweather.gov/api/data/taf?ids=${icao}&format=json`;
+    let taf = null;
+
+    try {
+      const awcRes = await fetch(awcUrl, {
+        headers: { "User-Agent": "NordwindSite/1.0" },
+        signal: AbortSignal.timeout(6000),
+      });
+      if (awcRes.ok) {
+        const json = await awcRes.json();
+        const entry = Array.isArray(json) && json.length > 0 ? json[0] : null;
+        if (entry?.rawTAF || entry?.raw_text || entry?.raw) {
+          taf = {
+            station: icao,
+            raw: String(entry.rawTAF || entry.raw_text || entry.raw),
+            issueTime: entry.issueTime || entry.issue_time || entry.validTimeFrom || null,
+          };
+        }
+      }
+    } catch {
+      taf = null;
+    }
+
+    res.json({ taf });
+  } catch (error) {
+    res.status(502).json({
+      error: "Failed to load TAF",
+      detail: String(error?.message || error || "unknown_error"),
+    });
+  }
+});
+
 app.put("/api/admin/fleet/:fleetId/liveries/:liveryId", async (req, res) => {
   try {
     const updated = await updateFleetLiveryStatus(req.params.fleetId, req.params.liveryId, req.body || {});
@@ -21714,8 +25051,14 @@ app.get("/api/vamsys/routes", async (_req, res) => {
   }
 
   try {
-    const payload = await loadRoutesData();
-    res.json(payload);
+    const [payload, hubs] = await Promise.all([
+      loadRoutesData(),
+      loadAdminHubsCatalog().catch(() => []),
+    ]);
+    res.json({
+      ...payload,
+      hubs: Array.isArray(hubs) ? hubs : [],
+    });
   } catch (error) {
     res.status(502).json({
       error: "Failed to load vAMSYS routes",
@@ -21775,6 +25118,8 @@ app.get("/api/vamsys/notams", async (req, res) => {
       .map((item) => serializeVamsysNotam(item))
       .map((item) => ({
         ...item,
+        isOpened: context?.pilot ? hasPilotOpenedNotam(context.pilot, item.id) : false,
+        openedAt: context?.pilot ? getPilotNotamStateEntry(context.pilot, item.id)?.openedAt || null : null,
         isRead: context?.pilot ? hasPilotReadNotam(context.pilot, item.id) : false,
       }))
       .sort((left, right) => {
@@ -21802,7 +25147,7 @@ app.get("/api/vamsys/notams", async (req, res) => {
   }
 });
 
-app.post("/api/pilot/notams/:id/read", async (req, res) => {
+app.post("/api/pilot/notams/:id/open", async (req, res) => {
   const context = await resolveCurrentPilotContext(req).catch(() => null);
   if (!context?.pilotId && !context?.pilot?.username) {
     res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
@@ -21816,6 +25161,45 @@ app.post("/api/pilot/notams/:id/read", async (req, res) => {
   }
 
   const nextState = markPilotNotamState(context.pilot, notamId, {
+    openedAt: new Date().toISOString(),
+  });
+  const entry = nextState.entries.find((item) => item.notamId === notamId) || null;
+
+  res.json({
+    ok: true,
+    notamId,
+    openedAt: entry?.openedAt || null,
+  });
+});
+
+app.post("/api/pilot/notams/:id/read", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId && !context?.pilot?.username) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+
+  const notamId = Number(req.params.id || 0) || 0;
+  if (notamId <= 0) {
+    res.status(400).json({ ok: false, error: "NOTAM ID is required", code: "notam_id_required" });
+    return;
+  }
+
+  const payload = await fetchNotamsPages().catch(() => []);
+  const targetNotam = (Array.isArray(payload) ? payload : [])
+    .map((item) => serializeVamsysNotam(item))
+    .find((item) => item.id === notamId);
+  if (targetNotam?.mustRead && !hasPilotOpenedNotam(context.pilot, notamId)) {
+    res.status(409).json({
+      ok: false,
+      error: "Open this must-read NOTAM before marking it as read.",
+      code: "notam_open_required",
+    });
+    return;
+  }
+
+  const nextState = markPilotNotamState(context.pilot, notamId, {
+    openedAt: getPilotNotamStateEntry(context.pilot, notamId)?.openedAt || new Date().toISOString(),
     readAt: new Date().toISOString(),
   });
   const entry = nextState.entries.find((item) => item.notamId === notamId) || null;
@@ -22207,6 +25591,21 @@ const isAuthorizedTelegramBotRequest = (request) => {
   return Boolean(expected && provided && provided === expected);
 };
 
+const isAuthorizedVkBotRequest = (request) => {
+  const provided = normalizeAdminText(request?.headers?.["x-vk-bot-token"] || "");
+  const expected = normalizeAdminText(VK_BOT_CONFIG_TOKEN || "");
+  const ok = Boolean(expected && provided && provided === expected);
+  if (!ok) {
+    logVk("warn", "config_auth_failed", {
+      path: request?.originalUrl || request?.url || "",
+      hasProvidedToken: Boolean(provided),
+      hasExpectedToken: Boolean(expected),
+      providedMask: maskSensitiveValue(provided),
+    });
+  }
+  return ok;
+};
+
 const resolveDiscordBotTicketCategory = (rawValue, config = getTicketConfigStore()) => {
   const normalized = normalizeAdminText(rawValue || "").toLowerCase();
   const categories = Array.isArray(config?.categories) ? config.categories : [];
@@ -22239,6 +25638,25 @@ app.get("/api/telegram-bot/config", (req, res) => {
   res.json({
     botSettings: getTelegramBotSettingsStore(),
     ticketConfig: getTicketConfigStore(),
+  });
+});
+
+app.get("/api/vk-bot/config", (req, res) => {
+  if (!isAuthorizedVkBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const botSettings = getVkBotSettingsStore();
+  logVk("info", "config_served", {
+    enabled: botSettings?.enabled !== false,
+    hasAccessToken: Boolean(normalizeAdminText(botSettings?.accessToken || "")),
+    groupId: Number(String(botSettings?.groupId || "").replace(/[^\d-]/g, "")) || 0,
+    sync: botSettings?.sync || null,
+  });
+
+  res.json({
+    botSettings,
   });
 });
 
@@ -22279,6 +25697,7 @@ app.post("/api/discord-bot/sync/content", express.json({ limit: "1mb" }), async 
   const content = normalizeAdminMultilineText(req.body?.content || summary || "");
   const author = normalizeAdminText(req.body?.author || "Discord Bot") || "Discord Bot";
   const botSettings = getDiscordBotSettingsStore();
+  const shouldPublishToVk = normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true);
 
   if (!title || !content) {
     res.status(400).json({ error: "Title and content are required" });
@@ -22310,6 +25729,17 @@ app.post("/api/discord-bot/sync/content", express.json({ limit: "1mb" }), async 
         },
       });
 
+      if (shouldPublishToVk) {
+        void publishNewsToVk({
+          title,
+          content,
+          category: "NOTAM",
+          author,
+          linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+          bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+        }).catch(() => {});
+      }
+
       res.status(201).json({ ok: true, item: serializeVamsysNotam(payload) });
       return;
     }
@@ -22335,6 +25765,17 @@ app.post("/api/discord-bot/sync/content", express.json({ limit: "1mb" }), async 
           stopShowing: req.body?.stopShowing,
         }),
       });
+
+      if (shouldPublishToVk) {
+        void publishNewsToVk({
+          title,
+          content,
+          category: "ALERT",
+          author,
+          linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+          bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+        }).catch(() => {});
+      }
 
       res.status(201).json({ ok: true, item: serializeVamsysAlert(payload) });
       return;
@@ -22361,6 +25802,17 @@ app.post("/api/discord-bot/sync/content", express.json({ limit: "1mb" }), async 
       featured: normalizeAdminBoolean(req.body?.featured, false),
     });
 
+    if (shouldPublishToVk) {
+      void publishNewsToVk({
+        title,
+        content,
+        category,
+        author,
+        linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+        bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+      }).catch(() => {});
+    }
+
     res.status(201).json({ ok: true, item });
   } catch (error) {
     res.status(502).json({ error: String(error?.message || error || "Failed to sync content") });
@@ -22379,6 +25831,7 @@ app.post("/api/telegram-bot/sync/content", express.json({ limit: "1mb" }), async
   const content = normalizeAdminMultilineText(req.body?.content || summary || "");
   const author = normalizeAdminText(req.body?.author || "Telegram Bot") || "Telegram Bot";
   const botSettings = getTelegramBotSettingsStore();
+  const shouldPublishToVk = normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true);
 
   if (!title || !content) {
     res.status(400).json({ error: "Title and content are required" });
@@ -22410,6 +25863,17 @@ app.post("/api/telegram-bot/sync/content", express.json({ limit: "1mb" }), async
         },
       });
 
+      if (shouldPublishToVk) {
+        void publishNewsToVk({
+          title,
+          content,
+          category: "NOTAM",
+          author,
+          linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+          bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+        }).catch(() => {});
+      }
+
       res.status(201).json({ ok: true, item: serializeVamsysNotam(payload) });
       return;
     }
@@ -22436,6 +25900,17 @@ app.post("/api/telegram-bot/sync/content", express.json({ limit: "1mb" }), async
         }),
       });
 
+      if (shouldPublishToVk) {
+        void publishNewsToVk({
+          title,
+          content,
+          category: "ALERT",
+          author,
+          linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+          bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+        }).catch(() => {});
+      }
+
       res.status(201).json({ ok: true, item: serializeVamsysAlert(payload) });
       return;
     }
@@ -22460,6 +25935,17 @@ app.post("/api/telegram-bot/sync/content", express.json({ limit: "1mb" }), async
       date: now.slice(0, 10),
       featured: normalizeAdminBoolean(req.body?.featured, false),
     });
+
+    if (shouldPublishToVk) {
+      void publishNewsToVk({
+        title,
+        content,
+        category,
+        author,
+        linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+        bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+      }).catch(() => {});
+    }
 
     res.status(201).json({ ok: true, item });
   } catch (error) {
@@ -22582,13 +26068,24 @@ app.post("/api/telegram-bot/tickets", express.json({ limit: "1mb" }), (req, res)
     return;
   }
 
+  const botSettings = getTelegramBotSettingsStore();
+  if (botSettings?.sync?.tickets === false) {
+    res.status(409).json({ error: "Ticket sync is disabled" });
+    return;
+  }
+
   const config = getTicketConfigStore();
   if (!config.enabled) {
     res.status(503).json({ error: "Ticket system is temporarily disabled" });
     return;
   }
 
-  const actor = req.body?.actor && typeof req.body.actor === "object" ? req.body.actor : {};
+  const actor = resolveTelegramBotTicketActor(req);
+  if (!actor?.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
   const subject = normalizeAdminText(req.body?.subject || "");
   const category = resolveDiscordBotTicketCategory(req.body?.category || req.body?.categoryId, config);
   const content = normalizeAdminMultilineText(req.body?.content || "");
@@ -22623,6 +26120,7 @@ app.post("/api/telegram-bot/tickets", express.json({ limit: "1mb" }), (req, res)
     owner: {
       pilotId: Number(actor?.pilotId || 0) || null,
       telegramId: normalizeAdminText(actor?.telegramId || "") || null,
+      telegramChatId: normalizeAdminText(actor?.chatId || req.body?.telegramChatId || req.body?.chatId || "") || null,
       username: normalizeAdminText(actor?.username || "") || "telegram-user",
       name: normalizeAdminText(actor?.name || actor?.username || "Telegram User") || "Telegram User",
       provider: "telegram-bot",
@@ -22644,7 +26142,7 @@ app.post("/api/telegram-bot/tickets", express.json({ limit: "1mb" }), (req, res)
     closedAt: null,
     language,
     source: "telegram",
-    telegramChatId: normalizeAdminText(req.body?.telegramChatId || req.body?.chatId || "") || null,
+    telegramChatId: normalizeAdminText(actor?.chatId || req.body?.telegramChatId || req.body?.chatId || "") || null,
   };
 
   withAdminContentUpdate((draft) => {
@@ -22654,7 +26152,155 @@ app.post("/api/telegram-bot/tickets", express.json({ limit: "1mb" }), (req, res)
     return draft;
   });
 
-  res.status(201).json({ ok: true, ticket });
+  void sendTelegramTicketAdminNotification({
+    eventKey: "ticketCreated",
+    ticket,
+    actorName: ticket.owner.name,
+    content,
+  }).catch(() => {});
+
+  res.status(201).json({ ok: true, ticket: sanitizeTicketForViewer(ticket, actor) });
+});
+
+app.get("/api/telegram-bot/tickets/meta", (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  res.json({ ok: true, ...getTelegramBotTicketConfigView() });
+});
+
+app.get("/api/telegram-bot/tickets", (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const actor = resolveTelegramBotTicketActor(req);
+  if (!actor?.isAdmin && !actor?.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  const tickets = listTicketsStore()
+    .filter((item) => canActorAccessTicket(item, actor))
+    .map((item) => sanitizeTicketForViewer(item, actor));
+  const unreadCount = tickets.reduce((sum, item) => sum + (Number(item?.unreadCount || 0) || 0), 0);
+
+  res.json({ ok: true, tickets, unreadCount });
+});
+
+app.get("/api/telegram-bot/tickets/:id", (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const actor = resolveTelegramBotTicketActor(req);
+  if (!actor?.isAdmin && !actor?.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  const ticketId = normalizeAdminText(req.params.id);
+  const ticket = listTicketsStore().find((item) => String(item?.id || "") === ticketId || String(item?.number || "") === ticketId);
+  if (!ticket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+  if (!canActorAccessTicket(ticket, actor)) {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+
+  res.json({ ok: true, ticket: sanitizeTicketForViewer(ticket, actor) });
+});
+
+app.post("/api/telegram-bot/tickets/:id/messages", express.json({ limit: "1mb" }), (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const botSettings = getTelegramBotSettingsStore();
+  if (botSettings?.sync?.tickets === false) {
+    res.status(409).json({ error: "Ticket sync is disabled" });
+    return;
+  }
+
+  const actor = resolveTelegramBotTicketActor(req);
+  if (!actor?.isAdmin && !actor?.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  const ticketId = normalizeAdminText(req.params.id);
+  const content = normalizeAdminMultilineText(req.body?.content || "");
+  if (!content) {
+    res.status(400).json({ error: "Message content is required" });
+    return;
+  }
+
+  let updatedTicket = null;
+  withAdminContentUpdate((draft) => {
+    const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+    const index = items.findIndex((item) => String(item?.id || "") === ticketId || String(item?.number || "") === ticketId);
+    if (index < 0) {
+      return draft;
+    }
+
+    const current = items[index];
+    if (!canActorAccessTicket(current, actor)) {
+      updatedTicket = { __error: "forbidden" };
+      return draft;
+    }
+
+    const now = new Date().toISOString();
+    const nextMessages = Array.isArray(current?.messages) ? [...current.messages] : [];
+    nextMessages.push({
+      id: randomUUID(),
+      authorRole: actor.isAdmin ? "staff" : "pilot",
+      authorName: actor.name,
+      authorUsername: actor.username,
+      content,
+      createdAt: now,
+    });
+
+    updatedTicket = {
+      ...current,
+      messages: nextMessages,
+      status: current?.status === "closed" ? "open" : normalizeTicketStatus(current?.status, "open"),
+      updatedAt: now,
+      closedAt: current?.status === "closed" ? null : current?.closedAt || null,
+      unreadByOwner: actor.isAdmin ? Number(current?.unreadByOwner || 0) + 1 : 0,
+      unreadByStaff: actor.isAdmin ? 0 : Number(current?.unreadByStaff || 0) + 1,
+    };
+
+    items[index] = updatedTicket;
+    draft.tickets = items;
+    return draft;
+  });
+
+  if (updatedTicket?.__error === "forbidden") {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
+  if (!updatedTicket) {
+    res.status(404).json({ error: "Ticket not found" });
+    return;
+  }
+
+  if (!actor.isAdmin) {
+    void sendTelegramTicketAdminNotification({
+      eventKey: "ticketReply",
+      ticket: updatedTicket,
+      actorName: actor.name,
+      content,
+    }).catch(() => {});
+  }
+
+  res.json({ ok: true, ticket: sanitizeTicketForViewer(updatedTicket, actor) });
 });
 
 app.post("/api/discord-bot/tickets/:id/status", express.json({ limit: "1mb" }), (req, res) => {
@@ -22663,8 +26309,25 @@ app.post("/api/discord-bot/tickets/:id/status", express.json({ limit: "1mb" }), 
     return;
   }
 
+  const botSettings = getTelegramBotSettingsStore();
+  if (botSettings?.sync?.tickets === false) {
+    res.status(409).json({ error: "Ticket sync is disabled" });
+    return;
+  }
+
+  const actor = resolveTelegramBotTicketActor(req);
+  if (!actor?.isAdmin && !actor?.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
   const ticketId = normalizeAdminText(req.params.id);
   const requestedStatus = normalizeTicketStatus(req.body?.status, "open");
+  if (!actor.isAdmin && !["open", "closed"].includes(requestedStatus)) {
+    res.status(403).json({ error: "Only admin can set this status" });
+    return;
+  }
+
   const actorName = normalizeAdminText(req.body?.actorName || "Discord Bot") || "Discord Bot";
   const reason = normalizeAdminMultilineText(req.body?.reason || "");
   let updatedTicket = null;
@@ -22739,13 +26402,19 @@ app.post("/api/telegram-bot/tickets/:id/status", express.json({ limit: "1mb" }),
     }
 
     const current = items[index];
+    if (!canActorAccessTicket(current, actor)) {
+      updatedTicket = { __error: "forbidden" };
+      return draft;
+    }
+
     const now = new Date().toISOString();
     updatedTicket = {
       ...current,
       status: requestedStatus,
       updatedAt: now,
       closedAt: requestedStatus === "closed" ? now : null,
-      unreadByOwner: requestedStatus === "closed" ? Number(current?.unreadByOwner || 0) + 1 : Number(current?.unreadByOwner || 0),
+      unreadByOwner: actor.isAdmin ? Number(current?.unreadByOwner || 0) + 1 : 0,
+      unreadByStaff: actor.isAdmin ? 0 : Number(current?.unreadByStaff || 0) + 1,
       lastTelegramBotReason: reason || null,
     };
     items[index] = updatedTicket;
@@ -22753,12 +26422,152 @@ app.post("/api/telegram-bot/tickets/:id/status", express.json({ limit: "1mb" }),
     return draft;
   });
 
+  if (updatedTicket?.__error === "forbidden") {
+    res.status(403).json({ error: "Access denied" });
+    return;
+  }
   if (!updatedTicket) {
     res.status(404).json({ error: "Ticket not found" });
     return;
   }
 
-  res.json({ ok: true, ticket: updatedTicket });
+  if (!actor.isAdmin) {
+    void sendTelegramTicketAdminNotification({
+      eventKey: requestedStatus === "closed" ? "ticketClosed" : "ticketUpdated",
+      ticket: updatedTicket,
+      actorName: actor.name,
+      content: reason || updatedTicket.subject,
+    }).catch(() => {});
+  }
+
+  res.json({ ok: true, ticket: sanitizeTicketForViewer(updatedTicket, actor) });
+});
+
+app.get("/api/telegram-bot/preferences", async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const target = resolveTelegramBotPilotTarget(req, { allowPilotId: true });
+  if (!target.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  const scope = buildTelegramBotPilotScope(target);
+  res.json({
+    ok: true,
+    pilotId: target.pilotId,
+    linked: Boolean(getStoredTelegramConnectionByPilotId(target.pilotId)),
+    preferences: getPilotPreferences(scope),
+    telegram: getStoredTelegramConnectionByPilotId(target.pilotId),
+  });
+});
+
+app.patch("/api/telegram-bot/preferences", express.json({ limit: "1mb" }), async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const target = resolveTelegramBotPilotTarget(req, { allowPilotId: true });
+  if (!target.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  const scope = buildTelegramBotPilotScope(target);
+  const preferences = setPilotPreferences(scope, {
+    notifications: {
+      channels: req.body?.notifications?.channels,
+      notificationTypes: req.body?.notifications?.notificationTypes,
+    },
+  });
+
+  res.json({
+    ok: true,
+    pilotId: target.pilotId,
+    linked: Boolean(getStoredTelegramConnectionByPilotId(target.pilotId)),
+    preferences,
+    telegram: getStoredTelegramConnectionByPilotId(target.pilotId),
+  });
+});
+
+app.get("/api/telegram-bot/linked-pilots", async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const linkedPilots = Array.from(vamsysLinksCache.entries())
+    .map(([pilotId, link]) => {
+      const telegram = sanitizeTelegramConnection(link?.metadata?.telegram);
+      if (!telegram?.chatId) {
+        return null;
+      }
+
+      const scope = buildTelegramBotPilotScope({
+        pilotId,
+        username: String(link?.username || "").trim(),
+        name: String(link?.name || "").trim(),
+      });
+
+      return {
+        pilotId: Number(pilotId || 0) || null,
+        username: String(link?.username || "").trim() || null,
+        name: String(link?.name || telegram?.name || telegram?.username || "").trim() || null,
+        chatId: telegram.chatId,
+        telegramId: telegram.telegramId,
+        linkedAt: telegram.linkedAt,
+        updatedAt: telegram.updatedAt,
+        preferences: getPilotPreferences(scope),
+      };
+    })
+    .filter(Boolean);
+
+  res.json({ ok: true, linkedPilots });
+});
+
+app.get("/api/telegram-bot/pireps", async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const target = resolveTelegramBotPilotTarget(req, { allowPilotId: true });
+  if (!target.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  try {
+    const limit = Math.max(1, Math.min(10, Number(req.query.limit || 5) || 5));
+    const pireps = await loadTelegramBotRecentPirepsByPilotId(target.pilotId, { limit });
+    res.json({ ok: true, pilotId: target.pilotId, pireps });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load PIREPs") });
+  }
+});
+
+app.post("/api/telegram-bot/booking", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+
+  const target = resolveTelegramBotPilotTarget(req, { allowPilotId: true });
+  if (!target.pilotId) {
+    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    return;
+  }
+
+  try {
+    const booking = await loadTelegramBotBookingByPilotId(target.pilotId);
+    res.json({ ok: true, pilotId: target.pilotId, booking });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load booking") });
+  }
 });
 
 app.post("/api/telegram-bot/profile", express.json({ limit: "256kb" }), async (req, res) => {
@@ -23135,11 +26944,41 @@ app.get("/api/admin/telegram-bot/config", (_req, res) => {
   });
 });
 
+app.get("/api/admin/vk-bot/config", (_req, res) => {
+  const botSettings = getVkBotSettingsStore();
+  logVk("info", "admin_config_read", {
+    enabled: botSettings?.enabled !== false,
+    hasAccessToken: Boolean(normalizeAdminText(botSettings?.accessToken || "")),
+    groupId: Number(String(botSettings?.groupId || "").replace(/[^\d-]/g, "")) || 0,
+  });
+  res.json({
+    botSettings,
+  });
+});
+
 app.put("/api/admin/telegram-bot/config", express.json({ limit: "1mb" }), (req, res) => {
   try {
     const botSettings = upsertTelegramBotSettingsStore(req.body && typeof req.body === "object" ? req.body : {});
     res.json({ ok: true, botSettings });
   } catch (error) {
+    res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.put("/api/admin/vk-bot/config", express.json({ limit: "1mb" }), (req, res) => {
+  try {
+    const botSettings = upsertVkBotSettingsStore(req.body && typeof req.body === "object" ? req.body : {});
+    logVk("info", "admin_config_updated", {
+      enabled: botSettings?.enabled !== false,
+      hasAccessToken: Boolean(normalizeAdminText(botSettings?.accessToken || "")),
+      groupId: Number(String(botSettings?.groupId || "").replace(/[^\d-]/g, "")) || 0,
+      sync: botSettings?.sync || null,
+    });
+    res.json({ ok: true, botSettings });
+  } catch (error) {
+    logVk("error", "admin_config_update_failed", {
+      error: String(error?.message || error),
+    });
     res.status(400).json({ ok: false, error: String(error?.message || error) });
   }
 });
@@ -23166,6 +27005,45 @@ app.post("/api/admin/telegram-bot/test-notification", requireAdmin, express.json
     res.json({ ok: true, result });
   } catch (error) {
     res.status(502).json({ ok: false, error: String(error?.message || "Failed to send Telegram test notification") });
+  }
+});
+
+app.post("/api/admin/vk-bot/test-notification", requireAdmin, express.json({ limit: "256kb" }), async (req, res) => {
+  try {
+    const actorName = normalizeAdminText(req.adminUser?.name || req.adminUser?.username || "Admin") || "Admin";
+    logVk("info", "admin_test_notification_start", {
+      actor: actorName,
+    });
+    const result = await publishNewsToVk({
+      title: normalizeAdminText(req.body?.title || "VK bot self-test") || "VK bot self-test",
+      content: normalizeAdminMultilineText(req.body?.content || [
+        "Проверка связки backend -> VK -> Telegram.",
+        `Инициатор: ${actorName}`,
+        `UTC: ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`,
+      ].join("\n")),
+      category: normalizeAdminText(req.body?.category || "News") || "News",
+      author: actorName,
+      force: true,
+    });
+
+    if (!result?.sent) {
+      logVk("warn", "admin_test_notification_failed", {
+        reason: normalizeAdminText(result?.reason || "unknown"),
+      });
+      res.status(400).json({ ok: false, error: result?.reason || "VK delivery is not configured" });
+      return;
+    }
+
+    logVk("info", "admin_test_notification_success", {
+      postId: result?.postId || null,
+      ownerId: result?.ownerId || null,
+    });
+    res.json({ ok: true, result });
+  } catch (error) {
+    logVk("error", "admin_test_notification_error", {
+      error: String(error?.message || "Failed to send VK test notification"),
+    });
+    res.status(502).json({ ok: false, error: String(error?.message || "Failed to send VK test notification") });
   }
 });
 
@@ -23530,6 +27408,15 @@ app.post("/api/admin/notams", async (req, res) => {
         ],
       }).catch(() => {});
     }
+    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+      void publishNewsToVk({
+        title: title || "Untitled NOTAM",
+        content: content || "",
+        category: "NOTAM",
+        author: "Ops",
+        linkUrl: url || null,
+      }).catch(() => {});
+    }
     res.json(payload);
   } catch (error) {
     res.status(502).json({
@@ -23577,6 +27464,15 @@ app.put("/api/admin/notams/:id", async (req, res) => {
           { name: "Priority", value: String(priority || "low"), inline: true },
           { name: "Type", value: String(type || "info"), inline: true },
         ],
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+      void publishNewsToVk({
+        title: title || "Untitled NOTAM",
+        content: content || "",
+        category: "NOTAM",
+        author: "Ops",
+        linkUrl: url || null,
       }).catch(() => {});
     }
     res.json(payload);
@@ -23652,6 +27548,16 @@ app.post("/api/admin/alerts", async (req, res) => {
         ],
       }).catch(() => {});
     }
+    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+      void publishNewsToVk({
+        title: String(req.body?.title || "Untitled Alert"),
+        content: String(req.body?.content || "").trim(),
+        category: "ALERT",
+        author: "Ops",
+        linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+        bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+      }).catch(() => {});
+    }
     res.json(payload);
   } catch (error) {
     res.status(502).json({
@@ -23691,6 +27597,16 @@ app.put("/api/admin/alerts/:id", async (req, res) => {
             inline: true,
           },
         ],
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+      void publishNewsToVk({
+        title: String(req.body?.title || "Untitled Alert"),
+        content: String(req.body?.content || "").trim(),
+        category: "ALERT",
+        author: "Ops",
+        linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
+        bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
       }).catch(() => {});
     }
     res.json(payload);
@@ -24842,6 +28758,749 @@ app.get("/api/public/staff", (_req, res) => {
   }
 });
 
+// ── AI chat ──────────────────────────────────────────────────────────────────
+const XAI_API_KEY = process.env.XAI_API_KEY || "";
+const AI_CHAT_RATE_LIMIT_MS = 4000;
+const aiChatLastRequestByIp = new Map();
+
+// AI knowledge base cache — rebuilt when bootstrap data refreshes or on demand
+let aiKnowledgeCache = { text: "", builtAt: 0 };
+const invalidateAiKnowledge = () => { aiKnowledgeCache = { text: "", builtAt: 0 }; };
+invalidateAiKnowledge(); // reset on server start so prompt changes take effect immediately
+const AI_KNOWLEDGE_TTL_MS = 10 * 60 * 1000; // 10 min
+
+const buildAiSiteContext = async () => {
+  const now = Date.now();
+  if (aiKnowledgeCache.text && now - aiKnowledgeCache.builtAt < AI_KNOWLEDGE_TTL_MS) {
+    return aiKnowledgeCache.text;
+  }
+
+  const sections = [];
+
+  // ── Routes from bootstrap cache (real vAMSYS data) ────────────────────────
+  try {
+    const bootstrapRoutes = Array.isArray(adminBootstrapCache?.data?.routes)
+      ? adminBootstrapCache.data.routes
+      : [];
+
+    if (bootstrapRoutes.length > 0) {
+      // Group by departure airport
+      const byDep = new Map();
+      for (const r of bootstrapRoutes) {
+        const from = String(r?.fromCode || "").trim().toUpperCase();
+        const fromName = String(r?.fromName || "").trim();
+        const to = String(r?.toCode || "").trim().toUpperCase();
+        const toName = String(r?.toName || "").trim();
+        const airline = String(r?.airlineCode || "NWS").trim();
+        if (!from || !to) continue;
+        if (!byDep.has(from)) byDep.set(from, { name: fromName, routes: [] });
+        byDep.get(from).routes.push(`→ ${to}${toName ? " (" + toName + ")" : ""} [${airline}]`);
+      }
+
+      const lines = [`### Маршрутная сеть (${bootstrapRoutes.length} маршрутов)`];
+      for (const [code, { name, routes }] of [...byDep.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+        lines.push(`${code}${name ? " (" + name + ")" : ""}:`);
+        routes.forEach((r) => lines.push("  " + r));
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Fleet from bootstrap cache ────────────────────────────────────────────
+  try {
+    const bootstrapFleets = Array.isArray(adminBootstrapCache?.data?.fleets)
+      ? adminBootstrapCache.data.fleets
+      : Array.isArray(adminBootstrapCache?.data?.liveFleets)
+        ? adminBootstrapCache.data.liveFleets
+        : [];
+
+    if (bootstrapFleets.length > 0) {
+      const lines = ["### Флот VA"];
+      for (const fleet of bootstrapFleets) {
+        const name = String(fleet?.name || "").trim();
+        const code = String(fleet?.code || fleet?.icao || "").trim();
+        const aircraft = Array.isArray(fleet?.aircraft) ? fleet.aircraft : [];
+        const regs = aircraft.map((a) => String(a?.registration || "").trim()).filter(Boolean);
+        if (!name && !code) continue;
+        lines.push(`- ${name}${code ? " (" + code + ")" : ""}${regs.length ? " — " + regs.length + " бортов: " + regs.join(", ") : ""}`);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Documents — full body for accurate instructions ───────────────────────
+  try {
+    const docs = listManagedAdminCollection("documents")
+      .filter((item) => normalizeAdminBoolean(item?.published, true));
+    if (docs.length > 0) {
+      const lines = ["### Документы и правила"];
+      for (const item of docs) {
+        const title = normalizeAdminText(item?.title || item?.name || "");
+        const body = normalizeAdminText(item?.body || item?.content || item?.description || "").slice(0, 800);
+        const slug = normalizeAdminText(item?.slug || "");
+        if (!title) continue;
+        lines.push(`**${title}**${slug ? " (/documents#" + slug + ")" : " (/documents)"}`);
+        if (body) lines.push(body);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── News (last 6 with body) ───────────────────────────────────────────────
+  try {
+    const news = listManagedAdminCollection("news")
+      .filter((item) => normalizeAdminBoolean(item?.published, true))
+      .slice(0, 6);
+    if (news.length > 0) {
+      const lines = ["### Последние новости"];
+      for (const item of news) {
+        const title = normalizeAdminText(item?.title || item?.name || "");
+        const body = normalizeAdminText(item?.body || item?.summary || item?.content || "").slice(0, 250);
+        if (!title) continue;
+        lines.push(`- **${title}**${body ? ": " + body : ""}`);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Activities (last 5) ───────────────────────────────────────────────────
+  try {
+    const activities = listManagedAdminCollection("activities")
+      .filter((item) => normalizeAdminBoolean(item?.published, true))
+      .slice(0, 5);
+    if (activities.length > 0) {
+      const lines = ["### Активности и события"];
+      for (const item of activities) {
+        const title = normalizeAdminText(item?.title || item?.name || "");
+        const body = normalizeAdminText(item?.body || item?.description || "").slice(0, 180);
+        if (!title) continue;
+        lines.push(`- **${title}**${body ? ": " + body : ""}`);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Events ────────────────────────────────────────────────────────────────
+  try {
+    const events = listManagedAdminCollection("events")
+      .filter((item) => normalizeAdminBoolean(item?.published, true))
+      .slice(0, 10);
+    if (events.length > 0) {
+      const lines = ["### Предстоящие события и ивенты"];
+      for (const item of events) {
+        const title = normalizeAdminText(item?.title || item?.name || "");
+        const desc = normalizeAdminText(item?.description || item?.body || "").slice(0, 200);
+        const date = normalizeAdminText(item?.date || item?.startDate || item?.eventDate || "");
+        if (!title) continue;
+        lines.push(`- **${title}**${date ? " (" + date + ")" : ""}${desc ? ": " + desc : ""}`);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── VATSIM events from activities ─────────────────────────────────────────
+  try {
+    const vatsimEvents = listManagedAdminCollection("activities")
+      .filter((item) => {
+        const cat = normalizeAdminText(item?.category || "").toLowerCase();
+        return cat.includes("vatsim") || cat.includes("event") || normalizeAdminBoolean(item?.published, true);
+      })
+      .slice(0, 6);
+    if (vatsimEvents.length > 0) {
+      const lines = ["### Активности / События (включая VATSIM)"];
+      for (const item of vatsimEvents) {
+        const title = normalizeAdminText(item?.title || item?.name || "");
+        const desc = normalizeAdminText(item?.body || item?.description || "").slice(0, 150);
+        const date = normalizeAdminText(item?.date || item?.startDate || "");
+        if (!title) continue;
+        lines.push(`- **${title}**${date ? " (" + date + ")" : ""}${desc ? ": " + desc : ""}`);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Staff ─────────────────────────────────────────────────────────────────
+  try {
+    const staff = listManagedAdminCollection("staff")
+      .filter((item) => normalizeAdminText(item?.status || "active").toLowerCase() !== "archived");
+    if (staff.length > 0) {
+      const lines = ["### Команда VA (стафф)"];
+      for (const item of staff) {
+        const name = normalizeAdminText(item?.name || "");
+        const role = normalizeAdminText(item?.role || "");
+        const discord = normalizeAdminText(item?.discord || "");
+        const email = normalizeAdminText(item?.email || "");
+        if (!name) continue;
+        lines.push(`- ${name} — ${role}${discord ? " | Discord: " + discord : ""}${email ? " | Email: " + email : ""}`);
+      }
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Ranks from vAMSYS ────────────────────────────────────────────────────
+  try {
+    const ranksMap = await loadRanksMap().catch(() => null);
+    if (ranksMap && ranksMap.size > 0) {
+      const sorted = [...ranksMap.entries()].sort((a, b) => a[0] - b[0]);
+      const lines = ["### Ранги VA (актуальные из vAMSYS, по порядку от низшего к высшему)"];
+      sorted.forEach(([id, name]) => {
+        lines.push(`- ${name} (ID: ${id})`);
+      });
+      lines.push("Текущий ранг и прогресс до следующего — в /dashboard → профиль пилота.");
+      sections.push(lines.join("\n"));
+    }
+  } catch {}
+
+  // ── Social links from site design ─────────────────────────────────────────
+  try {
+    const design = getSiteDesignStore();
+    const vkUrl = normalizeAdminText(design?.vkCommunityUrl || "");
+    const vkName = normalizeAdminText(design?.vkCommunityName || "");
+    const socialLines = ["### Контакты и соцсети VA"];
+    socialLines.push(`- Discord сервер: https://discord.gg/MfTT8KU5yC`);
+    if (vkUrl) socialLines.push(`- VK сообщество: ${vkUrl}${vkName ? " (" + vkName + ")" : ""}`);
+    socialLines.push(`- Поддержка / тикеты: /tickets (форма на сайте)`);
+    socialLines.push(`- Telegram бот: @nordwindva_bot (команды: /profile, /booking, /news, /events, /roster)`);
+    socialLines.push(`- Регистрация в VA (vAMSYS): https://vamsys.io/register/rag`);
+    socialLines.push(`- VATSIM: VA активно летает на VATSIM, следи за событиями в /activities`);
+    sections.push(socialLines.join("\n"));
+  } catch {}
+
+  const text = sections.join("\n\n");
+  aiKnowledgeCache = { text, builtAt: now };
+  return text;
+};
+
+const AI_SYSTEM_PROMPT = `Ты — AI-помощник виртуальной авиакомпании Nordwind Virtual Airlines (сокращённо: Nordwind Virtual, NWS VA).
+Твоя роль: отвечать на вопросы пользователей, давать подробные пошаговые инструкции и помогать новым пилотам разобраться в VA.
+
+═══════════════════════════════════════════
+ЯЗЫК И СТИЛЬ
+═══════════════════════════════════════════
+- Всегда отвечай на том же языке, на котором написан вопрос (русский или английский)
+- На инструкционные вопросы ("как", "что делать", "с чего начать") — нумерованные шаги
+- На вопросы о маршрутах — список с кодами ICAO, названиями городов и авиакомпанией [NWS/KAR/STW]
+- Отвечай конкретно, без лишней воды
+- Указывай страницы сайта где уместно
+
+═══════════════════════════════════════════
+ПРАВИЛА ТОЧНОСТИ
+═══════════════════════════════════════════
+- Факты о маршрутах, флоте, сотрудниках — только из данных ниже, не придумывай
+- Если маршрута/борта нет в данных — прямо скажи об этом
+- Если раздел маршрутов пуст — предложи проверить /routes напрямую
+- Для процедур и инструкций используй знания из этого промпта — они актуальны
+
+═══════════════════════════════════════════
+ЧТО ТАКОЕ NORDWIND VIRTUAL
+═══════════════════════════════════════════
+Nordwind Virtual — виртуальная авиакомпания (VA) для авиасимуляторов. Мы воссоздаём операции
+реальной авиакомпании Nordwind Airlines в симуляторах MSFS 2020/2024, X-Plane 12, P3D v5/v6.
+Платформа: vAMSYS (профессиональная система управления VA).
+Группа: входим в Russian Airways Group (RAG) вместе с другими российскими VA.
+Авиакомпании в сети: Nordwind (NWS), IKAR (KAR), Southwind (STW).
+
+═══════════════════════════════════════════
+КАК ВСТУПИТЬ В VA — ПОДРОБНО
+═══════════════════════════════════════════
+1. Убедись, что у тебя есть авиасимулятор (MSFS, X-Plane или P3D)
+2. Перейди на /join или напрямую на https://vamsys.io/register/rag
+3. Заполни анкету: имя, email, выбери симулятор, уровень опыта
+4. Дождись одобрения заявки (обычно 1–3 дня, стафф проверяет вручную)
+5. После одобрения получишь письмо с подтверждением на email
+6. Войди на наш сайт через кнопку "Войти" → выбери vAMSYS
+7. Открой /dashboard — это твой личный кабинет пилота
+8. Скачай ACARS-клиент (ссылка в /documents или /dashboard)
+9. Совершай первый полёт!
+
+Если заявка долго не одобряется — напиши в Discord https://discord.gg/MfTT8KU5yC или создай тикет /tickets
+
+═══════════════════════════════════════════
+КАК НАЧАТЬ ЛЕТАТЬ — ПОЛНЫЙ ГАЙД ДЛЯ НОВИЧКОВ
+═══════════════════════════════════════════
+ШАГ 1 — Войди на сайт
+  → Нажми "Войти" в шапке сайта
+  → Авторизуйся через vAMSYS (основной) или Discord
+  → Попадёшь в /dashboard
+
+ШАГ 2 — Выбери и забронируй рейс
+  → В /dashboard найди раздел "Бронирования"
+  → Выбери рейс по маршруту, самолёту или аэропорту
+  → Нажми "Забронировать" — рейс закрепляется за тобой
+  → Все маршруты VA смотри на /routes (интерактивная карта)
+
+ШАГ 3 — Спланируй полёт
+  → Используй SimBrief (simbrief.com) для расчёта плана полёта
+  → В /dashboard есть интеграция с SimBrief — план загружается автоматически
+  → Изучи маршрут, погоду, NOTAM'ы
+
+ШАГ 4 — Установи и настрой ACARS
+  → ACARS — это программа-трекер, которая записывает полёт и подаёт PIREP
+  → Без ACARS полёт НЕ засчитается
+  → Скачай ACARS из /documents или /dashboard → раздел "Настройки"
+  → Запусти ACARS до старта симулятора
+  → Введи свои данные vAMSYS (логин/пароль или API-ключ)
+  → Выбери забронированный рейс в ACARS
+
+ШАГ 5 — Лети!
+  → Запусти симулятор ПОСЛЕ запуска ACARS
+  → ACARS автоматически фиксирует взлёт, полёт и посадку
+  → Не закрывай ACARS во время полёта
+  → После посадки нажми "Завершить полёт" в ACARS
+
+ШАГ 6 — PIREP отправлен
+  → ACARS автоматически подаёт PIREP (отчёт о полёте)
+  → PIREP появится в /dashboard → "Мои полёты"
+  → Часы и полёт добавятся к твоей статистике
+  → Стафф может проверить PIREP — обычно принимается автоматически
+
+═══════════════════════════════════════════
+ЧТО ТАКОЕ ACARS И КАК ЕГО НАСТРОИТЬ
+═══════════════════════════════════════════
+ACARS (Aircraft Communications Addressing and Reporting System) — клиентская программа-трекер.
+Для Nordwind Virtual используется ACARS от vAMSYS.
+
+Установка:
+1. Скачай ACARS с /documents (раздел "Инструменты") или из /dashboard → Настройки
+2. Установи как обычную программу (Windows)
+3. Запусти ACARS
+4. Введи свои данные: логин vAMSYS или API-токен (найдёшь в /dashboard → Настройки)
+5. ACARS подключится к серверу vAMSYS
+
+Поддерживаемые симуляторы:
+- Microsoft Flight Simulator 2020 (MSFS 2020) ✓
+- Microsoft Flight Simulator 2024 (MSFS 2024) ✓
+- X-Plane 11/12 ✓
+- Prepar3D v4/v5/v6 ✓
+- FSX / FSX:SE ✓
+
+Настройка в ACARS:
+1. Выбери симулятор в настройках ACARS
+2. Запусти симулятор
+3. В ACARS нажми "Connect" — программа найдёт симулятор автоматически
+4. Выбери рейс из списка забронированных
+5. Нажми "Begin Flight" когда готов к запуску двигателей
+
+Частые проблемы:
+- ACARS не видит симулятор → убедись что ACARS запущен ДО симулятора
+- Полёт не засчитался → проверь что был нажат "Begin Flight" перед взлётом
+- Ошибка авторизации → проверь API-ключ в /dashboard → Настройки
+- Подробнее: /documents или спроси в Discord https://discord.gg/MfTT8KU5yC
+
+═══════════════════════════════════════════
+SIMBRIEF — ПЛАНИРОВАНИЕ ПОЛЁТОВ
+═══════════════════════════════════════════
+SimBrief (simbrief.com) — бесплатный профессиональный планировщик полётов.
+Nordwind Virtual интегрирован с SimBrief — планы загружаются автоматически в /dashboard.
+
+Как использовать SimBrief:
+1. Зарегистрируйся на simbrief.com (бесплатно)
+2. В /dashboard → Настройки привяжи SimBrief ID
+3. При планировании рейса нажми "Загрузить из SimBrief" в /dashboard
+4. SimBrief посчитает: топливо, маршрут, время, альтернативные аэропорты
+5. Экспортируй план в симулятор (MSFS поддерживает .pln файлы)
+
+═══════════════════════════════════════════
+PIREP — ОТЧЁТ О ПОЛЁТЕ
+═══════════════════════════════════════════
+PIREP (Pilot Report) — отчёт о выполненном полёте. Подаётся автоматически через ACARS.
+
+Что фиксирует PIREP:
+- Маршрут (откуда/куда)
+- Налётанные часы
+- Посадочная скорость снижения (landing rate) в ft/min
+- Расход топлива
+- Время вылета/прилёта
+- Использованный самолёт и регистрация
+
+Когда PIREP принимается:
+✓ ACARS был активен весь полёт
+✓ Полёт выполнен на забронированном маршруте
+✓ Посадка в норме (landing rate обычно до -300 ft/min)
+✓ Не нарушены правила VA (смотри /documents)
+
+Когда PIREP может быть отклонён:
+✗ ACARS не запущен или отключился
+✗ Слишком грубая посадка
+✗ Нарушение маршрута
+✗ Топливо закончилось в воздухе
+
+Посмотреть все свои PIREP: /dashboard → "Мои полёты"
+
+═══════════════════════════════════════════
+РАНГИ И ПРОГРЕССИЯ
+═══════════════════════════════════════════
+Ранги присваиваются автоматически по налётанным часам в vAMSYS.
+Чем больше часов — тем выше ранг и доступ к более крупным воздушным судам.
+
+Актуальный список рангов (от низшего к высшему) — в разделе "Ранги VA" данных ниже.
+Количество часов для каждого ранга настроено в vAMSYS — точные пороги смотри в /dashboard → профиль пилота (там показан прогресс до следующего ранга).
+
+Не называй конкретные часы для рангов — эти данные настраиваются администраторами и могут меняться.
+Текущий ранг, налёт и прогресс: /dashboard → профиль пилота
+Таблица лидеров по налёту: /dashboard → статистика
+
+═══════════════════════════════════════════
+СОБЫТИЯ И БОНУСНЫЕ БАЛЛЫ
+═══════════════════════════════════════════
+VA проводит регулярные события: VATSIM-ивенты, тематические полёты, марафоны, конкурсы.
+
+Бонусные баллы и награды за события:
+- За участие в официальных ивентах начисляются дополнительные очки/баллы в vAMSYS
+- Некоторые ивенты дают уникальные значки (badges) — отображаются в профиле пилота
+- Групповые полёты могут давать повышенный коэффициент к налёту
+- Конкурсы на лучшую посадку, наибольший налёт за период — с призами и признанием
+- Специальные маршруты в дни событий могут давать бонус к очкам
+
+Как участвовать:
+1. Следи за анонсами на /activities и /news
+2. Подпишись на Discord https://discord.gg/MfTT8KU5yC — ивенты анонсируются заранее
+3. Для VATSIM-ивентов: убедись что зарегистрирован на vatsim.net
+4. В день ивента выполни рейс по указанному маршруту через ACARS — баллы начислятся автоматически
+5. Telegram-бот @nordwindva_bot команда /events — список ближайших событий
+
+═══════════════════════════════════════════
+ШТРАФЫ И НАРУШЕНИЯ
+═══════════════════════════════════════════
+VA придерживается реалистичных стандартов — грубые нарушения влекут последствия.
+
+Что может привести к отклонению PIREP:
+- Посадка с превышением нормы вертикальной скорости (landing rate) — обычно жёстче -600 ft/min
+- ACARS не был активен во время полёта
+- Полёт выполнен не на забронированном маршруте
+- Топливо закончилось в полёте (fuel exhaustion)
+- Взлёт без нажатия "Begin Flight" в ACARS
+
+Дополнительные меры за систематические нарушения:
+- Предупреждение от стаффа
+- Временная приостановка полётов
+- В крайних случаях — исключение из VA
+
+Длительное отсутствие:
+- Нет обязательного минимума полётов в месяц (см. раздел ниже про обязаловку)
+- Но при очень долгом отсутствии (несколько месяцев) профиль может быть переведён в статус "frozen"
+- Разморозка: написать стаффу в Discord или /tickets
+
+Если PIREP отклонён несправедливо — создай тикет /tickets с объяснением ситуации.
+
+═══════════════════════════════════════════
+ОБЯЗАТЕЛЬНОСТЬ ПОЛЁТОВ И СЕТЬ VATSIM
+═══════════════════════════════════════════
+Обязателен ли минимум полётов?
+НЕТ — в Nordwind Virtual нет обязательного минимума полётов в месяц.
+Летай когда хочешь и сколько хочешь — это хобби, а не работа.
+
+Обязателен ли VATSIM?
+НЕТ — летать на VATSIM не обязательно.
+Все полёты засчитываются независимо от того, подключён ли ты к сети VATSIM или нет.
+
+Но VATSIM настоятельно рекомендуется потому что:
+- Это реалистичный ATC с живыми диспетчерами — совсем другой опыт
+- VA проводит официальные VATSIM-ивенты с бонусными очками
+- Помогает отработать фразеологию и процедуры
+- Большое комьюнити единомышленников
+- Некоторые значки и достижения выдаются только за VATSIM-полёты
+
+Как начать на VATSIM (если ещё не):
+1. Зарегистрируйся бесплатно на vatsim.net
+2. Скачай пилотский клиент: vPilot (MSFS/P3D) или X-Pilot (X-Plane)
+3. Пройди обучение на vatsim.net/pilots — обязательно перед первым выходом в сеть
+4. Начни с тихих секторов и несложных аэропортов
+5. Следи за нашими ивентами на /activities
+
+═══════════════════════════════════════════
+VATSIM — ПОЛЁТЫ С ЖИВЫМИ ДИСПЕТЧЕРАМИ
+═══════════════════════════════════════════
+VATSIM (Virtual Air Traffic Simulation Network) — сеть с живыми диспетчерами-волонтёрами.
+Nordwind Virtual поддерживает полёты на VATSIM и регулярно проводит ивенты.
+
+Как начать летать на VATSIM:
+1. Зарегистрируйся на vatsim.net (отдельно от нашей VA, бесплатно)
+2. Скачай пилотский клиент: vPilot (для MSFS/P3D) или X-Pilot (для X-Plane)
+3. Изучи базовые фразеологии (есть в /documents)
+4. Начни с полётов в зонах с малым трафиком (не Москва в пятницу вечером)
+5. Смотри расписание ивентов VA на /activities
+
+VATSIM-ивенты Nordwind Virtual:
+- Анонсируются в Discord https://discord.gg/MfTT8KU5yC и на /activities
+- Это организованные полёты группой с выделенными ATC секторами
+- Участие добровольное, но очень рекомендуется — отличный опыт!
+- На некоторых ивентах выдаются значки и дополнительные очки
+
+Полезные ресурсы VATSIM:
+- vatsim.net — регистрация и информация
+- vatrus.ru — VATSIM Россия (раздел, который контролирует наш регион)
+- skyvector.com — карты для планирования полётов
+
+═══════════════════════════════════════════
+КАК С НАМИ СВЯЗАТЬСЯ
+═══════════════════════════════════════════
+Discord (главный канал общения):
+  https://discord.gg/MfTT8KU5yC
+  Каналы: #помощь-новичкам, #общение, #полёты, #события, #техподдержка
+
+Тикеты на сайте (официальные обращения):
+  /tickets → "Создать тикет"
+  Используй для: проблем с PIREP, апелляций, вопросов к стаффу
+
+Telegram бот (@nordwindva_bot):
+  Команды: /profile, /booking, /news, /events, /roster, /metar, /taf
+  Удобен для быстрой проверки бронирований и новостей
+
+VK сообщество:
+  Ссылка в разделе "Контакты и соцсети" ниже
+  Там: новости, анонсы, медиа
+
+Стафф VA:
+  Список команды: /team
+  Для срочных вопросов — Discord или тикет
+
+═══════════════════════════════════════════
+СТРАНИЦЫ САЙТА — ПОЛНЫЙ СПИСОК
+═══════════════════════════════════════════
+/ — Главная: новости, статистика VA, быстрый доступ
+/join — Вступить в VA (анкета)
+/login — Войти (vAMSYS или Discord)
+/dashboard — Личный кабинет: статистика, бронирования, настройки, SimBrief
+/fleet — Флот: все ВС с описаниями и ливреями
+/routes — Маршруты: интерактивная карта всей сети
+/live — Живые полёты участников прямо сейчас
+/news — Новости VA
+/activities — События, ивенты, VATSIM-мероприятия
+/documents — Документы: правила, инструкции, SOP, ACARS-гайды
+/team — Команда и стафф VA с контактами
+/tickets — Написать в поддержку
+/gates — Распределение гейтов в аэропортах
+/about — О проекте Nordwind Virtual`;
+
+app.post("/api/public/ai-chat", async (req, res) => {
+  if (!XAI_API_KEY) {
+    res.status(503).json({ error: "AI not configured" });
+    return;
+  }
+
+  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const now = Date.now();
+  const lastRequest = aiChatLastRequestByIp.get(ip) || 0;
+  if (now - lastRequest < AI_CHAT_RATE_LIMIT_MS) {
+    res.status(429).json({ error: "Too many requests, please wait a moment" });
+    return;
+  }
+  aiChatLastRequestByIp.set(ip, now);
+  if (aiChatLastRequestByIp.size > 2000) {
+    const oldestIp = aiChatLastRequestByIp.keys().next().value;
+    aiChatLastRequestByIp.delete(oldestIp);
+  }
+
+  const message = String(req.body?.message || "").trim().slice(0, 1000);
+  if (!message) {
+    res.status(400).json({ error: "Message is required" });
+    return;
+  }
+
+  const history = Array.isArray(req.body?.history)
+    ? req.body.history.slice(-8).filter((m) => String(m?.content || "").trim())
+    : [];
+  const siteContext = await buildAiSiteContext();
+
+  // Search results from client search index — grounded, real data
+  const searchResults = Array.isArray(req.body?.searchResults) ? req.body.searchResults.slice(0, 50) : [];
+  const searchContext = searchResults.length > 0
+    ? "\n\n---\nРЕЗУЛЬТАТЫ ПОИСКА ПО ЭТОМУ ЗАПРОСУ (реальные данные из базы сайта):\n" +
+      searchResults.map((r) => {
+        const cat = String(r?.category || "");
+        const title = String(r?.title || "");
+        const subtitle = String(r?.subtitle || "");
+        const badge = String(r?.badge || "");
+        const catLabel = {
+          route: "Маршрут", fleet: "Флот", airport: "Аэропорт",
+          livery: "Ливрея", staff: "Сотрудник", news: "Новость", document: "Документ"
+        }[cat] || cat;
+        return `[${catLabel}] ${title}${badge ? " (${badge})" : ""}${subtitle ? " — " + subtitle : ""}`;
+      }).join("\n")
+    : "";
+
+  const systemContent = `${AI_SYSTEM_PROMPT}\n\n---\nАКТУАЛЬНЫЙ КОНТЕНТ САЙТА:\n${siteContext}${searchContext}`;
+
+  const messages = [
+    { role: "system", content: systemContent },
+    ...history.map((item) => ({
+      role: String(item?.role || "user") === "assistant" ? "assistant" : "user",
+      content: String(item?.content || "").slice(0, 500),
+    })),
+    { role: "user", content: message },
+  ];
+
+  try {
+    const response = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
+      body: JSON.stringify({ model: "grok-3-mini", messages, max_tokens: 1000, temperature: 0.3 }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text().catch(() => "");
+      logger.warn("[ai-chat] xai_error", { status: response.status, body: errText.slice(0, 200) });
+      res.status(502).json({ error: "AI service error" });
+      return;
+    }
+
+    const data = await response.json();
+    const answer = String(data?.choices?.[0]?.message?.content || "").trim();
+    res.json({ answer });
+  } catch (error) {
+    logger.warn("[ai-chat] request_failed", { error: String(error) });
+    res.status(502).json({ error: "Failed to reach AI service" });
+  }
+});
+
+// ── Stream token + settings storage ──────────────────────────────────────────
+
+let streamTokens = {};
+let streamSettings = {};
+
+try { streamTokens = JSON.parse(fs.readFileSync(STREAM_TOKENS_FILE, "utf8")); } catch {}
+try { streamSettings = JSON.parse(fs.readFileSync(STREAM_SETTINGS_FILE, "utf8")); } catch {}
+
+const saveStreamTokens = () => {
+  try { fs.writeFileSync(STREAM_TOKENS_FILE, JSON.stringify(streamTokens, null, 2)); } catch {}
+};
+const saveStreamSettings = () => {
+  try { fs.writeFileSync(STREAM_SETTINGS_FILE, JSON.stringify(streamSettings, null, 2)); } catch {}
+};
+
+const buildStreamFlightPayload = (flight) => ({
+  callsign: String(flight.callsign || flight.flightNumber || ""),
+  departure: String(flight.departure || flight.departureIcao || flight.departure_id || ""),
+  arrival: String(flight.arrival || flight.arrivalIcao || flight.arrival_id || ""),
+  departureName: String(flight.departureName || flight.departureCity || ""),
+  arrivalName: String(flight.arrivalName || flight.arrivalCity || ""),
+  departureLat: Number(flight.departureLat) || null,
+  departureLon: Number(flight.departureLon) || null,
+  arrivalLat: Number(flight.arrivalLat) || null,
+  arrivalLon: Number(flight.arrivalLon) || null,
+  currentLat: Number(flight.currentLat) || null,
+  currentLon: Number(flight.currentLon) || null,
+  heading: Number(flight.heading) || 0,
+  altitude: Number(flight.altitude) || 0,
+  speed: Number(flight.speed) || 0,
+  progress: Number(flight.progress) || 0,
+  telemetryTrack: Array.isArray(flight.telemetryTrack) ? flight.telemetryTrack : [],
+  eta: flight.eta || flight.etaUtc || null,
+  aircraft: String(flight.aircraft || ""),
+  network: String(flight.network || ""),
+});
+
+// GET /api/public/stream/flight-by-token?token=xxx
+app.get("/api/public/stream/flight-by-token", async (req, res) => {
+  const token = String(req.query.token || "").trim();
+  if (!token) { res.status(400).json({ error: "token required" }); return; }
+
+  const pilotId = streamTokens[token];
+  if (!pilotId) { res.status(404).json({ error: "Invalid or expired token" }); return; }
+
+  try {
+    const flightMap = await loadFlightMap();
+    const flights = Array.isArray(flightMap?.flights) ? flightMap.flights : [];
+    const flight = flights.find((f) => String(f.pilotId || f.pilot_id || "").trim() === String(pilotId));
+    if (!flight) { res.json({ noFlight: true }); return; }
+    res.json(buildStreamFlightPayload(flight));
+  } catch {
+    res.status(502).json({ error: "Failed to load flight data" });
+  }
+});
+
+// GET /api/pilot/stream-token — get or create token + settings for logged-in pilot
+app.get("/api/pilot/stream-token", (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+
+  const pid = String(pilotId);
+  let token = Object.entries(streamTokens).find(([, v]) => v === pid)?.[0] ?? null;
+  if (!token) {
+    token = require("crypto").randomUUID();
+    streamTokens[token] = pid;
+    saveStreamTokens();
+  }
+
+  const settings = streamSettings[pid] ?? { showHud: true, width: 1280, height: 720 };
+  res.json({ token, settings });
+});
+
+// POST /api/pilot/stream-token/regenerate
+app.post("/api/pilot/stream-token/regenerate", (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+
+  const pid = String(pilotId);
+  const old = Object.entries(streamTokens).find(([, v]) => v === pid)?.[0];
+  if (old) delete streamTokens[old];
+
+  const token = require("crypto").randomUUID();
+  streamTokens[token] = pid;
+  saveStreamTokens();
+  res.json({ token });
+});
+
+// PUT /api/pilot/stream-settings
+app.put("/api/pilot/stream-settings", express.json(), (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+
+  const { showHud, width, height } = req.body || {};
+  const pid = String(pilotId);
+  streamSettings[pid] = {
+    showHud: showHud !== false,
+    width: Math.max(320, Math.min(3840, Number(width) || 1280)),
+    height: Math.max(200, Math.min(2160, Number(height) || 720)),
+  };
+  saveStreamSettings();
+  res.json({ ok: true, settings: streamSettings[pid] });
+});
+
+app.get("/api/public/stream/flight", async (req, res) => {
+  const callsign = String(req.query.callsign || "").trim().toUpperCase();
+  if (!callsign) {
+    res.status(400).json({ error: "callsign query param required" });
+    return;
+  }
+  try {
+    const flightMap = await loadFlightMap();
+    const flights = Array.isArray(flightMap?.flights) ? flightMap.flights : [];
+    const flight = flights.find((f) => {
+      const cs = String(f.callsign || f.flightNumber || f.flight_number || "").trim().toUpperCase();
+      return cs === callsign;
+    });
+    if (!flight) {
+      res.status(404).json({ error: "Flight not found", callsign });
+      return;
+    }
+    res.json({
+      callsign: String(flight.callsign || flight.flightNumber || callsign),
+      departure: String(flight.departure || flight.departureIcao || flight.departure_id || ""),
+      arrival: String(flight.arrival || flight.arrivalIcao || flight.arrival_id || ""),
+      departureName: String(flight.departureName || flight.departureCity || ""),
+      arrivalName: String(flight.arrivalName || flight.arrivalCity || ""),
+      departureLat: Number(flight.departureLat) || null,
+      departureLon: Number(flight.departureLon) || null,
+      arrivalLat: Number(flight.arrivalLat) || null,
+      arrivalLon: Number(flight.arrivalLon) || null,
+      currentLat: Number(flight.currentLat) || null,
+      currentLon: Number(flight.currentLon) || null,
+      heading: Number(flight.heading) || 0,
+      altitude: Number(flight.altitude) || 0,
+      speed: Number(flight.speed) || 0,
+      progress: Number(flight.progress) || 0,
+      telemetryTrack: Array.isArray(flight.telemetryTrack) ? flight.telemetryTrack : [],
+      eta: flight.eta || flight.etaUtc || null,
+      aircraft: String(flight.aircraft || ""),
+      network: String(flight.network || ""),
+    });
+  } catch {
+    res.status(502).json({ error: "Failed to load flight data" });
+  }
+});
+
 app.get("/api/public/documents/:slug", (req, res) => {
   const slug = slugifyAdminValue(req.params.slug, "");
   const document = listManagedAdminCollection("documents").find((item) => item.slug === slug && normalizeAdminBoolean(item?.published, true));
@@ -24869,6 +29528,7 @@ app.post("/api/admin/content/:collection", express.json(), async (req, res) => {
     return;
   }
 
+  const integrations = {};
   let item = upsertManagedAdminCollectionItem(collection, req.body || {});
   if (collection === "activities" && isManagedEventActivity(item)) {
     try {
@@ -24901,7 +29561,42 @@ app.post("/api/admin/content/:collection", express.json(), async (req, res) => {
       author: item?.author || "Admin",
     }).catch(() => {});
   }
-  res.status(201).json({ ok: true, item });
+  if (collection === "activities") {
+    const vkRequested = normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, false);
+    const vkPlan = getManagedActivityVkPublishPlan(item, req.body || {});
+    if (vkPlan.attempted) {
+      try {
+        integrations.vk = await publishNewsToVk({
+          title: item?.title,
+          content: item?.content || item?.summary || item?.description,
+          category: item?.category || "News",
+          author: item?.author || "Admin",
+          linkUrl: vkPlan.linkUrl,
+          bannerUrl: item?.bannerUrl || item?.imageUrl || item?.image,
+        });
+      } catch (error) {
+        integrations.vk = {
+          sent: false,
+          attempted: true,
+          reason: String(error?.message || error || "vk_publish_failed"),
+        };
+      }
+    } else if (vkRequested) {
+      integrations.vk = {
+        sent: false,
+        attempted: false,
+        reason: vkPlan.reason,
+      };
+    }
+    const vkStatePatch = buildManagedActivityVkStatePatch(integrations.vk, vkRequested);
+    if (vkStatePatch) {
+      item = upsertManagedAdminCollectionItem(collection, {
+        ...item,
+        ...vkStatePatch,
+      }, item.id);
+    }
+  }
+  res.status(201).json({ ok: true, item, integrations });
 });
 
 app.put("/api/admin/content/:collection/:id", express.json(), async (req, res) => {
@@ -24911,6 +29606,7 @@ app.put("/api/admin/content/:collection/:id", express.json(), async (req, res) =
     return;
   }
 
+  const integrations = {};
   let item = upsertManagedAdminCollectionItem(collection, req.body || {}, req.params.id);
   if (collection === "activities" && isManagedEventActivity(item)) {
     try {
@@ -24943,7 +29639,98 @@ app.put("/api/admin/content/:collection/:id", express.json(), async (req, res) =
       author: item?.author || "Admin",
     }).catch(() => {});
   }
-  res.json({ ok: true, item });
+  if (collection === "activities") {
+    const vkRequested = normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, false);
+    const vkPlan = getManagedActivityVkPublishPlan(item, req.body || {});
+    if (vkPlan.attempted) {
+      try {
+        integrations.vk = await publishNewsToVk({
+          title: item?.title,
+          content: item?.content || item?.summary || item?.description,
+          category: item?.category || "News",
+          author: item?.author || "Admin",
+          linkUrl: vkPlan.linkUrl,
+          bannerUrl: item?.bannerUrl || item?.imageUrl || item?.image,
+        });
+      } catch (error) {
+        integrations.vk = {
+          sent: false,
+          attempted: true,
+          reason: String(error?.message || error || "vk_publish_failed"),
+        };
+      }
+    } else if (vkRequested) {
+      integrations.vk = {
+        sent: false,
+        attempted: false,
+        reason: vkPlan.reason,
+      };
+    }
+    const vkStatePatch = buildManagedActivityVkStatePatch(integrations.vk, vkRequested);
+    if (vkStatePatch) {
+      item = upsertManagedAdminCollectionItem(collection, {
+        ...item,
+        ...vkStatePatch,
+      }, item.id);
+    }
+  }
+  res.json({ ok: true, item, integrations });
+});
+
+app.post("/api/admin/content/activities/:id/publish-vk", express.json({ limit: "256kb" }), async (req, res) => {
+  const activityId = normalizeAdminText(req.params.id);
+  if (!activityId) {
+    res.status(400).json({ ok: false, error: "Activity id is required" });
+    return;
+  }
+
+  let item = getManagedAdminCollectionItem("activities", activityId);
+  if (!item) {
+    res.status(404).json({ ok: false, error: "Activity not found" });
+    return;
+  }
+
+  const vkPlan = getManagedActivityVkPublishPlan(item, { sendToVK: true, publishToVK: true });
+  let vkResult;
+  if (vkPlan.attempted) {
+    try {
+      vkResult = await publishNewsToVk({
+        title: item?.title,
+        content: item?.content || item?.summary || item?.description,
+        category: item?.category || "News",
+        author: item?.author || "Admin",
+        linkUrl: vkPlan.linkUrl,
+        bannerUrl: item?.bannerUrl || item?.imageUrl || item?.image,
+      });
+    } catch (error) {
+      vkResult = {
+        sent: false,
+        attempted: true,
+        reason: String(error?.message || error || "vk_publish_failed"),
+      };
+    }
+  } else {
+    vkResult = {
+      sent: false,
+      attempted: false,
+      reason: vkPlan.reason,
+    };
+  }
+
+  const vkStatePatch = buildManagedActivityVkStatePatch(vkResult, true);
+  if (vkStatePatch) {
+    item = upsertManagedAdminCollectionItem("activities", {
+      ...item,
+      ...vkStatePatch,
+    }, item.id);
+  }
+
+  if (!vkResult?.sent) {
+    res.status(400).json({ ok: false, error: vkResult?.reason || "VK publish failed", result: vkResult, item });
+    return;
+  }
+
+  res.json({ ok: true, result: vkResult, item });
 });
 
 app.delete("/api/admin/content/:collection/:id", async (req, res) => {
@@ -25817,6 +30604,14 @@ app.post("/api/admin/pireps/:id/accept", async (req, res) => {
   if (pirepId <= 0) { res.status(400).json({ ok: false, error: "PIREP ID required" }); return; }
   try {
     const payload = await apiRequest(`/pireps/${pirepId}/accept`, { method: "POST" });
+    const detailsPayload = await apiRequest(`/pireps/${pirepId}`).catch(() => null);
+    const detailsNode = getPilotApiItem(detailsPayload) || getPilotApiItem(payload) || null;
+    const details = detailsNode?.attributes ? flattenJsonApiNode(detailsNode) : detailsNode;
+    if (details && typeof details === "object") {
+      ingestCompletedPirepIntoChallenges({
+        pirep: details,
+      });
+    }
     res.json({ ok: true, result: payload });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || "Failed to accept PIREP") });
@@ -25835,6 +30630,14 @@ app.post("/api/admin/pireps/:id/accept-claim", express.json(), async (req, res) 
   }
   try {
     const payload = await apiRequest(`/pireps/${pirepId}/accept-claim`, { method: "POST", body: { hours, minutes, points } });
+    const detailsPayload = await apiRequest(`/pireps/${pirepId}`).catch(() => null);
+    const detailsNode = getPilotApiItem(detailsPayload) || getPilotApiItem(payload) || null;
+    const details = detailsNode?.attributes ? flattenJsonApiNode(detailsNode) : detailsNode;
+    if (details && typeof details === "object") {
+      ingestCompletedPirepIntoChallenges({
+        pirep: details,
+      });
+    }
     res.json({ ok: true, result: payload });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || "Failed to accept claim") });
@@ -26198,6 +31001,7 @@ const server = app.listen(PORT, () => {
   startUnifiedCatalogSyncScheduler();
   startDashboardCatalogNightlyRefreshScheduler();
   startDiscordWebhookAutomationScheduler();
+  startPilotChallengesScheduler();
   // Pre-warm admin bootstrap and overview so first navigation to admin panel is instant
   void loadAdminBootstrapCatalog().catch((err) => {
     console.warn("[admin-bootstrap] initial warmup failed:", String(err));

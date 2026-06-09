@@ -1306,10 +1306,10 @@ export function AdminFleet() {
                 <tr>
                   {([
                     { col: "registration" as SortKey, label: tr("Борт", "Tail") },
-                    { col: "model" as SortKey, label: tr("Название", "Model") },
-                    { col: "airlineCode" as SortKey, label: tr("Авиакомпания", "Airline") },
-                    { col: "fleetName" as SortKey, label: tr("Группы флота", "Fleet group") },
                     { col: "fleetCode" as SortKey, label: tr("Код", "Code") },
+                    { col: "airlineCode" as SortKey, label: tr("Авиакомпания", "Airline") },
+                    { col: "model" as SortKey, label: tr("Название", "Model") },
+                    { col: "fleetName" as SortKey, label: tr("Группы флота", "Fleet group") },
                     { col: "status" as SortKey, label: tr("Статус", "Status") },
                   ] as Array<{ col: SortKey; label: string }>).map(({ col, label }) => (
                     <th
@@ -1359,14 +1359,14 @@ export function AdminFleet() {
                         className={`cursor-pointer transition-colors ${isSelected ? "bg-red-50" : "hover:bg-gray-50"}`}
                       >
                         <td className="px-4 py-3 font-mono font-semibold text-gray-900">{aircraft.registration || "—"}</td>
-                        <td className="px-4 py-3 text-gray-700">{aircraft.model}</td>
-                        <td className="px-4 py-3">
-                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{airlineCode}</span>
-                        </td>
-                        <td className="px-4 py-3 text-gray-500">{aircraft.fleetRef.name}</td>
                         <td className="px-4 py-3">
                           <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{aircraft.fleetRef.code || "—"}</span>
                         </td>
+                        <td className="px-4 py-3">
+                          <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">{airlineCode}</span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-700">{aircraft.model}</td>
+                        <td className="px-4 py-3 text-gray-500">{aircraft.fleetRef.name}</td>
                         <td className="px-4 py-3">
                           <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${
                             aircraft.serviceable === false ? "bg-amber-50 text-amber-700 ring-amber-200" : "bg-green-50 text-green-700 ring-green-200"

@@ -1,6 +1,7 @@
 import { Outlet } from "react-router";
 import { Header } from "./header";
 import { Footer } from "./footer";
+import { AiSearchWidget } from "./ai-search-widget";
 
 export function Root() {
   return (
@@ -10,6 +11,7 @@ export function Root() {
         <Outlet />
       </main>
       <Footer />
+      <AiSearchWidget />
     </div>
   );
 }

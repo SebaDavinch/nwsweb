@@ -6,7 +6,9 @@ import {
   Edit, 
   Search, 
   Calendar,
-  MoreVertical 
+  MoreVertical,
+  Send,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent } from "../ui/card";
 import { Button } from "../ui/button";
@@ -43,6 +45,9 @@ interface ManagedNewsItem {
   views?: number;
   tag?: string | null;
   linkUrl?: string | null;
+  vkPublishStatus?: string | null;
+  vkPublishReason?: string | null;
+  vkPublishedAt?: string | null;
 }
 
 interface NotamApiItem {
@@ -88,6 +93,9 @@ interface OpsItem {
   mustRead?: boolean;
   tag?: string | null;
   linkUrl?: string | null;
+  vkPublishStatus?: string | null;
+  vkPublishReason?: string | null;
+  vkPublishedAt?: string | null;
   alertPages?: string[];
   alertOrder?: number;
   alertStartShowing?: string | null;
@@ -118,6 +126,7 @@ export function AdminNews() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<OpsItem | null>(null);
   const [items, setItems] = useState<OpsItem[]>([]);
+  const [vkPublishingId, setVkPublishingId] = useState<string | null>(null);
   const tr = useCallback((ru: string, en: string) => (language === "ru" ? ru : en), [language]);
 
   const label = (key: string, fallback: string) => {
@@ -152,6 +161,9 @@ export function AdminNews() {
       sendToDiscord: false,
       tag: item.tag || null,
       linkUrl: item.linkUrl || null,
+      vkPublishStatus: item.vkPublishStatus || null,
+      vkPublishReason: item.vkPublishReason || null,
+      vkPublishedAt: item.vkPublishedAt || null,
     };
   }, [tr]);
 
@@ -264,6 +276,7 @@ export function AdminNews() {
           tag: data.tag || null,
           linkUrl: data.linkUrl || null,
           sendToDiscord: Boolean(data.sendToDiscord),
+          sendToVK: Boolean(data.sendToVK),
         };
         const response = await fetch(
           editingItem?.category === "News"
@@ -280,6 +293,24 @@ export function AdminNews() {
           alert(label("admin.news.operationFailed", "Операция не выполнена"));
           return;
         }
+        const payload = await response.json().catch(() => null) as {
+          integrations?: {
+            vk?: {
+              sent?: boolean;
+              attempted?: boolean;
+              reason?: string;
+            };
+          };
+        } | null;
+        const vkResult = payload?.integrations?.vk;
+        if (Boolean(data.sendToVK) && vkResult?.attempted && vkResult.sent === false) {
+          alert(
+            tr(
+              `Новость сохранена, но публикация в VK не выполнена: ${vkResult.reason || "unknown_error"}`,
+              `News was saved, but VK publication failed: ${vkResult.reason || "unknown_error"}`
+            )
+          );
+        }
       } else if (data.category === "NOTAM") {
         const requestBody = {
           title: data.title,
@@ -290,6 +321,7 @@ export function AdminNews() {
           tag: data.tag || null,
           url: data.linkUrl || null,
           sendToDiscord: Boolean(data.sendToDiscord),
+          sendToVK: Boolean(data.sendToVK),
         };
         const response = await fetch(editingItem?.externalId ? `/api/admin/notams/${editingItem.externalId}` : "/api/admin/notams", {
           method: editingItem?.externalId ? "PUT" : "POST",
@@ -311,6 +343,7 @@ export function AdminNews() {
           start_showing: data.alertStartShowing || null,
           stop_showing: data.alertStopShowing || null,
           sendToDiscord: Boolean(data.sendToDiscord),
+          sendToVK: Boolean(data.sendToVK),
         };
         const response = await fetch(editingItem?.externalId ? `/api/admin/alerts/${editingItem.externalId}` : "/api/admin/alerts", {
           method: editingItem?.externalId ? "PUT" : "POST",
@@ -361,6 +394,73 @@ export function AdminNews() {
       } catch (error) {
         console.error("Операция удаления завершилась ошибкой", error);
       }
+    }
+  };
+
+  const handleRepublishVk = async (item: OpsItem) => {
+    if (item.category !== "News" || item.source !== "local") {
+      return;
+    }
+    setVkPublishingId(item.id);
+    try {
+      const response = await fetch(`/api/admin/content/activities/${encodeURIComponent(String(item.externalId))}/publish-vk`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        error?: string;
+        item?: {
+          vkPublishStatus?: string | null;
+          vkPublishReason?: string | null;
+          vkPublishedAt?: string | null;
+        };
+      } | null;
+
+      if (!response.ok || payload?.ok === false) {
+        const reason = String(payload?.error || tr("Не удалось опубликовать в VK", "Failed to publish to VK"));
+        setItems((prev) => prev.map((entry) =>
+          entry.id === item.id
+            ? {
+                ...entry,
+                vkPublishStatus: "failed",
+                vkPublishReason: reason,
+                vkPublishedAt: null,
+              }
+            : entry
+        ));
+        alert(reason);
+        return;
+      }
+
+      const updated = payload?.item;
+      setItems((prev) => prev.map((entry) =>
+        entry.id === item.id
+          ? {
+              ...entry,
+              vkPublishStatus: updated?.vkPublishStatus || "published",
+              vkPublishReason: updated?.vkPublishReason || "",
+              vkPublishedAt: updated?.vkPublishedAt || new Date().toISOString(),
+            }
+          : entry
+      ));
+    } catch (error) {
+      const reason = String(error instanceof Error ? error.message : tr("Не удалось опубликовать в VK", "Failed to publish to VK"));
+      setItems((prev) => prev.map((entry) =>
+        entry.id === item.id
+          ? {
+              ...entry,
+              vkPublishStatus: "failed",
+              vkPublishReason: reason,
+              vkPublishedAt: null,
+            }
+          : entry
+      ));
+      alert(reason);
+    } finally {
+      setVkPublishingId(null);
     }
   };
 
@@ -478,6 +578,31 @@ export function AdminNews() {
                           <div className={`w-2 h-2 rounded-full ${item.status === 'Published' ? 'bg-green-500' : 'bg-gray-300'}`} />
                           {item.status}
                         </div>
+                        {item.category === "News" && item.source === "local" && (
+                          <div className="mt-1">
+                            <Badge
+                              variant="outline"
+                              title={item.vkPublishReason || ""}
+                              className={
+                                item.vkPublishStatus === "published"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : item.vkPublishStatus === "failed"
+                                    ? "border-red-200 bg-red-50 text-red-700"
+                                    : item.vkPublishStatus === "skipped"
+                                      ? "border-amber-200 bg-amber-50 text-amber-700"
+                                      : "border-gray-200 bg-gray-50 text-gray-600"
+                              }
+                            >
+                              {item.vkPublishStatus === "published"
+                                ? tr("VK: опубликовано", "VK: published")
+                                : item.vkPublishStatus === "failed"
+                                  ? tr("VK: ошибка", "VK: failed")
+                                  : item.vkPublishStatus === "skipped"
+                                    ? tr("VK: пропущено", "VK: skipped")
+                                    : tr("VK: нет данных", "VK: no status")}
+                            </Badge>
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-gray-500">{item.author}</td>
                       <td className="px-4 py-3 text-gray-500">
@@ -494,6 +619,19 @@ export function AdminNews() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            {item.category === "News" && item.source === "local" && (
+                              <DropdownMenuItem
+                                onClick={() => { void handleRepublishVk(item); }}
+                                disabled={vkPublishingId === item.id}
+                              >
+                                {vkPublishingId === item.id ? (
+                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                ) : (
+                                  <Send className="w-4 h-4 mr-2" />
+                                )}
+                                {tr("Переопубликовать в VK", "Republish to VK")}
+                              </DropdownMenuItem>
+                            )}
                             <DropdownMenuItem onClick={() => {
                               setEditingItem(item);
                               setIsFormOpen(true);

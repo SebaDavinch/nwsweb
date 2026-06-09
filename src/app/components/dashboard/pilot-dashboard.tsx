@@ -27,6 +27,7 @@ import {
   BookOpen,
   BarChart2,
   Trophy,
+  MonitorPlay,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -51,6 +52,7 @@ import { PilotBalance } from "./pilot-balance";
 import { PilotPassport } from "./pilot-passport";
 import { PilotStats } from "./pilot-stats";
 import { PilotLeaderboard } from "./pilot-leaderboard";
+import { PilotStreamWidgets } from "./pilot-stream-widgets";
 
 const normalizeDashboardTab = (value: string) => {
   if (value === "claims") {
@@ -110,7 +112,8 @@ const upcomingIcaoToCountryIso2 = (icao?: string | null) => {
 
 export function PilotDashboard() {
   const { isAuthenticated, isAuthLoading, pilot, isAdmin, logout } = useAuth();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const location = useLocation();
   const navigate = useNavigate();
   const { countryIso2 } = useParams();
@@ -230,7 +233,18 @@ export function PilotDashboard() {
   } | null>(null);
   const [isActivityProgressLoading, setIsActivityProgressLoading] = useState(false);
   const [isPilotApiConnectedForActivities, setIsPilotApiConnectedForActivities] = useState(true);
-  const [isActivityWidgetExpanded, setIsActivityWidgetExpanded] = useState(false);
+  const [isActivityWidgetExpanded, setIsActivityWidgetExpanded] = useState(true);
+  const [sidebarBalance, setSidebarBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated || !pilot) return;
+    let active = true;
+    fetch("/api/pilot/balance", { credentials: "include" })
+      .then((r) => r.json().catch(() => null))
+      .then((payload) => { if (active && typeof payload?.balance === "number") setSidebarBalance(payload.balance); })
+      .catch(() => null);
+    return () => { active = false; };
+  }, [isAuthenticated, pilot]);
 
   useEffect(() => {
     if (!isAuthenticated || !pilot || activeTab !== "home") {
@@ -267,6 +281,7 @@ export function PilotDashboard() {
       active = false;
     };
   }, [activeTab, isAuthenticated, pilot]);
+
 
   useEffect(() => {
     if (!isAuthenticated || !pilot || activeTab !== "home") {
@@ -444,6 +459,7 @@ export function PilotDashboard() {
     { id: "passport", label: t("dashboard.tabs.passport"), icon: BookOpen },
     { id: "balance", label: t("dashboard.tabs.balance"), icon: Coins },
     { id: "documents", label: t("nav.documents"), icon: FileText },
+    { id: "stream-widgets", label: tr("Виджеты", "Widgets"), icon: MonitorPlay },
     { id: "settings", label: t("dashboard.settings"), icon: Settings },
   ];
 
@@ -493,9 +509,18 @@ export function PilotDashboard() {
               <div className="text-sm font-bold text-white truncate">
                 {displayNameWithCallsign}
               </div>
-              <div className="text-xs text-gray-400 flex items-center gap-1">
-                <span className="text-[#E31E24]">{pilot.rank}</span>
+              <div className="text-xs text-gray-400 flex items-center justify-between gap-1">
+                <span className="text-[#E31E24]">{regularRankName}</span>
+                {sidebarBalance !== null ? (
+                  <span className="inline-flex items-center gap-0.5 text-amber-400 font-semibold">
+                    <Coins size={11} />
+                    {sidebarBalance.toLocaleString("ru-RU")}
+                  </span>
+                ) : null}
               </div>
+              {honoraryRankName && honoraryRankName !== regularRankName ? (
+                <div className="mt-0.5 text-[11px] text-gray-500">{honoraryRankName}</div>
+              ) : null}
               {staffRoles.length > 0 ? (
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {staffRoles.map((role, index) => (
@@ -603,15 +628,17 @@ export function PilotDashboard() {
                   </div>
                 </div>
 
-                {urgentNotams.length > 0 ? (
-                  <Card className="border-orange-200 bg-linear-to-r from-orange-50 via-amber-50 to-white shadow-sm">
-                    <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge className="bg-orange-500 text-white">{t("dashboard.notams.alertBadge")}</Badge>
-                          <div className="font-semibold text-[#1d1d1f]">{t("dashboard.notams.alertTitle")}</div>
-                        </div>
-                        <p className="mt-2 text-sm text-gray-600">{t("dashboard.notams.alertSubtitle")}</p>
+                <Card className="border-orange-200 bg-linear-to-r from-orange-50 via-amber-50 to-white shadow-sm">
+                  <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge className="bg-orange-500 text-white">{t("dashboard.notams.alertBadge")}</Badge>
+                        <div className="font-semibold text-[#1d1d1f]">{t("dashboard.notams.alertTitle")}</div>
+                      </div>
+                      <p className="mt-2 text-sm text-gray-600">
+                        {urgentNotams.length > 0 ? t("dashboard.notams.alertSubtitle") : t("dashboard.notams.noActive")}
+                      </p>
+                      {urgentNotams.length > 0 ? (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {urgentNotams.map((item) => (
                             <Badge key={item.id} variant="outline" className="border-orange-200 bg-white text-orange-700">
@@ -619,25 +646,25 @@ export function PilotDashboard() {
                             </Badge>
                           ))}
                         </div>
-                      </div>
-                      <Button
-                        onClick={() => openDashboardTab("notams")}
-                        variant="outline"
-                        className="border-orange-200 bg-white text-orange-700 hover:bg-orange-50 hover:text-orange-800"
-                      >
-                        {t("dashboard.notams.viewAll")}
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ) : null}
+                      ) : null}
+                    </div>
+                    <Button
+                      onClick={() => openDashboardTab("notams")}
+                      variant="outline"
+                      className="border-orange-200 bg-white text-orange-700 hover:bg-orange-50 hover:text-orange-800"
+                    >
+                      {t("dashboard.notams.viewAll")}
+                    </Button>
+                  </CardContent>
+                </Card>
 
-                {dashboardAlerts.length > 0 ? (
-                  <Card className="border-sky-200 bg-linear-to-r from-sky-50 via-cyan-50 to-white shadow-sm">
-                    <CardContent className="p-5">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge className="bg-sky-600 text-white">{t("dashboard.alerts.badge")}</Badge>
-                        <div className="font-semibold text-[#1d1d1f]">{t("dashboard.alerts.title")}</div>
-                      </div>
+                <Card className="border-sky-200 bg-linear-to-r from-sky-50 via-cyan-50 to-white shadow-sm">
+                  <CardContent className="p-5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge className="bg-sky-600 text-white">{t("dashboard.alerts.badge")}</Badge>
+                      <div className="font-semibold text-[#1d1d1f]">{t("dashboard.alerts.title")}</div>
+                    </div>
+                    {dashboardAlerts.length > 0 ? (
                       <div className="mt-4 grid gap-3 lg:grid-cols-3">
                         {dashboardAlerts.map((item) => (
                           <div key={item.id} className="rounded-2xl border border-sky-100 bg-white/90 p-4 shadow-sm">
@@ -651,9 +678,13 @@ export function PilotDashboard() {
                           </div>
                         ))}
                       </div>
-                    </CardContent>
-                  </Card>
-                ) : null}
+                    ) : (
+                      <div className="mt-4 rounded-2xl border border-sky-100 bg-white/90 p-4 text-sm text-gray-600 shadow-sm">
+                        {t("dashboard.alerts.empty")}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
                 {/* Stats Grid */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -792,6 +823,44 @@ export function PilotDashboard() {
                       </CardContent>
                     </Card>
 
+                    <Card className="border-none shadow-sm">
+                      <CardHeader>
+                        <CardTitle className="text-base">{t("dashboard.home.lastFlights.title")}</CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {recentFlightsPreview.length > 0 ? (
+                          recentFlightsPreview.map((flight) => (
+                            <button
+                              key={flight.id}
+                              type="button"
+                              onClick={() => openPirepDetail(flight.id)}
+                              className="w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition-colors hover:border-[#E31E24] hover:bg-white"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <div className="font-semibold text-[#1d1d1f]">{flight.flightNumber || "\u2014"}</div>
+                                  <div className="mt-1 text-sm text-gray-500">{flight.departure || "\u2014"} → {flight.arrival || "\u2014"}</div>
+                                </div>
+                                <div className="text-right">
+                                  <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{flight.status || "\u2014"}</div>
+                                  <div className="mt-1 text-xs text-gray-500">
+                                    {flight.completedAt
+                                      ? new Date(flight.completedAt).toLocaleDateString(undefined, {
+                                          month: "short",
+                                          day: "numeric",
+                                        })
+                                      : "\u2014"}
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="text-sm text-gray-500">{t("dashboard.home.lastFlights.empty")}</div>
+                        )}
+                      </CardContent>
+                    </Card>
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <button 
                         onClick={() => openDashboardTab("where2fly")}
@@ -850,9 +919,13 @@ export function PilotDashboard() {
                         </CardHeader>
                         <CardContent>
                           <div className="text-2xl font-bold mb-1">{regularRankName}</div>
-                          <div className="mb-3 text-sm text-white/80">
-                            {t("dashboard.rank.honorary")}: {honoraryRankName || "—"}
-                          </div>
+                          {honoraryRankName && honoraryRankName !== regularRankName ? (
+                            <div className="mb-3 text-sm text-white/80">
+                              {t("dashboard.rank.honorary")}: {honoraryRankName}
+                            </div>
+                          ) : (
+                            <div className="mb-3" />
+                          )}
                           <div className="text-xs text-gray-400 flex justify-between">
                             <span>Live vAMSYS data</span>
                             <span>{totalHours}h</span>
@@ -947,44 +1020,6 @@ export function PilotDashboard() {
                      ) : null}
 
                      <Card className="border-none shadow-sm">
-                        <CardHeader>
-                          <CardTitle className="text-base">{t("dashboard.home.lastFlights.title")}</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                          {recentFlightsPreview.length > 0 ? (
-                            recentFlightsPreview.map((flight) => (
-                              <button
-                                key={flight.id}
-                                type="button"
-                                onClick={() => openPirepDetail(flight.id)}
-                                className="w-full rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-left transition-colors hover:border-[#E31E24] hover:bg-white"
-                              >
-                                <div className="flex items-center justify-between gap-3">
-                                  <div>
-                                    <div className="font-semibold text-[#1d1d1f]">{flight.flightNumber || "—"}</div>
-                                    <div className="mt-1 text-sm text-gray-500">{flight.departure || "—"} → {flight.arrival || "—"}</div>
-                                  </div>
-                                  <div className="text-right">
-                                    <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{flight.status || "—"}</div>
-                                    <div className="mt-1 text-xs text-gray-500">
-                                      {flight.completedAt
-                                        ? new Date(flight.completedAt).toLocaleDateString(undefined, {
-                                            month: "short",
-                                            day: "numeric",
-                                          })
-                                        : "—"}
-                                    </div>
-                                  </div>
-                                </div>
-                              </button>
-                            ))
-                          ) : (
-                            <div className="text-sm text-gray-500">{t("dashboard.home.lastFlights.empty")}</div>
-                          )}
-                        </CardContent>
-                     </Card>
-
-                     <Card className="border-none shadow-sm">
                         <CardHeader className="space-y-3">
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
@@ -1002,18 +1037,18 @@ export function PilotDashboard() {
                               onClick={() => setIsActivityWidgetExpanded((value) => !value)}
                               aria-expanded={isActivityWidgetExpanded}
                             >
-                              {isActivityWidgetExpanded ? "Collapse" : "Expand"}
+                              {isActivityWidgetExpanded ? t("dashboard.activities.widget.collapse") : t("dashboard.activities.widget.expand")}
                               <ChevronDown className={`ml-1 h-3.5 w-3.5 transition-transform ${isActivityWidgetExpanded ? "rotate-180" : "rotate-0"}`} />
                             </Button>
                           </div>
 
                           <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-600">
                             {isActivityProgressLoading
-                              ? "Loading..."
+                              ? t("dashboard.activities.widget.loading")
                               : !isPilotApiConnectedForActivities
                                 ? t("dashboard.activities.widget.connect")
                                 : Array.isArray(activityProgressWidget?.items) && activityProgressWidget.items.length > 0
-                                  ? `${activityProgressWidget.items.length} active item(s)`
+                                  ? t("dashboard.activities.widget.activeItems").replace("{{count}}", String(activityProgressWidget.items.length))
                                   : t("dashboard.activities.widget.empty")}
                           </div>
                         </CardHeader>
@@ -1023,7 +1058,7 @@ export function PilotDashboard() {
                             {isActivityProgressLoading ? (
                               <div className="flex items-center gap-2 text-sm text-gray-500">
                                 <Loader2 className="h-4 w-4 animate-spin" />
-                                Loading...
+                                {t("dashboard.activities.widget.loading")}
                               </div>
                             ) : !isPilotApiConnectedForActivities ? (
                               <div className="space-y-3">
@@ -1039,9 +1074,28 @@ export function PilotDashboard() {
                                   const status = String(item?.progress?.status || "not_started").trim();
                                   const legCompleted = Number(item?.progress?.legCompleted || 0) || 0;
                                   const legTotal = Number(item?.progress?.legTotal || 0) || 0;
+                                  const statusLabel = status === "not_started"
+                                    ? t("dashboard.activities.widget.notStarted")
+                                    : status === "completed"
+                                      ? t("dashboard.activities.widget.completed")
+                                      : status === "in_progress"
+                                        ? t("dashboard.activities.widget.inProgress")
+                                        : status.replaceAll("_", " ");
+                                  const statusBadgeClass = status === "completed"
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                    : status === "in_progress"
+                                      ? "border-sky-200 bg-sky-50 text-sky-700"
+                                      : "border-gray-200 bg-white text-gray-600";
+                                  const progressFillClass = status === "completed"
+                                    ? "from-emerald-500 via-lime-400 to-cyan-400"
+                                    : status === "in_progress"
+                                      ? progressPercent >= 70
+                                        ? "from-sky-500 via-cyan-400 to-emerald-400"
+                                        : "from-orange-500 via-amber-400 to-yellow-300"
+                                      : "from-gray-400 via-gray-300 to-gray-200";
 
                                   return (
-                                    <div key={item.registrationId} className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-3">
+                                    <div key={item.registrationId} className="rounded-xl border border-gray-100 bg-gradient-to-br from-white to-gray-50 px-3 py-3">
                                       <div className="flex items-center justify-between gap-2">
                                         <div className="truncate text-sm font-medium text-[#1d1d1f]">{item.activityTitle}</div>
                                         <Badge variant="outline" className="border-gray-200 bg-white text-[10px] text-gray-700">
@@ -1049,10 +1103,33 @@ export function PilotDashboard() {
                                         </Badge>
                                       </div>
                                       <div className="mt-2 flex items-center justify-between text-xs text-gray-500">
-                                        <span>{status === "not_started" ? t("dashboard.activities.widget.notStarted") : status.replaceAll("_", " ")}</span>
-                                        <span>{progressPercent}%</span>
+                                        <Badge variant="outline" className={`h-5 rounded-full px-2 text-[10px] font-medium ${statusBadgeClass}`}>
+                                          {statusLabel}
+                                        </Badge>
+                                        <span className="font-semibold text-[#1d1d1f]">{progressPercent}%</span>
                                       </div>
-                                      <Progress value={progressPercent} className="mt-2 h-2 bg-gray-200 [&_[data-slot=progress-indicator]]:bg-[#E31E24]" />
+                                      <div className="mt-2">
+                                        <div className="relative h-2.5 overflow-hidden rounded-full bg-gray-200/90">
+                                          <div
+                                            className={`h-full rounded-full bg-gradient-to-r transition-[width] duration-700 ease-out ${progressFillClass}`}
+                                            style={{ width: `${progressPercent}%` }}
+                                          />
+                                          {[25, 50, 75].map((mark) => (
+                                            <span
+                                              key={mark}
+                                              className={`pointer-events-none absolute top-0 h-full w-px ${progressPercent >= mark ? "bg-white/45" : "bg-gray-300/80"}`}
+                                              style={{ left: `${mark}%` }}
+                                            />
+                                          ))}
+                                        </div>
+                                        <div className="mt-1 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-gray-400">
+                                          <span>0%</span>
+                                          <span>25%</span>
+                                          <span>50%</span>
+                                          <span>75%</span>
+                                          <span>100%</span>
+                                        </div>
+                                      </div>
                                       {legTotal > 0 ? (
                                         <div className="mt-1 text-[11px] text-gray-500">
                                           {t("dashboard.activities.widget.legs")}: {legCompleted}/{legTotal}
@@ -1077,6 +1154,7 @@ export function PilotDashboard() {
                           </CardContent>
                         ) : null}
                      </Card>
+
                   </div>
                 </div>
               </div>
@@ -1187,6 +1265,12 @@ export function PilotDashboard() {
             {activeTab === "balance" && (
               <div className="animate-in fade-in duration-500">
                 <PilotBalance />
+              </div>
+            )}
+
+            {activeTab === "stream-widgets" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotStreamWidgets />
               </div>
             )}
 

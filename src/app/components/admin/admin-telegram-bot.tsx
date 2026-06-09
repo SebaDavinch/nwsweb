@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, MessageCircle, Save, Send, Shield, Webhook } from "lucide-react";
+import { Bell, Loader2, MessageCircle, Save, Send, Shield } from "lucide-react";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -21,10 +22,19 @@ interface TelegramBotSettings {
   };
   commands: {
     start: boolean;
+    menu: boolean;
+    link: boolean;
     help: boolean;
     ping: boolean;
+    profile: boolean;
+    booking: boolean;
     news: boolean;
     notams: boolean;
+    events: boolean;
+    roster: boolean;
+    metar: boolean;
+    taf: boolean;
+    settings: boolean;
     ticket: boolean;
   };
   updatedAt?: string | null;
@@ -46,19 +56,28 @@ interface TelegramBotConfigResponse {
 }
 
 const SYNC_FIELDS: Array<{ key: keyof TelegramBotSettings["sync"]; label: string; description: string }> = [
-  { key: "tickets", label: "Tickets", description: "Allow Telegram bot to create and update tickets." },
-  { key: "news", label: "News", description: "Allow Telegram bot to publish website news." },
-  { key: "notams", label: "NOTAMs", description: "Allow Telegram bot to create NOTAM entries." },
-  { key: "alerts", label: "Alerts", description: "Allow Telegram bot to create dashboard alerts and send PIREP review/status alerts to admin chats." },
+  { key: "tickets", label: "Тикеты", description: "Разрешить Telegram-боту создавать тикеты и отвечать в них." },
+  { key: "news", label: "Новости", description: "Разрешить Telegram-боту публиковать новости и события через сайт." },
+  { key: "notams", label: "NOTAM", description: "Разрешить Telegram-боту создавать NOTAM через backend сайта." },
+  { key: "alerts", label: "Оповещения", description: "Отправка staff-alert и тестовых уведомлений в admin chats." },
 ];
 
 const COMMAND_FIELDS: Array<{ key: keyof TelegramBotSettings["commands"]; label: string; description: string }> = [
-  { key: "start", label: "/start", description: "Greeting and onboarding command." },
-  { key: "help", label: "/help", description: "Command list and usage help." },
-  { key: "ping", label: "/ping", description: "Simple health check." },
-  { key: "news", label: "/news", description: "Latest website news feed." },
-  { key: "notams", label: "/notams", description: "Operational NOTAM feed." },
-  { key: "ticket", label: "/ticket", description: "Create website support tickets from Telegram." },
+  { key: "start", label: "/start", description: "Открыть стартовое сообщение и главное меню." },
+  { key: "menu", label: "/menu", description: "Показать инлайн-меню бота." },
+  { key: "link", label: "/link", description: "Привязать Telegram к профилю пилота по коду." },
+  { key: "help", label: "/help", description: "Список доступных команд." },
+  { key: "ping", label: "/ping", description: "Быстрая проверка, что бот онлайн." },
+  { key: "profile", label: "/profile", description: "Профиль пилота." },
+  { key: "booking", label: "/booking", description: "Текущий букинг пилота." },
+  { key: "ticket", label: "/ticket", description: "Список тикетов, создание и ответы через Telegram." },
+  { key: "news", label: "/news", description: "Последние новости сайта." },
+  { key: "notams", label: "/notams", description: "Оперативные NOTAM." },
+  { key: "events", label: "/events", description: "Ближайшие события." },
+  { key: "roster", label: "/roster", description: "Ростер пилотов." },
+  { key: "metar", label: "/metar", description: "Погода METAR по ICAO." },
+  { key: "taf", label: "/taf", description: "Прогноз TAF по ICAO." },
+  { key: "settings", label: "/settings", description: "Настройки Telegram-уведомлений пилота." },
 ];
 
 const parseAdminChatIds = (value: string) =>
@@ -70,6 +89,7 @@ const parseAdminChatIds = (value: string) =>
 export function AdminTelegramBot() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSendingTest, setIsSendingTest] = useState(false);
   const [settings, setSettings] = useState<TelegramBotSettings | null>(null);
   const [ticketCategories, setTicketCategories] = useState<TicketCategory[]>([]);
   const [adminChatInput, setAdminChatInput] = useState("");
@@ -129,6 +149,26 @@ export function AdminTelegramBot() {
     }
   };
 
+  const sendTestNotification = async () => {
+    setIsSendingTest(true);
+    try {
+      const response = await fetch("/api/admin/telegram-bot/test-notification", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(String(payload?.error || "Не удалось отправить тестовое уведомление Telegram"));
+      }
+      toast.success("Тестовое уведомление Telegram отправлено");
+    } catch (error) {
+      toast.error(String(error instanceof Error ? error.message : "Не удалось отправить тестовое уведомление Telegram"));
+    } finally {
+      setIsSendingTest(false);
+    }
+  };
+
   if (isLoading || !settings) {
     return (
       <div className="flex items-center rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
@@ -143,13 +183,19 @@ export function AdminTelegramBot() {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Telegram Bot</h2>
           <p className="text-sm text-gray-500">
-            Manage Telegram bot runtime, allowed commands, content sync, admin chats and staff-side PIREP alerts.
+            Управление Telegram-ботом: меню, тикеты, pilot-уведомления и staff admin chats.
           </p>
         </div>
-        <Button onClick={save} disabled={isSaving} className="bg-[#E31E24] hover:bg-[#c91a1f]">
-          {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Save settings
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={sendTestNotification} disabled={isSendingTest}>
+            {isSendingTest ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Bell className="mr-2 h-4 w-4" />}
+            Отправить тест
+          </Button>
+          <Button onClick={save} disabled={isSaving} className="bg-[#E31E24] hover:bg-[#c91a1f]">
+            {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+            Сохранить настройки
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="settings" className="w-full">
@@ -168,8 +214,8 @@ export function AdminTelegramBot() {
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
                 <div>
-                  <div className="font-medium text-gray-900">Bot integration enabled</div>
-                  <div className="text-xs text-gray-500">Master switch for website to Telegram integration.</div>
+                  <div className="font-medium text-gray-900">Интеграция с ботом включена</div>
+                  <div className="text-xs text-gray-500">Главный переключатель Telegram-интеграции сайта.</div>
                 </div>
                 <Switch
                   checked={settings.enabled}
@@ -179,63 +225,18 @@ export function AdminTelegramBot() {
                 />
               </div>
 
-              <div className="grid gap-3 md:grid-cols-2">
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                  <div>
-                    <div className="font-medium text-gray-900">Long polling</div>
-                    <div className="text-xs text-gray-500">Default runtime mode for the current bot service.</div>
-                  </div>
-                  <Switch
-                    checked={settings.pollingEnabled}
-                    onCheckedChange={(checked) =>
-                      setSettings((prev) => (prev ? { ...prev, pollingEnabled: Boolean(checked) } : prev))
-                    }
-                  />
-                </div>
-
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                  <div>
-                    <div className="font-medium text-gray-900">Webhook mode</div>
-                    <div className="text-xs text-gray-500">Prepared for the next stage when webhook delivery is added.</div>
-                  </div>
-                  <Switch
-                    checked={settings.webhookEnabled}
-                    onCheckedChange={(checked) =>
-                      setSettings((prev) => (prev ? { ...prev, webhookEnabled: Boolean(checked) } : prev))
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-gray-600">Webhook URL</label>
-                <Input
-                  value={settings.webhookUrl || ""}
-                  onChange={(event) =>
-                    setSettings((prev) => (prev ? { ...prev, webhookUrl: event.target.value } : prev))
-                  }
-                  placeholder="https://your-domain.example/api/telegram/webhook"
-                />
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
+                Текущий Telegram runtime работает через long polling. Webhook в активный сценарий не входит и в админке больше не является рабочей настройкой.
               </div>
 
               <div className="grid gap-4 md:grid-cols-3">
                 <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
                   <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
                     <MessageCircle className="h-4 w-4 text-gray-500" />
-                    Bot mode
+                    Режим бота
                   </div>
                   <div className="mt-2 text-xs text-gray-500">
-                    {settings.pollingEnabled ? "Long polling is enabled." : "Long polling is disabled."}
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                    <Webhook className="h-4 w-4 text-gray-500" />
-                    Webhook
-                  </div>
-                  <div className="mt-2 text-xs text-gray-500">
-                    {settings.webhookEnabled ? "Webhook mode is enabled in config." : "Webhook mode is currently off."}
+                    {settings.pollingEnabled ? "Long polling включён." : "Long polling отключён в конфиге."}
                   </div>
                 </div>
 
@@ -245,7 +246,17 @@ export function AdminTelegramBot() {
                     Admin chats
                   </div>
                   <div className="mt-2 text-xs text-gray-500">
-                    {parseAdminChatIds(adminChatInput).length} configured admin chat{parseAdminChatIds(adminChatInput).length === 1 ? "" : "s"}.
+                    {parseAdminChatIds(adminChatInput).length} chat{parseAdminChatIds(adminChatInput).length === 1 ? "" : "s"} для staff-уведомлений.
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                    <Send className="h-4 w-4 text-gray-500" />
+                    Ticket flow
+                  </div>
+                  <div className="mt-2 text-xs text-gray-500">
+                    Создание, список, ответы и закрытие тикетов через Telegram-меню.
                   </div>
                 </div>
               </div>
@@ -256,7 +267,7 @@ export function AdminTelegramBot() {
         <TabsContent value="sync" className="space-y-6">
           <Card className="border-none shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Content sync</CardTitle>
+              <CardTitle className="text-base">Синхронизация</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
               {SYNC_FIELDS.map((item) => (
@@ -273,12 +284,12 @@ export function AdminTelegramBot() {
 
           <Card className="border-none shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Ticket categories available to the bot</CardTitle>
+              <CardTitle className="text-base">Категории тикетов для Telegram</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {enabledCategories.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-500">
-                  No ticket categories configured yet. The Telegram bot will not be able to create tickets until categories are added.
+                  Категории ещё не настроены. Пока список пуст, Telegram-бот не сможет создавать тикеты.
                 </div>
               ) : (
                 enabledCategories.map((category) => (
@@ -295,7 +306,7 @@ export function AdminTelegramBot() {
         <TabsContent value="commands" className="space-y-6">
           <Card className="border-none shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Enabled commands</CardTitle>
+              <CardTitle className="text-base">Доступные команды</CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {COMMAND_FIELDS.map((item) => (
@@ -312,14 +323,14 @@ export function AdminTelegramBot() {
 
           <Card className="border-none shadow-sm">
             <CardHeader>
-              <CardTitle className="text-base">Current stage</CardTitle>
+              <CardTitle className="text-base">Что сейчас реально работает</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm text-gray-600">
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                The current Telegram bot already supports content reading and ticket/content creation through the website backend.
+                Инлайн-меню, профиль, букинг, новости, NOTAM, события, ростер, METAR, TAF, тикеты и пользовательские настройки уведомлений.
               </div>
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-                Next stage: inline buttons, ticket thread sync, notifications to admin chats, and optional webhook delivery.
+                PIREP-уведомления идут по статусам review/accepted/rejected/invalidated и по сценариям, где пилоту нужен ответ.
               </div>
             </CardContent>
           </Card>
@@ -340,12 +351,12 @@ export function AdminTelegramBot() {
                   className="min-h-40"
                 />
                 <div className="text-xs text-gray-500">
-                  These chats are allowed to use admin-only Telegram commands like content publishing.
+                  Эти чаты получают test/staff уведомления и используются как staff endpoint для Telegram.
                 </div>
               </div>
 
               <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600">
-                Telegram does not have guild roles like Discord, so access is currently managed by explicit chat IDs.
+                В Telegram нет ролей как в Discord, поэтому доступ staff задаётся явным списком chat ID.
               </div>
 
               <div className="grid gap-3 md:grid-cols-2">

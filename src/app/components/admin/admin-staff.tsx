@@ -161,6 +161,23 @@ export function AdminStaff() {
   const [reloadToken, setReloadToken] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
   const autoSyncTriggeredRef = useRef(false);
+  const [loggedInSet, setLoggedInSet] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    fetch("/api/admin/auth-logs?limit=500", { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => {
+        const entries: { actor?: { username?: string; id?: string } }[] =
+          Array.isArray(data?.entries) ? data.entries : [];
+        const ids = new Set<string>();
+        entries.forEach((e) => {
+          if (e?.actor?.username) ids.add(String(e.actor.username).toLowerCase());
+          if (e?.actor?.id) ids.add(String(e.actor.id));
+        });
+        setLoggedInSet(ids);
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -228,6 +245,23 @@ export function AdminStaff() {
         </Button>
       }
       columns={[
+        {
+          key: "username",
+          label: tr("Статус входа", "Login status"),
+          render: (item) => {
+            const username = String(item.username || "").toLowerCase();
+            const pilotId = String(item.pilotId || "");
+            const hasLogin =
+              (username && loggedInSet.has(username)) ||
+              (pilotId && loggedInSet.has(pilotId));
+            return (
+              <span
+                title={hasLogin ? tr("Заходил на сайт", "Has logged in") : tr("Никогда не заходил", "Never logged in")}
+                className={`inline-block h-2.5 w-2.5 rounded-full ${hasLogin ? "bg-green-500" : "bg-gray-300"}`}
+              />
+            );
+          },
+        },
         { key: "name", label: tr("Имя", "Name") },
         { key: "username", label: tr("Логин", "Username") },
         { key: "handle", label: tr("Хэндл", "Handle") },

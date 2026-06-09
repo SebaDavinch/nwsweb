@@ -18,6 +18,7 @@ import { AdminAirportsManagement, AdminHubsManagement } from "./admin-network-pa
 import { AdminTickets } from "./admin-tickets";
 import { AdminDiscordBot } from "./admin-discord-bot";
 import { AdminTelegramBot } from "./admin-telegram-bot";
+import { AdminVkBot } from "./admin-vk-bot";
 import { AdminAuditLogs } from "./admin-audit-logs";
 import { AdminAuthLogs } from "./admin-auth-logs";
 import { AdminBannerGeneratorPage } from "./admin-banner-generator";
@@ -62,7 +63,7 @@ import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
 const ADMIN_PAGES = new Set([
   "fleet", "news", "activities", "notams", "pilots", "pilot-profile", "documents",
   "events", "staff", "badges", "bookings", "routes", "pireps", "pirep-detail",
-  "airports", "hubs", "tickets", "discord-bot", "telegram-bot",
+  "airports", "hubs", "tickets", "discord-bot", "telegram-bot", "vk-bot",
   "banner-generator", "acars", "settings", "audit-logs", "auth-logs", "gallery",
   "callsign-checker",
 ]);
@@ -87,6 +88,7 @@ function AdminPageContent({ page, pageId }: { page: string; pageId: number }) {
   if (page === "tickets") return <AdminTickets />;
   if (page === "discord-bot") return <AdminDiscordBot />;
   if (page === "telegram-bot") return <AdminTelegramBot />;
+  if (page === "vk-bot") return <AdminVkBot />;
   if (page === "banner-generator") return <AdminBannerGeneratorPage />;
   if (page === "gallery") return <AdminGallery />;
   if (page === "callsign-checker") return <AdminCallsignChecker />;
@@ -216,6 +218,7 @@ export function AdminLayout() {
           { page: "acars", icon: Radio, label: tr("Кэш телеметрии", "Telemetry Cache") },
           { page: "discord-bot", icon: Bot, label: tr("Discord", "Discord") },
           { page: "telegram-bot", icon: Send, label: tr("Telegram", "Telegram") },
+          { page: "vk-bot", icon: Bot, label: tr("VK", "VK") },
           { page: "settings", icon: Settings, label: tr("Настройки", "Settings") },
           { page: "staff", icon: ShieldCheck, label: tr("Персонал", "Staff") },
           { page: "audit-logs", icon: ClipboardList, label: tr("Журнал аудита", "Audit Log") },

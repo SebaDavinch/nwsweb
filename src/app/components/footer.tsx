@@ -3,17 +3,19 @@ import { Link } from "react-router";
 import { useLanguage } from "../context/language-context";
 import { Button } from "./ui/button";
 import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
-import vatsimLogo from "@/assets/Logo_VATSIM.png";
 import ragLogo from "@/assets/rag-logo-original.png";
 import { useSiteDesign } from "../hooks/use-site-design";
 
 export function Footer() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const design = useSiteDesign();
+  const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const primaryColor = design.primaryColor || "#E31E24";
   const accentColor = design.accentColor || "#2A2A2A";
   const footerLogo = design.footerLogoDataUrl || logo;
   const myNextAirlineLogoUrl = "https://mynextairline.com/images/logo-light.png";
+  const vkCommunityUrl = String(design.vkCommunityUrl || "").trim();
+  const vkCommunityName = String(design.vkCommunityName || "").trim() || "VK";
 
   return (
     <footer className="text-white mt-auto" style={{ backgroundColor: accentColor }}>
@@ -81,6 +83,17 @@ export function Footer() {
                 <ExternalLink size={16} />
                 <span>Discord</span>
               </a>
+              {vkCommunityUrl ? (
+                <a
+                  href={vkCommunityUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-gray-100 transition-colors hover:bg-white/10"
+                >
+                  <ExternalLink size={16} />
+                  <span>{tr("VK-сообщество", "VK community")}: {vkCommunityName}</span>
+                </a>
+              ) : null}
               <div>
                 <Button asChild className="bg-[#E31E24] text-white hover:bg-[#c41a20]">
                   <Link to="/tickets">
@@ -95,28 +108,7 @@ export function Footer() {
 
         {/* Partner logos */}
         <div className="border-t border-gray-700 mt-8 pt-8">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 xl:items-stretch">
-            <a
-              href="https://vatsim.net/"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="VATSIM"
-              className="group flex min-h-[138px] flex-col items-start justify-between rounded-2xl border border-white/10 bg-white/5 p-4 transition-colors hover:bg-white/10"
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-gray-400">
-                {t("footer.partners.official")}
-              </div>
-              <img
-                src={vatsimLogo}
-                alt="VATSIM"
-                className="h-auto max-h-[64px] w-full max-w-[260px] object-contain"
-                loading="lazy"
-              />
-              <div className="text-[10px] font-semibold uppercase tracking-[0.26em] text-cyan-300/80">
-                Aviate Educate Communicate
-              </div>
-            </a>
-
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:items-stretch">
             <a
               href="https://vamsys.io/register/rag"
               target="_blank"
@@ -130,7 +122,7 @@ export function Footer() {
               <img
                 src={ragLogo}
                 alt="Russian Airways Group"
-                className="h-auto max-h-[52px] w-full max-w-[250px] object-contain"
+                className="h-auto max-h-[57px] w-full max-w-[250px] object-contain"
                 loading="lazy"
               />
               <div className="text-sm text-gray-300">
@@ -151,7 +143,7 @@ export function Footer() {
               <img
                 src={myNextAirlineLogoUrl}
                 alt="MyNextAirline"
-                className="h-auto max-h-[42px] w-full max-w-[250px] object-contain"
+                className="h-auto max-h-[47px] w-full max-w-[250px] object-contain"
                 loading="lazy"
               />
               <div className="text-sm text-gray-300">My Next Airline</div>

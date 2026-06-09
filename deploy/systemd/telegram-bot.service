@@ -1,0 +1,26 @@
+[Unit]
+Description=Nordwind Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nordwind
+Group=nordwind
+WorkingDirectory=/opt/nordwindsite/telegram-bot
+Environment=NODE_ENV=production
+EnvironmentFile=-/opt/nordwindsite/.env
+EnvironmentFile=-/opt/nordwindsite/telegram-bot/.env
+ExecStart=/usr/bin/node /opt/nordwindsite/telegram-bot/src/index.js
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nordwind-telegram-bot
+
+[Install]
+WantedBy=multi-user.target
