@@ -5,6 +5,8 @@ import { useAuth } from "../../context/auth-context";
 import { useLiveFlights } from "./use-live-flights";
 import { useAppHealth, type ServiceState } from "./use-app-health";
 import { externalLinkProps } from "./open-external";
+import { RadioNowPlaying } from "./radio-now-playing";
+import { useAppConfig } from "./use-app-config";
 
 const SITE_URL = "https://vnws.org";
 const DISCORD_URL = "https://discord.gg/MfTT8KU5yC";
@@ -55,6 +57,7 @@ export function LiveStatsBar() {
   const { language } = useLanguage();
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const { pilot, isAuthenticated, isAuthLoading } = useAuth();
+  const { config } = useAppConfig();
   const { flights, count, byVac, loading } = useLiveFlights();
   const { backend, vamsys } = useAppHealth();
   const utc = useUtcClock();
@@ -93,6 +96,12 @@ export function LiveStatsBar() {
           <VacChip label="KAR" count={byVac.KAR} color="#2563eb" />
           <VacChip label="STW" count={byVac.STW} color="#ea580c" />
         </div>
+        {isAuthenticated && config.features.radio ? (
+          <>
+            <span className="hidden h-3 w-px bg-zinc-300 dark:bg-white/10 sm:block" />
+            <RadioNowPlaying />
+          </>
+        ) : null}
       </div>
 
       {/* Справа: мой рейс · статусы · UTC · ссылки */}

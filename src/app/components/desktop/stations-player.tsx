@@ -1,18 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { Play, Pause, Volume2, VolumeX, Radio, Loader2, Headphones, Info } from "lucide-react";
 import { useLanguage } from "../../context/language-context";
 import { useAppConfig } from "./use-app-config";
-import { useAudioOutputs, getSavedSinkId, setSavedSinkId, isSinkSelectable } from "./use-audio-outputs";
-
-const VOL_KEY = "nws.radio.station.volume";
-
-type AudioWithSink = HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+import { useAudioOutputs, isSinkSelectable } from "./use-audio-outputs";
+import { useRadio, playStation, setRadioVolume, setRadioSink } from "./use-radio";
 
 export function StationsPlayer() {
   const { language } = useLanguage();
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const { config } = useAppConfig();
   const { devices, refresh } = useAudioOutputs();
+  // Воспроизведение — из общего стора (переживает навигацию, синхрон с виджетом в футере).
+  const { station, playing, loading, volume, sinkId } = useRadio();
 
   const allStations = (config.radioStations || []).filter(
     (s) => s.url && s.kind !== "youtube" && !/youtube\.com|youtu\.be/.test(s.url)
@@ -27,78 +26,22 @@ export function StationsPlayer() {
   ];
   const presentRegions = new Set(allStations.map((s) => String(s.region || "other")));
   const stations = region === "all" ? allStations : allStations.filter((s) => String(s.region || "other") === region);
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [playing, setPlaying] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [volume, setVolume] = useState<number>(() => {
-    const v = Number(window.localStorage.getItem(VOL_KEY));
-    return Number.isFinite(v) && v >= 0 && v <= 100 ? v : 70;
-  });
-  const [sinkId, setSinkId] = useState<string>(getSavedSinkId);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const activeId = station?.id ?? null;
 
-  useEffect(() => {
-    window.localStorage.setItem(VOL_KEY, String(volume));
-    if (audioRef.current) audioRef.current.volume = volume / 100;
-  }, [volume]);
-
-  // применить выбранное устройство вывода
-  useEffect(() => {
-    const a = audioRef.current as AudioWithSink | null;
-    if (a?.setSinkId && sinkId) {
-      a.setSinkId(sinkId).catch(() => {
-        /* устройство недоступно */
-      });
-    }
-  }, [sinkId, activeId]);
-
-  const play = async (id: string, url: string) => {
-    const a = audioRef.current as AudioWithSink | null;
-    if (!a) return;
-    if (activeId === id && playing) {
-      a.pause();
-      setPlaying(false);
-      return;
-    }
-    setActiveId(id);
-    setLoading(true);
-    a.src = url;
-    a.volume = volume / 100;
-    try {
-      if (a.setSinkId && sinkId) await a.setSinkId(sinkId).catch(() => {});
-      await a.play();
-      setPlaying(true);
-      void refresh(); // после play появятся метки устройств
-    } catch {
-      setPlaying(false);
-    } finally {
-      setLoading(false);
-    }
+  const play = async (id: string, name: string, url: string) => {
+    await playStation({ id, name, url });
+    void refresh(); // после play появятся метки устройств
   };
 
   return (
     <div className="space-y-3">
-      {/* скрытый аудио-элемент */}
-      <audio
-        ref={audioRef}
-        onPlaying={() => {
-          setPlaying(true);
-          setLoading(false);
-        }}
-        onPause={() => setPlaying(false)}
-        onWaiting={() => setLoading(true)}
-      />
-
       {/* Выбор устройства вывода */}
       <div className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2 dark:border-white/10 dark:bg-zinc-900">
         <Headphones className="h-4 w-4 shrink-0 text-zinc-400" />
         {isSinkSelectable() ? (
           <select
             value={sinkId}
-            onChange={(e) => {
-              setSinkId(e.target.value);
-              setSavedSinkId(e.target.value);
-            }}
+            onChange={(e) => setRadioSink(e.target.value)}
             className="flex-1 bg-transparent text-sm text-zinc-700 focus:outline-none dark:text-zinc-200"
           >
             <option value="">{tr("Устройство по умолчанию", "Default device")}</option>
@@ -111,7 +54,7 @@ export function StationsPlayer() {
         ) : (
           <span className="text-xs text-zinc-400">{tr("Выбор устройства недоступен", "Device selection unavailable")}</span>
         )}
-        <button type="button" onClick={() => setVolume((v) => (v > 0 ? 0 : 70))} className="text-zinc-400">
+        <button type="button" onClick={() => setRadioVolume(volume > 0 ? 0 : 70)} className="text-zinc-400">
           {volume > 0 ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
         </button>
         <input
@@ -119,7 +62,7 @@ export function StationsPlayer() {
           min={0}
           max={100}
           value={volume}
-          onChange={(e) => setVolume(Number(e.target.value))}
+          onChange={(e) => setRadioVolume(Number(e.target.value))}
           className="w-24 accent-red-500"
         />
       </div>
@@ -157,7 +100,7 @@ export function StationsPlayer() {
                 <div key={s.id} className={`flex items-center gap-3 px-4 py-2.5 ${active ? "bg-red-50/60 dark:bg-red-500/5" : ""}`}>
                   <button
                     type="button"
-                    onClick={() => void play(s.id, s.url)}
+                    onClick={() => void play(s.id, s.name || s.url, s.url)}
                     className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-400"
                   >
                     {active && loading ? (

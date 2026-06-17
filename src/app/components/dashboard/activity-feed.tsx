@@ -99,36 +99,36 @@ function FeedRow({ item, language }: { item: FeedItem; language: string }) {
 
   const body = (
     <div className="flex items-start gap-3">
-      <div className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-50">
+      <div className="relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gray-50 dark:bg-white/5">
         <Icon className={`h-4.5 w-4.5 ${meta.accent}`} />
-        {item.vac ? <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${VAC_COLOR[item.vac] || "bg-gray-400"}`} /> : null}
+        {item.vac ? <span className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-zinc-900 ${VAC_COLOR[item.vac] || "bg-gray-400"}`} /> : null}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-          {actorName ? <span className="text-sm font-semibold text-gray-900">{actorName}</span> : null}
-          <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500">
+          {actorName ? <span className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{actorName}</span> : null}
+          <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:bg-white/10 dark:text-zinc-400">
             {tr(meta.labelRu, meta.labelEn)}
           </span>
-          <span className="text-xs text-gray-400">{timeAgo(item.createdAt, language)}</span>
+          <span className="text-xs text-gray-400 dark:text-zinc-500">{timeAgo(item.createdAt, language)}</span>
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5 text-sm text-gray-700">
+        <div className="mt-0.5 flex items-center gap-1.5 text-sm text-gray-700 dark:text-zinc-300">
           <span className="font-semibold">{item.title}</span>
           {item.route ? (
-            <span className="inline-flex items-center gap-1 text-gray-500">
+            <span className="inline-flex items-center gap-1 text-gray-500 dark:text-zinc-400">
               <Flag icao={item.route.from} />
               <span className="font-mono text-xs">{item.route.from}</span>
-              <Plane className="h-3 w-3 text-gray-300" />
+              <Plane className="h-3 w-3 text-gray-300 dark:text-zinc-600" />
               <Flag icao={item.route.to} />
               <span className="font-mono text-xs">{item.route.to}</span>
             </span>
           ) : null}
         </div>
         {item.summary && !item.route ? (
-          <div className="mt-0.5 truncate text-xs text-gray-500">{item.summary}</div>
+          <div className="mt-0.5 truncate text-xs text-gray-500 dark:text-zinc-400">{item.summary}</div>
         ) : null}
       </div>
       {item.media?.url ? (
-        <div className="relative h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100">
+        <div className="relative h-12 w-16 shrink-0 overflow-hidden rounded-lg bg-gray-100 dark:bg-white/5">
           <img src={item.media.url} alt="" className="h-full w-full object-cover" loading="lazy" />
           {item.media.likeCount > 0 ? (
             <span className="absolute bottom-0.5 right-0.5 flex items-center gap-0.5 rounded bg-black/55 px-1 text-[9px] font-bold text-white">
@@ -141,7 +141,7 @@ function FeedRow({ item, language }: { item: FeedItem; language: string }) {
     </div>
   );
 
-  const cls = "block rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-gray-100 hover:bg-gray-50";
+  const cls = "block rounded-xl border border-transparent px-3 py-2.5 transition-colors hover:border-gray-100 hover:bg-gray-50 dark:hover:border-white/10 dark:hover:bg-white/5";
   return item.href ? (
     <a href={item.href} className={cls}>
       {body}
@@ -164,18 +164,18 @@ export function ActivityFeed({ limit = 30, className = "" }: { limit?: number; c
     <div className={className}>
       <div className="mb-2 flex items-center gap-2">
         <ActivityIcon className="h-4.5 w-4.5 text-[#E31E24]" />
-        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-600">
+        <h2 className="text-sm font-bold uppercase tracking-wide text-gray-600 dark:text-zinc-300">
           {tr("Лента сообщества", "Community feed")}
         </h2>
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-200 py-10 text-sm text-gray-400">
+        <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-gray-200 py-10 text-sm text-gray-400 dark:border-white/10 dark:text-zinc-500">
           <Loader2 className="h-4 w-4 animate-spin" />
           {tr("Загрузка…", "Loading…")}
         </div>
       ) : error || feed.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400">
+        <div className="rounded-xl border border-dashed border-gray-200 py-10 text-center text-sm text-gray-400 dark:border-white/10 dark:text-zinc-500">
           {tr("Пока тихо. Загляните позже.", "Quiet for now. Check back later.")}
         </div>
       ) : (

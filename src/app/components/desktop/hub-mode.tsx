@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
 import {
   Home,
   Activity,
@@ -11,7 +12,6 @@ import {
   Newspaper,
   MessageSquare,
   Map as MapIcon,
-  Radio as RadioIcon,
   RadioTower,
   Package,
   Trophy,
@@ -72,6 +72,7 @@ export function HubMode() {
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const { isAuthenticated, isAuthLoading } = useAuth();
   const { config } = useAppConfig();
+  const location = useLocation();
   const [section, setSection] = useState<HubSection>(() => {
     try {
       const s = new URLSearchParams(window.location.search).get("section");
@@ -96,6 +97,16 @@ export function HubMode() {
       /* ignore */
     }
   }, [collapsed]);
+
+  // Реакция на ?section= в URL (напр. переход из футер-виджета «Радио»).
+  // Внутренние клики по рейлу URL не меняют, поэтому этот эффект их не перетирает.
+  useEffect(() => {
+    const s = new URLSearchParams(location.search).get("section");
+    if (s) {
+      setSection(s as HubSection);
+      if (s !== "recent") setPirepId(null);
+    }
+  }, [location.search]);
 
   const openPirep = (id: number) => {
     setPirepId(id);
@@ -124,7 +135,6 @@ export function HubMode() {
     { id: "notams", label: "NOTAM", icon: <ShieldAlert className="h-4 w-4" /> },
     { id: "news", label: tr("Новости", "News"), icon: <Newspaper className="h-4 w-4" /> },
     { id: "map", label: tr("Карта", "Map"), icon: <MapIcon className="h-4 w-4" /> },
-    { id: "radio", label: tr("Радио", "Radio"), icon: <RadioIcon className="h-4 w-4" /> },
     { id: "acars", label: tr("ACARS", "ACARS"), icon: <RadioTower className="h-4 w-4" /> },
     { id: "chat", label: tr("Чат", "Chat"), icon: <MessageSquare className="h-4 w-4" /> },
     { id: "changelog", label: tr("Что нового", "Changelog"), icon: <Package className="h-4 w-4" /> },
@@ -133,7 +143,6 @@ export function HubMode() {
   const items = allItems.filter((item) => {
     if (item.id === "chat") return config.features.chat;
     if (item.id === "map") return config.features.map;
-    if (item.id === "radio") return config.features.radio;
     if (item.id === "gallery") return config.features.screenshots;
     return true;
   });
@@ -196,8 +205,10 @@ export function HubMode() {
           <HubOverview onOpenPirep={openPirep} onOpenNotams={() => setSection("notams")} onOpenActivities={() => setSection("activities")} />
         </div>
       ) : (
-      /* Контент секции — светлый «лист» (переиспользуемые ЛК-компоненты), читаемо в обеих темах */
-      <div className="nws-scroll-hover flex-1 overflow-y-auto bg-zinc-100 p-5 text-zinc-900">
+      /* Контент секции — «лист» следует теме: светлый в light, тёмный в dark.
+         Раньше был жёстко светлый, но `.dark` на корне AppShell включал dark:-варианты
+         переиспользуемых компонентов → тёмные блоки на светлом фоне («тема сломана»). */
+      <div className="nws-scroll-hover flex-1 overflow-y-auto bg-zinc-100 p-5 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
         {section === "recent" &&
           (pirepId !== null ? (
             <PilotPirepDetail pirepId={pirepId} onBack={() => setPirepId(null)} />
@@ -218,7 +229,7 @@ export function HubMode() {
           </div>
         )}
         {section === "feed" && (
-          <div className="mx-auto max-w-2xl rounded-2xl bg-white p-4 shadow-sm">
+          <div className="mx-auto max-w-2xl rounded-2xl bg-white p-4 shadow-sm dark:bg-zinc-900">
             <ActivityFeed limit={40} />
           </div>
         )}
