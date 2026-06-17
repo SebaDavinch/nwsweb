@@ -18,7 +18,6 @@ import { useAppTheme } from "./use-app-theme";
 import { NotificationCenter } from "../dashboard/notification-center";
 import { icaoToCountry, getFlagUri } from "../dashboard/flag-data";
 import { useActiveBooking } from "./use-active-booking";
-import { NordwindJet } from "./nordwind-jet";
 import { HubAgenda } from "./hub-agenda";
 import { useActivityProgress } from "./use-activity-progress";
 
@@ -220,8 +219,6 @@ export function HubOverview({
             </h1>
             <p className={`mt-1 max-w-md text-sm ${isDark ? "text-white/70" : "text-zinc-500"}`}>{t("app.hub.subtitle")}</p>
           </div>
-          {/* Декоративный борт сбоку — парит, оживляет страницу (левее колокольчика, на широких экранах) */}
-          <NordwindJet className="nws-float pointer-events-none absolute right-16 top-1/2 hidden h-24 w-auto -translate-y-1/2 opacity-80 drop-shadow-xl lg:block xl:right-20 xl:h-28" />
           <div className="relative z-10">
             <NotificationCenter />
           </div>

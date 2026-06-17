@@ -31,6 +31,15 @@
 ::view-transition-new(root) {
   z-index: 9999;
 }
+/* Снимки перехода — чисто визуальные: они НИКОГДА не должны перехватывать клики.
+   Защита от «зависшего» оверлея перехода, делающего приложение некликабельным. */
+::view-transition,
+::view-transition-group(*),
+::view-transition-image-pair(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  pointer-events: none;
+}
 
 /* Leaflet custom styles */
 .leaflet-popup-content-wrapper {

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "../../context/language-context";
 import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
-import { NordwindJet } from "./nordwind-jet";
 
 // Авиа-надписи под баром загрузки (с лёгким юмором, как просили).
 const PHRASES: { ru: string; en: string }[] = [
@@ -32,6 +31,7 @@ export function AppSplash({ ready, onDone }: { ready: boolean; onDone: () => voi
   const [fading, setFading] = useState(false);
   const startRef = useRef<number>(Date.now());
   const doneRef = useRef(false);
+  const doneTimer = useRef<number | undefined>(undefined);
 
   // Прогресс-бар: пока не готово — асимптота к 92%; когда готово — добегает до 100%.
   useEffect(() => {
@@ -66,10 +66,15 @@ export function AppSplash({ ready, onDone }: { ready: boolean; onDone: () => voi
     if (finished && progress >= 99) {
       doneRef.current = true;
       setFading(true);
-      const t = window.setTimeout(onDone, FADE_MS);
-      return () => window.clearTimeout(t);
+      // НЕ возвращаем cleanup, который чистит таймер: эффект перезапускается
+      // каждый кадр (progress меняется), и cleanup отменял бы onDone → сплэш
+      // зависал бы невидимым оверлеем и блокировал клики. Чистим только при размонтировании.
+      doneTimer.current = window.setTimeout(onDone, FADE_MS);
     }
   }, [ready, progress, onDone]);
+
+  // Очистка таймера завершения только при размонтировании.
+  useEffect(() => () => { if (doneTimer.current) window.clearTimeout(doneTimer.current); }, []);
 
   // Гарантированный фолбэк-таймаут (если progress по какой-то причине застрял).
   useEffect(() => {
@@ -87,16 +92,13 @@ export function AppSplash({ ready, onDone }: { ready: boolean; onDone: () => voi
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden bg-zinc-950 transition-opacity"
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center overflow-hidden bg-zinc-950 transition-opacity ${fading ? "pointer-events-none" : ""}`}
       style={{ opacity: fading ? 0 : 1, transitionDuration: `${FADE_MS}ms` }}
     >
       {/* Фоновое красное свечение */}
       <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-red-600/20 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-32 -right-24 h-96 w-96 rounded-full bg-red-900/30 blur-3xl" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_-10%,rgba(239,68,68,0.14),transparent_45%)]" />
-
-      {/* Парящий борт на фоне */}
-      <NordwindJet className="nws-float pointer-events-none absolute right-[-60px] top-12 h-28 w-auto opacity-10" />
 
       {/* Лого */}
       <div className="relative mb-8 flex items-center justify-center rounded-3xl border border-white/10 bg-zinc-900/70 px-9 py-6 shadow-[0_20px_60px_rgba(0,0,0,0.5)] backdrop-blur">

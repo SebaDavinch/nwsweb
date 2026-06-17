@@ -47,10 +47,17 @@ function toggleThemeAnimated(next: AppTheme, origin?: { x: number; y: number }) 
   // максимальный радиус до самого дальнего угла экрана
   const endRadius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
 
-  const transition = start.call(document, () => {
-    // синхронный коммит React, чтобы VT снял корректный «после»-снимок
-    flushSync(() => setThemeStore(next));
-  });
+  let transition;
+  try {
+    transition = start.call(document, () => {
+      // синхронный коммит React, чтобы VT снял корректный «после»-снимок
+      flushSync(() => setThemeStore(next));
+    });
+  } catch {
+    // Если View Transition не запустился — просто меняем тему без анимации.
+    setThemeStore(next);
+    return;
+  }
 
   transition.ready
     .then(() => {
