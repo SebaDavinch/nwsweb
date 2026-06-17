@@ -22,6 +22,36 @@ import {
 } from "../ui/alert-dialog";
 import { FlightMap, type Route as FlightMapRoute } from "./flight-map";
 import { PassengerManifest } from "./passenger-manifest";
+import { FlightPhaseBadge, normalizeFlightPhase, type FlightPhase } from "./flight-phase";
+
+interface LiveFlight {
+  flightNumber?: string;
+  status?: string;
+  currentPhase?: string;
+  altitude?: number | null;
+  speed?: number | null;
+  heading?: number | null;
+  progress?: number | null;
+  eta?: string;
+  ete?: string;
+  remainingDistanceNm?: number | null;
+  currentLat?: number | null;
+  currentLon?: number | null;
+  departureLat?: number | null;
+  departureLon?: number | null;
+  arrivalLat?: number | null;
+  arrivalLon?: number | null;
+  hasLiveTelemetry?: boolean;
+}
+
+interface FlightMapResponse {
+  flights?: LiveFlight[];
+}
+
+const LIVE_POLL_MS = 12_000;
+
+const normalizeCallsign = (value?: string | null) =>
+  String(value || "").trim().toUpperCase().replace(/\s+/g, "");
 
 interface Booking {
   id: number;
@@ -227,6 +257,7 @@ export function PilotBookingView() {
   const [isCancelling, setIsCancelling] = useState(false);
   const [isOpeningSimbrief, setIsOpeningSimbrief] = useState(false);
   const [isRefreshingSimbrief, setIsRefreshingSimbrief] = useState(false);
+  const [liveFlight, setLiveFlight] = useState<LiveFlight | null>(null);
 
   useEffect(() => {
     if (!booking?.network) {
@@ -343,6 +374,65 @@ export function PilotBookingView() {
       active = false;
     };
   }, [bookingId, t]);
+
+  // Live flight tracking — poll the flight map and match the active flight to this booking
+  useEffect(() => {
+    if (!booking) {
+      return;
+    }
+
+    const candidates = [normalizeCallsign(booking.callsign), normalizeCallsign(booking.flightNumber)].filter(Boolean);
+    if (!candidates.length) {
+      return;
+    }
+
+    let active = true;
+
+    const poll = async () => {
+      try {
+        const response = await fetch("/api/vamsys/flight-map", { credentials: "include" });
+        if (!response.ok) {
+          return;
+        }
+        const payload = (await response.json().catch(() => null)) as FlightMapResponse | null;
+        if (!active) {
+          return;
+        }
+        const flights = Array.isArray(payload?.flights) ? payload.flights : [];
+        const match =
+          flights.find((flight) => candidates.includes(normalizeCallsign(flight.flightNumber))) || null;
+        setLiveFlight(match);
+      } catch {
+        /* keep last known live state on transient errors */
+      }
+    };
+
+    void poll();
+    const timer = window.setInterval(() => void poll(), LIVE_POLL_MS);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [booking]);
+
+  const livePhase = useMemo<FlightPhase | null>(() => {
+    if (!liveFlight) {
+      return null;
+    }
+    return normalizeFlightPhase(liveFlight.currentPhase || liveFlight.status, {
+      altitude: liveFlight.altitude,
+      speed: liveFlight.speed,
+      heading: liveFlight.heading,
+      progress: liveFlight.progress,
+      currentLat: liveFlight.currentLat,
+      currentLon: liveFlight.currentLon,
+      departureLat: liveFlight.departureLat,
+      departureLon: liveFlight.departureLon,
+      arrivalLat: liveFlight.arrivalLat,
+      arrivalLon: liveFlight.arrivalLon,
+    });
+  }, [liveFlight]);
 
   const mapRoute = useMemo<FlightMapRoute | null>(() => {
     if (!booking || !route) {
@@ -696,10 +786,72 @@ export function PilotBookingView() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-0.5">Статус</div>
-                      <Badge variant="outline" className="border-gray-200 text-gray-600">{booking.statusLabel}</Badge>
+                      <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-1">Статус</div>
+                      {livePhase ? (
+                        <FlightPhaseBadge phase={livePhase} size="lg" />
+                      ) : (
+                        <Badge variant="outline" className="border-gray-200 text-gray-600">{booking.statusLabel}</Badge>
+                      )}
                     </div>
                   </div>
+
+                  {/* Live tracking strip */}
+                  {liveFlight && (
+                    <div className="border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white px-6 py-4">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-emerald-600">
+                          <span className="relative flex h-2 w-2">
+                            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+                          </span>
+                          {t("phase.live")}
+                        </span>
+                        {typeof liveFlight.progress === "number" && (
+                          <span className="font-mono text-xs font-semibold text-gray-500">
+                            {Math.round(liveFlight.progress)}%
+                          </span>
+                        )}
+                      </div>
+                      {/* progress bar */}
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600 transition-all duration-700"
+                          style={{ width: `${Math.max(0, Math.min(100, Math.round(Number(liveFlight.progress) || 0)))}%` }}
+                        />
+                      </div>
+                      {/* telemetry chips */}
+                      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                        {[
+                          {
+                            label: "ALT",
+                            value:
+                              typeof liveFlight.altitude === "number"
+                                ? liveFlight.altitude >= 1000
+                                  ? `FL${Math.round(liveFlight.altitude / 100)}`
+                                  : `${Math.round(liveFlight.altitude)} ft`
+                                : "—",
+                          },
+                          {
+                            label: "GS",
+                            value: typeof liveFlight.speed === "number" ? `${Math.round(liveFlight.speed)} kt` : "—",
+                          },
+                          {
+                            label: "DIST REM",
+                            value:
+                              typeof liveFlight.remainingDistanceNm === "number"
+                                ? `${Math.round(liveFlight.remainingDistanceNm)} nm`
+                                : "—",
+                          },
+                          { label: "ETE", value: liveFlight.ete || "—" },
+                        ].map(({ label, value }) => (
+                          <div key={label} className="rounded-lg bg-white px-3 py-2 ring-1 ring-gray-100">
+                            <div className="text-[10px] uppercase tracking-widest text-gray-400">{label}</div>
+                            <div className="mt-0.5 font-mono text-sm font-bold text-gray-800">{value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Route display */}
                   <div className="px-6 py-5">

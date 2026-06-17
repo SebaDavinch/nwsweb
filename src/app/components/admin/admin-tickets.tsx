@@ -24,6 +24,20 @@ interface TicketConfig {
   assignees: TicketConfigItem[];
 }
 
+interface RouteReportBlockedPilot {
+  pilotId?: number | null;
+  username?: string | null;
+  name?: string | null;
+  reason?: string | null;
+  blockedAt?: string;
+}
+
+interface RouteReportSettings {
+  cooldownMinutes: number;
+  dailyLimit: number;
+  blockedPilots: RouteReportBlockedPilot[];
+}
+
 interface TicketMessage {
   id: string;
   authorRole: "pilot" | "staff";
@@ -84,16 +98,31 @@ export function AdminTickets() {
   const [newTagName, setNewTagName] = useState("");
   const [newAssigneeName, setNewAssigneeName] = useState("");
 
+  // Route report moderation
+  const [reportSettings, setReportSettings] = useState<RouteReportSettings>({ cooldownMinutes: 30, dailyLimit: 5, blockedPilots: [] });
+  const [isSavingReportSettings, setIsSavingReportSettings] = useState(false);
+  const [newBlockUsername, setNewBlockUsername] = useState("");
+  const [newBlockReason, setNewBlockReason] = useState("");
+
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [configRes, ticketsRes] = await Promise.all([
+      const [configRes, ticketsRes, reportSettingsRes] = await Promise.all([
         fetch("/api/admin/tickets/config", { credentials: "include" }),
         fetch("/api/admin/tickets", { credentials: "include" }),
+        fetch("/api/admin/route-reports/settings", { credentials: "include" }),
       ]);
 
       const configPayload = configRes.ok ? await configRes.json() : {};
       const ticketPayload = ticketsRes.ok ? await ticketsRes.json() : {};
+      const reportSettingsPayload = reportSettingsRes.ok ? await reportSettingsRes.json() : {};
+      if (reportSettingsPayload?.settings) {
+        setReportSettings({
+          cooldownMinutes: Number(reportSettingsPayload.settings.cooldownMinutes ?? 30),
+          dailyLimit: Number(reportSettingsPayload.settings.dailyLimit ?? 5),
+          blockedPilots: Array.isArray(reportSettingsPayload.settings.blockedPilots) ? reportSettingsPayload.settings.blockedPilots : [],
+        });
+      }
 
       const nextConfig = configPayload?.ticketConfig;
       const nextTickets = Array.isArray(ticketPayload?.tickets) ? ticketPayload.tickets : [];
@@ -176,6 +205,51 @@ export function AdminTickets() {
     };
     setConfig((prev) => ({ ...prev, assignees: [...prev.assignees, newItem] }));
     setNewAssigneeName("");
+  };
+
+  const saveReportSettings = async (next?: RouteReportSettings) => {
+    const payload = next || reportSettings;
+    setIsSavingReportSettings(true);
+    try {
+      const res = await fetch("/api/admin/route-reports/settings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = res.ok ? await res.json() : null;
+      if (data?.settings) {
+        setReportSettings({
+          cooldownMinutes: Number(data.settings.cooldownMinutes ?? payload.cooldownMinutes),
+          dailyLimit: Number(data.settings.dailyLimit ?? payload.dailyLimit),
+          blockedPilots: Array.isArray(data.settings.blockedPilots) ? data.settings.blockedPilots : payload.blockedPilots,
+        });
+      }
+    } finally {
+      setIsSavingReportSettings(false);
+    }
+  };
+
+  const addBlockedPilot = () => {
+    const username = newBlockUsername.trim();
+    if (!username) return;
+    const next = {
+      ...reportSettings,
+      blockedPilots: [
+        ...reportSettings.blockedPilots,
+        { username, reason: newBlockReason.trim() || null, blockedAt: new Date().toISOString() },
+      ],
+    };
+    setReportSettings(next);
+    setNewBlockUsername("");
+    setNewBlockReason("");
+    void saveReportSettings(next);
+  };
+
+  const removeBlockedPilot = (index: number) => {
+    const next = { ...reportSettings, blockedPilots: reportSettings.blockedPilots.filter((_, i) => i !== index) };
+    setReportSettings(next);
+    void saveReportSettings(next);
   };
 
   const deleteConfigItem = (type: "categories" | "tags" | "assignees", id: string) => {
@@ -398,6 +472,83 @@ export function AdminTickets() {
             <Button onClick={saveConfig} disabled={isSavingConfig} className="bg-[#E31E24] hover:bg-[#c91a1f]">
               {isSavingConfig ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               {tr("Сохранить конфигурацию", "Save configuration")}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-none shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">{tr("Модерация репортов маршрутов", "Route Report Moderation")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-gray-200 p-3">
+              <div className="text-sm font-semibold text-gray-700 mb-1">{tr("Кулдаун между репортами (мин)", "Cooldown between reports (min)")}</div>
+              <div className="text-xs text-gray-500 mb-2">{tr("0 — без кулдауна. Не действует на повторный репорт того же маршрута (он считается дубликатом).", "0 — no cooldown. Doesn't apply to re-reporting the same route (treated as a duplicate).")}</div>
+              <Input
+                type="number"
+                min={0}
+                max={1440}
+                value={reportSettings.cooldownMinutes}
+                onChange={(e) => setReportSettings((prev) => ({ ...prev, cooldownMinutes: Math.max(0, Number(e.target.value) || 0) }))}
+              />
+            </div>
+            <div className="rounded-lg border border-gray-200 p-3">
+              <div className="text-sm font-semibold text-gray-700 mb-1">{tr("Лимит репортов за 24 часа", "Reports limit per 24 hours")}</div>
+              <div className="text-xs text-gray-500 mb-2">{tr("0 — без лимита.", "0 — unlimited.")}</div>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={reportSettings.dailyLimit}
+                onChange={(e) => setReportSettings((prev) => ({ ...prev, dailyLimit: Math.max(0, Number(e.target.value) || 0) }))}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+            <div className="text-sm font-semibold text-gray-700">{tr("Заблокированные пилоты", "Blocked pilots")}</div>
+            <div className="text-xs text-gray-500">{tr("Пилоты из списка не смогут отправлять репорты о маршрутах.", "Pilots on this list cannot submit route reports.")}</div>
+            {reportSettings.blockedPilots.length === 0 ? (
+              <div className="text-sm text-gray-400 py-1">{tr("Список пуст.", "List is empty.")}</div>
+            ) : (
+              reportSettings.blockedPilots.map((pilot, index) => (
+                <div key={`${pilot.username || pilot.pilotId}-${index}`} className="flex items-center justify-between gap-2 rounded-md bg-gray-50 px-3 py-2">
+                  <div className="min-w-0">
+                    <span className="font-medium text-sm text-gray-900">{pilot.name || pilot.username || `Pilot #${pilot.pilotId}`}</span>
+                    {pilot.username ? <span className="ml-2 text-xs text-gray-500 font-mono">{pilot.username}</span> : null}
+                    {pilot.reason ? <span className="ml-2 text-xs text-gray-400">— {pilot.reason}</span> : null}
+                  </div>
+                  <button className="text-red-400 hover:text-red-600 shrink-0" onClick={() => removeBlockedPilot(index)}>
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))
+            )}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                value={newBlockUsername}
+                onChange={(e) => setNewBlockUsername(e.target.value)}
+                placeholder={tr("Username пилота (vAMSYS)...", "Pilot username (vAMSYS)...")}
+                onKeyDown={(e) => e.key === "Enter" && addBlockedPilot()}
+              />
+              <Input
+                value={newBlockReason}
+                onChange={(e) => setNewBlockReason(e.target.value)}
+                placeholder={tr("Причина (необязательно)...", "Reason (optional)...")}
+                onKeyDown={(e) => e.key === "Enter" && addBlockedPilot()}
+              />
+              <Button variant="outline" onClick={addBlockedPilot} disabled={!newBlockUsername.trim() || isSavingReportSettings}>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
+            <Button onClick={() => void saveReportSettings()} disabled={isSavingReportSettings} className="bg-[#E31E24] hover:bg-[#c91a1f]">
+              {isSavingReportSettings ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              {tr("Сохранить настройки репортов", "Save report settings")}
             </Button>
           </div>
         </CardContent>

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
+import { clearAppSession } from "../app-session";
 
 interface Pilot {
   id: string;
@@ -305,6 +306,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    // Десктоп: сначала отзываем app-токен на сервере (пока заголовок ещё шлётся), затем чистим локально.
+    fetch("/api/auth/session/revoke", {
+      method: "POST",
+      credentials: "include",
+    })
+      .catch(() => {
+        // ignore
+      })
+      .finally(() => clearAppSession());
+
     fetch("/api/auth/vamsys/logout", {
       method: "POST",
       credentials: "include",

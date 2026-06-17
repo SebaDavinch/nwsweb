@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { getIcaoFlagUri, getFlagUri, icaoToCountry } from "./flag-data";
 
-// Interface definitions (matching Where2Fly)
 export interface Airport {
-  code?: string; // Support both code (old) and icao (new)
+  code?: string;
   icao?: string;
   iata?: string;
   name: string;
@@ -39,332 +39,517 @@ export interface SelectableRoute {
   active?: boolean;
 }
 
+export interface HubData {
+  code: string;
+  name: string;
+  lat: number;
+  lon: number;
+  routeCount: number;
+  selected?: boolean;
+}
+
 interface FlightMapProps {
   route: Route | null;
-  airports?: Airport[]; // Optional list of airports to display when no route is active
+  airports?: Airport[];
   availableRoutes?: SelectableRoute[];
+  hubs?: HubData[];
   originAirport?: Airport | null;
   selectedAirportCode?: string | null;
+  selectedHubCode?: string | null;
   onAirportSelect?: (airportCode: string) => void;
+  onHubSelect?: (hubCode: string) => void;
+  onHubHover?: (hubCode: string | null) => void;
   showOriginMarker?: boolean;
+  mode?: "default" | "hubs";
+  theme?: "light" | "dark";
+  focusRouteId?: string | null;
 }
+
+// ── SVG pin factory ───────────────────────────────────────────────────────────
+
+function makePinIcon(opts: {
+  label?: string;
+  bg?: string;
+  border?: string;
+  textColor?: string;
+  size?: "sm" | "md" | "lg";
+  pulse?: boolean;
+  count?: number;
+}) {
+  const { label = "", bg = "#E31E24", border = "#fff", textColor = "#fff", size = "md", pulse = false, count } = opts;
+
+  const dims = { sm: [28, 38], md: [36, 48], lg: [48, 62] }[size];
+  const [w, h] = dims;
+  const r = w / 2;
+  const fontSize = size === "lg" ? 11 : size === "md" ? 10 : 9;
+  const labelText = count !== undefined ? String(count) : (label.slice(0, 4));
+
+  const pulseHtml = pulse
+    ? `<div style="position:absolute;inset:-6px;border-radius:50%;border:2px solid ${bg};opacity:0.35;animation:pinPulse 2s infinite;"></div>`
+    : "";
+
+  return L.divIcon({
+    html: `
+      <div style="position:relative;width:${w}px;height:${h}px;">
+        ${pulseHtml}
+        <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter:drop-shadow(0 4px 8px rgba(0,0,0,0.28));">
+          <path d="M${r} 2 C${r * 0.3} 2, 2 ${r * 0.7}, 2 ${r + 2} C2 ${r * 1.8}, ${r * 0.6} ${h * 0.72}, ${r} ${h - 2} C${r * 1.4} ${h * 0.72}, ${w - 2} ${r * 1.8}, ${w - 2} ${r + 2} C${w - 2} ${r * 0.7}, ${r * 1.7} 2, ${r} 2 Z" fill="${bg}" stroke="${border}" stroke-width="2"/>
+          <circle cx="${r}" cy="${r + 1}" r="${r * 0.52}" fill="${border}" opacity="0.18"/>
+          <text x="${r}" y="${r + 5}" text-anchor="middle" font-family="-apple-system,system-ui,sans-serif" font-weight="700" font-size="${fontSize}" fill="${textColor}" letter-spacing="-0.3">${labelText}</text>
+        </svg>
+      </div>
+    `,
+    className: "",
+    iconSize: [w, h],
+    iconAnchor: [r, h - 2],
+    popupAnchor: [0, -(h - 4)],
+  });
+}
+
+function makeDestPinIcon(code: string, selected: boolean, dark = false, flag = "") {
+  const bg = selected ? "#E31E24" : (dark ? "#1e3a5f" : "#1e293b");
+  const border = dark && !selected ? "#60a5fa" : "white";
+  const d = 28;
+  const flagUri = getFlagUri(flag);
+  const flagBadge = flagUri
+    ? `<div style="position:absolute;top:-4px;right:-7px;width:15px;height:10px;border:1.5px solid white;border-radius:2px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.45);flex-shrink:0;">
+        <img src="${flagUri}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+       </div>`
+    : "";
+  return L.divIcon({
+    html: `
+      <div class="nws-marker-scale" style="position:relative;width:${d}px;height:${d}px;">
+        <div style="width:${d}px;height:${d}px;border-radius:50%;background:${bg};border:2px solid ${border};box-shadow:0 3px 6px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;">
+          <span style="font-family:-apple-system,system-ui,sans-serif;font-weight:700;font-size:7.5px;line-height:1;color:#fff;letter-spacing:-0.3px;">${code.slice(0, 4)}</span>
+        </div>
+        ${flagBadge}
+      </div>
+    `,
+    className: "",
+    iconSize: [d, d],
+    iconAnchor: [d / 2, d / 2],
+    popupAnchor: [0, -(d / 2 + 6)],
+  });
+}
+
+function makeHubPinIcon(code: string, count: number, selected: boolean, dark = false, flag = "") {
+  const bg = selected ? "#E31E24" : (dark ? "#1e3a5f" : "#0f172a");
+  const border = dark && !selected ? "#60a5fa" : "white";
+  const d = 46;
+  const flagUri = getFlagUri(flag);
+  const flagBadge = flagUri
+    ? `<div style="position:absolute;top:-3px;right:-7px;width:18px;height:12px;border:1.5px solid white;border-radius:2px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.5);">
+        <img src="${flagUri}" style="width:100%;height:100%;object-fit:cover;display:block;" />
+       </div>`
+    : "";
+  return L.divIcon({
+    html: `
+      <div class="nws-marker-scale" style="position:relative;width:${d}px;height:${d}px;">
+        ${selected ? `<div style="position:absolute;inset:-8px;border-radius:50%;border:2px solid rgba(227,30,36,0.4);animation:pinPulse 2s infinite;"></div>` : ""}
+        <div style="width:${d}px;height:${d}px;border-radius:50%;background:${bg};border:2.5px solid ${border};box-shadow:0 6px 16px rgba(0,0,0,0.45);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;">
+          <span style="font-family:-apple-system,system-ui,sans-serif;font-weight:800;font-size:11px;line-height:1;color:#fff;letter-spacing:-0.3px;">${code.slice(0, 4)}</span>
+          <span style="font-family:-apple-system,system-ui,sans-serif;font-weight:600;font-size:8.5px;line-height:1;color:rgba(255,255,255,0.75);">${count} rts</span>
+        </div>
+        ${flagBadge}
+      </div>
+    `,
+    className: "",
+    iconSize: [d, d],
+    iconAnchor: [d / 2, d / 2],
+    popupAnchor: [0, -(d / 2 + 8)],
+  });
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
 
 export function FlightMap({
   route,
   airports = [],
   availableRoutes = [],
+  hubs = [],
   originAirport = null,
   selectedAirportCode = null,
+  selectedHubCode = null,
   onAirportSelect,
+  onHubSelect,
+  onHubHover,
   showOriginMarker = true,
+  mode = "default",
+  theme = "light",
+  focusRouteId = null,
 }: FlightMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
-  const markersRef = useRef<L.Layer[]>([]);
+  const layersRef = useRef<L.Layer[]>([]);
+  // Защита от сброса зума: fitBounds выполняется только при смене набора данных,
+  // а не при каждом перерендере родителя (hover-коллбэки пересоздают пропсы)
+  const fitKeyRef = useRef<string>("");
+  const fitOnce = (key: string, fit: () => void) => {
+    if (fitKeyRef.current === key) return;
+    fitKeyRef.current = key;
+    fit();
+  };
 
+  // Inject pulse animation once
   useEffect(() => {
-    if (!mapContainerRef.current) return;
-
-    // Initialize map only once
-    if (!mapRef.current) {
-      mapRef.current = L.map(mapContainerRef.current, {
-        center: [48.0, 40.0], // General view
-        zoom: 3,
-        zoomControl: true,
-        attributionControl: false
-      });
-
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19
-      }).addTo(mapRef.current);
+    if (typeof document !== "undefined" && !document.getElementById("pin-pulse-style")) {
+      const style = document.createElement("style");
+      style.id = "pin-pulse-style";
+      style.textContent = `@keyframes pinPulse { 0%,100%{opacity:.35;transform:scale(1)} 50%{opacity:.15;transform:scale(1.25)} }`;
+      document.head.appendChild(style);
     }
-
-    return () => {
-      // Cleanup on unmount
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
   }, []);
 
+  // Init map once
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapContainerRef.current || mapRef.current) return;
 
+    mapRef.current = L.map(mapContainerRef.current, {
+      center: [52.0, 42.0],
+      zoom: 4,
+      zoomControl: false,
+      attributionControl: false,
+    });
+
+    const tileUrl = theme === "dark"
+      ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+      : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png";
+
+    L.tileLayer(tileUrl, {
+      subdomains: "abcd",
+      maxZoom: 19,
+    }).addTo(mapRef.current);
+
+    L.control.zoom({ position: "bottomright" }).addTo(mapRef.current);
+
+    // Динамический масштаб маркеров: мельче на обзорном зуме, крупнее при приближении
+    const applyMarkerScale = () => {
+      const z = mapRef.current?.getZoom() ?? 4;
+      const scale = Math.min(1.05, Math.max(0.5, 0.28 + z * 0.105));
+      mapContainerRef.current?.style.setProperty("--nws-marker-scale", String(scale));
+    };
+    applyMarkerScale();
+    mapRef.current.on("zoom", applyMarkerScale);
+    mapRef.current.on("zoomend", applyMarkerScale);
+
+    return () => {
+      mapRef.current?.remove();
+      mapRef.current = null;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fly-to when a route is focused (without hiding other routes)
+  useEffect(() => {
     const map = mapRef.current;
+    if (!map || !focusRouteId || !availableRoutes?.length) return;
+    const r = availableRoutes.find((x) => x.id === focusRouteId);
+    if (!r || !Number.isFinite(r.from.lat) || !Number.isFinite(r.to.lat)) return;
+    const b = L.latLngBounds([[r.from.lat, r.from.lon], [r.to.lat, r.to.lon]]);
+    if (b.isValid()) map.flyToBounds(b, { padding: [100, 100], maxZoom: 7, duration: 0.7 });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusRouteId]);
 
-    // Clear existing markers/layers
-    markersRef.current.forEach(layer => map.removeLayer(layer));
-    markersRef.current = [];
+  // Re-draw layers whenever data changes
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
 
-    // Custom icons
-    const airportIcon = L.divIcon({
-      html: `<div style="width: 8px; height: 8px; background-color: #E31E24; border-radius: 50%; box-shadow: 0 0 4px rgba(227, 30, 36, 0.5);"></div>`,
-      className: "",
-      iconSize: [8, 8],
-      iconAnchor: [4, 4],
-    });
+    layersRef.current.forEach((l) => map.removeLayer(l));
+    layersRef.current = [];
 
-    const originIcon = L.divIcon({
-      html: `
-        <div style="
-          width: 18px;
-          height: 18px;
-          background: linear-gradient(135deg, #2563eb, #38bdf8);
-          border: 3px solid white;
-          border-radius: 999px;
-          box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
-        "></div>
-      `,
-      className: "",
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
-    });
+    const add = (l: L.Layer) => { l.addTo(map); layersRef.current.push(l); return l; };
+    const bounds = L.latLngBounds([]);
+    const isDark = theme === "dark";
 
-    const destinationIcon = L.divIcon({
-      html: `
-        <div style="
-          width: 14px;
-          height: 14px;
-          background-color: white;
-          border: 2px solid #64748b;
-          border-radius: 999px;
-          box-shadow: 0 2px 8px rgba(15, 23, 42, 0.15);
-        "></div>
-      `,
-      className: "",
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
-    });
+    const inactiveColor = isDark ? "#f87171" : "#fca5a5";
+    const inactiveOpacity = isDark ? 0.5 : 0.3;
+    const inactiveWeight = isDark ? 1.5 : 1.2;
 
-    const selectedDestinationIcon = L.divIcon({
-      html: `
-        <div style="
-          width: 18px;
-          height: 18px;
-          background-color: #E31E24;
-          border: 3px solid white;
-          border-radius: 999px;
-          box-shadow: 0 6px 18px rgba(227, 30, 36, 0.32);
-        "></div>
-      `,
-      className: "",
-      iconSize: [18, 18],
-      iconAnchor: [9, 9],
-    });
+    // ── Mode: hubs ──────────────────────────────────────────────────────────
+    if (mode === "hubs") {
+      const hubBounds = L.latLngBounds([]);
+      const destBounds = L.latLngBounds([]);
+      const destSeen = new Set<string>();
 
-    const activeAirportIcon = L.divIcon({
-      html: `
-        <div style="
-          width: 16px;
-          height: 16px;
-          background-color: #E31E24;
-          border: 3px solid white;
-          border-radius: 50%;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        "></div>
-      `,
-      className: "",
-      iconSize: [16, 16],
-      iconAnchor: [8, 8],
-    });
-
-    if (route) {
-      // Draw Selected Route
-      const bounds = L.latLngBounds([]);
-      const visitedAirports = new Set<string>();
-
-      route.legs.forEach((leg) => {
-        const fromLat = leg.from.lat;
-        const fromLon = leg.from.lon;
-        const toLat = leg.to.lat;
-        const toLon = leg.to.lon;
-        
-        const fromCode = leg.from.icao || leg.from.code || "UNK";
-        const toCode = leg.to.icao || leg.to.code || "UNK";
-
-        const fromLatLng = L.latLng(fromLat, fromLon);
-        const toLatLng = L.latLng(toLat, toLon);
-
-        bounds.extend(fromLatLng);
-        bounds.extend(toLatLng);
-
-        // Add markers for airports
-        if (!visitedAirports.has(fromCode)) {
-          const marker = L.marker(fromLatLng, { icon: activeAirportIcon })
-            .bindPopup(`<b>${fromCode}</b><br/>${leg.from.name}`, { closeButton: false })
-            .addTo(map);
-          markersRef.current.push(marker);
-          visitedAirports.add(fromCode);
-        }
-
-        if (!visitedAirports.has(toCode)) {
-          const marker = L.marker(toLatLng, { icon: activeAirportIcon })
-            .bindPopup(`<b>${toCode}</b><br/>${leg.to.name}`, { closeButton: false })
-            .addTo(map);
-          markersRef.current.push(marker);
-          visitedAirports.add(toCode);
-        }
-
-        // Create curved line
-        const curvedPath = createCurvedPath(fromLatLng, toLatLng);
-        const pathLine = L.polyline(curvedPath, {
-          color: "#E31E24",
-          weight: 3,
-          opacity: 0.8,
-          smoothFactor: 1,
-        }).addTo(map);
-        markersRef.current.push(pathLine);
-
-        // Add plane icon
-        const planeIcon = L.divIcon({
-          html: `
-            <div style="
-              width: 24px; height: 24px; background-color: white; border: 2px solid #E31E24; border-radius: 50%;
-              display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 8px rgba(227, 30, 36, 0.4);
-            ">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="#E31E24">
-                <path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
-              </svg>
-            </div>
-          `,
-          className: "",
-          iconSize: [24, 24],
-          iconAnchor: [12, 12],
-        });
-
-        const midPoint = curvedPath[Math.floor(curvedPath.length / 2)];
-        const planeMarker = L.marker(midPoint, { icon: planeIcon })
-          .bindTooltip(`Flight ${route.id}`, { permanent: false, direction: "top" })
-          .addTo(map);
-        markersRef.current.push(planeMarker);
+      // 1. Draw ALL routes as very dim background network lines (inactive first)
+      availableRoutes.forEach((r) => {
+        if (!Number.isFinite(r.from.lat) || !Number.isFinite(r.to.lat)) return;
+        if (Boolean(r.active)) return; // draw active on top
+        const fromLL = L.latLng(r.from.lat, r.from.lon);
+        const toLL = L.latLng(r.to.lat, r.to.lon);
+        const isHubMatch = !selectedHubCode || (r.from.icao || r.from.code || "").toUpperCase() === selectedHubCode;
+        add(L.polyline(createCurvedPath(fromLL, toLL), {
+          color: isDark ? "#f87171" : "#f87171",
+          weight: isHubMatch && selectedHubCode ? 1.5 : 1,
+          opacity: isDark
+            ? (isHubMatch && selectedHubCode ? 0.40 : 0.14)
+            : (isHubMatch && selectedHubCode ? 0.35 : 0.22),
+          dashArray: isHubMatch && selectedHubCode ? "5 8" : "3 10",
+        }).bindTooltip(r.label || `${r.from.icao || r.from.code} → ${r.to.icao || r.to.code}`, {
+          direction: "top", sticky: true, offset: [0, -8],
+          className: "nws-route-tip",
+        }));
       });
 
-      if (bounds.isValid()) {
-        map.fitBounds(bounds, { padding: [50, 50] });
-      }
+      // 2. Draw ACTIVE routes with multi-layer glow on top
+      availableRoutes.filter((r) => Boolean(r.active)).forEach((r) => {
+        if (!Number.isFinite(r.from.lat) || !Number.isFinite(r.to.lat)) return;
+        const fromLL = L.latLng(r.from.lat, r.from.lon);
+        const toLL = L.latLng(r.to.lat, r.to.lon);
+        const destCode = (r.to.icao || r.to.code || "").toUpperCase();
+        const path = createCurvedPath(fromLL, toLL);
 
-    } else if (availableRoutes.length > 0) {
-      const bounds = L.latLngBounds([]);
-      const destinationMarkers = new Map<string, Airport>();
-      const effectiveOrigin = originAirport || availableRoutes[0]?.from || null;
+        // Glow layers: wide dim → medium → thin solid
+        add(L.polyline(path, { color: "#E31E24", weight: 28, opacity: 0.05 }));
+        add(L.polyline(path, { color: "#E31E24", weight: 12, opacity: 0.11 }));
+        add(L.polyline(path, { color: "#E31E24", weight: 4, opacity: 0.35 }));
+        add(L.polyline(path, { color: "#ff5a5f", weight: 2.5, opacity: 0.98 }));
 
-      const originCodes = new Set(
+        if (!destSeen.has(destCode)) {
+          destSeen.add(destCode);
+          const m = add(
+            L.marker(toLL, { icon: makeDestPinIcon(destCode, true, isDark, icaoToCountry(destCode)), zIndexOffset: 600 })
+              .bindPopup(
+                `<div style="font-family:-apple-system,system-ui,sans-serif;"><div style="font-weight:800;font-size:14px;color:#0f172a">${destCode}</div><div style="color:#64748b;font-size:12px;margin-top:1px">${r.to.name}</div></div>`,
+                { closeButton: false, className: "nws-popup" }
+              )
+          );
+          if (onAirportSelect) m.on("click", () => onAirportSelect(destCode));
+        }
+      });
+
+      // 3. Destination markers for hub-selected routes (non-active)
+      if (selectedHubCode) {
         availableRoutes
-          .map((item) => String(item.from.icao || item.from.code || "").trim().toUpperCase())
-          .filter(Boolean)
-      );
-      const shouldShowOriginMarker = showOriginMarker && originCodes.size <= 1;
-
-      if (effectiveOrigin && shouldShowOriginMarker) {
-        const originLatLng = L.latLng(effectiveOrigin.lat, effectiveOrigin.lon);
-        bounds.extend(originLatLng);
-        const marker = L.marker(originLatLng, { icon: originIcon })
-          .bindTooltip(`<b>${effectiveOrigin.icao || effectiveOrigin.code || "UNK"}</b><br/>${effectiveOrigin.name}<br/>Current location`, {
-            direction: "top",
-          })
-          .addTo(map);
-        markersRef.current.push(marker);
+          .filter((r) => !r.active && (r.from.icao || r.from.code || "").toUpperCase() === selectedHubCode)
+          .forEach((r) => {
+            if (!Number.isFinite(r.to.lat)) return;
+            const toLL = L.latLng(r.to.lat, r.to.lon);
+            const destCode = (r.to.icao || r.to.code || "").toUpperCase();
+            destBounds.extend(toLL);
+            if (!destSeen.has(destCode)) {
+              destSeen.add(destCode);
+              const m = add(
+                L.marker(toLL, { icon: makeDestPinIcon(destCode, false, isDark, icaoToCountry(destCode)), zIndexOffset: 0 })
+                  .bindPopup(
+                    `<div style="font-family:-apple-system,system-ui,sans-serif;"><div style="font-weight:800;font-size:14px;color:#0f172a">${destCode}</div><div style="color:#64748b;font-size:12px;margin-top:1px">${r.to.name}</div></div>`,
+                    { closeButton: false, className: "nws-popup" }
+                  )
+              );
+              if (onAirportSelect) m.on("click", () => onAirportSelect(destCode));
+            }
+          });
       }
 
-      availableRoutes.forEach((selectionRoute) => {
-        const fromLatLng = L.latLng(selectionRoute.from.lat, selectionRoute.from.lon);
-        const toLatLng = L.latLng(selectionRoute.to.lat, selectionRoute.to.lon);
-        const destinationCode = String(selectionRoute.to.icao || selectionRoute.to.code || "").trim().toUpperCase();
-        const isActive = Boolean(
-          selectionRoute.active || (selectedAirportCode && destinationCode === String(selectedAirportCode).trim().toUpperCase())
+      // 4. Hub markers on top of everything
+      hubs.forEach((hub) => {
+        const ll = L.latLng(hub.lat, hub.lon);
+        hubBounds.extend(ll);
+        const isSelected = hub.code === selectedHubCode;
+        const marker = add(
+          L.marker(ll, { icon: makeHubPinIcon(hub.code, hub.routeCount, isSelected, isDark, icaoToCountry(hub.code)), zIndexOffset: isSelected ? 2000 : 1000 })
+            .bindPopup(
+              `<div style="font-family:-apple-system,system-ui,sans-serif;min-width:160px;">
+                <div style="display:flex;align-items:center;gap:7px;">
+                  ${getIcaoFlagUri(hub.code) ? `<img src="${getIcaoFlagUri(hub.code)}" style="width:20px;height:14px;border-radius:2px;object-fit:cover;border:1px solid rgba(0,0,0,0.1);" />` : ""}
+                  <div style="font-weight:800;font-size:15px;color:#0f172a">${hub.code}</div>
+                </div>
+                <div style="color:#64748b;font-size:12px;margin-top:3px">${hub.name}</div>
+                <div style="margin-top:8px;display:flex;align-items:center;gap:6px;">
+                  <span style="background:#E31E24;color:#fff;border-radius:99px;padding:2px 10px;font-size:11px;font-weight:700">${hub.routeCount} рейсов</span>
+                </div>
+              </div>`,
+              { closeButton: false, className: "nws-popup" }
+            )
         );
-
-        bounds.extend(fromLatLng);
-        bounds.extend(toLatLng);
-
-        const curvedPath = createCurvedPath(fromLatLng, toLatLng);
-        const pathLine = L.polyline(curvedPath, {
-          color: isActive ? "#E31E24" : "#6366f1",
-          weight: isActive ? 3 : 1.2,
-          opacity: isActive ? 0.9 : 0.28,
-          dashArray: isActive ? undefined : "6 9",
-          smoothFactor: 1,
-        })
-          .bindTooltip(selectionRoute.label || `${selectionRoute.from.icao || selectionRoute.from.code || "—"} → ${selectionRoute.to.icao || selectionRoute.to.code || "—"}`, {
-            direction: "top",
-          })
-          .addTo(map);
-
-        if (onAirportSelect && destinationCode) {
-          pathLine.on("click", () => onAirportSelect(destinationCode));
-        }
-
-        markersRef.current.push(pathLine);
-
-        if (destinationCode && !destinationMarkers.has(destinationCode)) {
-          destinationMarkers.set(destinationCode, selectionRoute.to);
+        if (onHubSelect) marker.on("click", () => onHubSelect(hub.code));
+        if (onHubHover) {
+          marker.on("mouseover", () => onHubHover(hub.code));
+          marker.on("mouseout", () => onHubHover(null));
         }
       });
 
-      destinationMarkers.forEach((airport, airportCode) => {
-        const latLng = L.latLng(airport.lat, airport.lon);
-        const isSelected = Boolean(selectedAirportCode && airportCode === String(selectedAirportCode).trim().toUpperCase());
-        const marker = L.marker(latLng, {
-          icon: isSelected ? selectedDestinationIcon : destinationIcon,
-        })
-          .bindTooltip(`<b>${airportCode}</b><br/>${airport.name}`, { direction: "top" })
-          .addTo(map);
-
-        if (onAirportSelect) {
-          marker.on("click", () => onAirportSelect(airportCode));
+      // 5. Fit bounds: hub routes when hub selected, all hubs otherwise
+      fitOnce(`hubs|${selectedHubCode || ""}|${hubs.map((h) => h.code).join(",")}`, () => {
+        if (selectedHubCode) {
+          const selectedHub = hubs.find((h) => h.code === selectedHubCode);
+          const pts: [number, number][] = [];
+          if (selectedHub) pts.push([selectedHub.lat, selectedHub.lon]);
+          if (destBounds.isValid()) {
+            pts.push([destBounds.getNorth(), destBounds.getEast()]);
+            pts.push([destBounds.getSouth(), destBounds.getWest()]);
+          }
+          const b = L.latLngBounds(pts);
+          if (b.isValid()) map.fitBounds(b, { padding: [70, 70], maxZoom: 6 });
+        } else if (hubBounds.isValid()) {
+          map.fitBounds(hubBounds, { padding: [60, 60], maxZoom: 5 });
         }
-
-        markersRef.current.push(marker);
       });
-
-      if (bounds.isValid()) {
-        map.fitBounds(bounds, { padding: [40, 40], maxZoom: 6 });
-      }
-
-    } else if (airports.length > 0) {
-      // Show all available airports if no route is selected
-      const bounds = L.latLngBounds([]);
-      
-      airports.forEach(airport => {
-        const code = airport.icao || airport.code || "UNK";
-        const latLng = L.latLng(airport.lat, airport.lon);
-        bounds.extend(latLng);
-
-        const iataLine = airport.iata ? ` / ${airport.iata}` : "";
-        const cityLine = airport.city ? `<br/>${airport.city}` : "";
-        const countryLine = airport.country ? `<br/><span style="color:#888">${airport.country}</span>` : "";
-        const marker = L.marker(latLng, { icon: airportIcon })
-          .bindTooltip(`<b>${code}${iataLine}</b><br/>${airport.name}${cityLine}${countryLine}`, { direction: "top", opacity: 0.95 })
-          .addTo(map);
-
-        if (onAirportSelect) {
-          marker.on("click", () => onAirportSelect(code));
-        }
-
-        markersRef.current.push(marker);
-      });
-
-      if (bounds.isValid()) {
-        // Don't zoom in too much if it's just dots
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 5 });
-      }
+      return;
     }
 
-  }, [availableRoutes, airports, onAirportSelect, originAirport, route, selectedAirportCode, showOriginMarker]);
+    // ── Mode: single selected route ─────────────────────────────────────────
+    if (route) {
+      route.legs.forEach((leg) => {
+        const fromLL = L.latLng(leg.from.lat, leg.from.lon);
+        const toLL = L.latLng(leg.to.lat, leg.to.lon);
+        const fromCode = (leg.from.icao || leg.from.code || "UNK").toUpperCase();
+        const toCode = (leg.to.icao || leg.to.code || "UNK").toUpperCase();
+
+        bounds.extend(fromLL);
+        bounds.extend(toLL);
+
+        const path = createCurvedPath(fromLL, toLL);
+
+        if (isDark) {
+          add(L.polyline(path, { color: "#E31E24", weight: 14, opacity: 0.12 }));
+          add(L.polyline(path, { color: "#E31E24", weight: 5, opacity: 0.3 }));
+        }
+        add(L.polyline(path, { color: "#E31E24", weight: 2.5, opacity: 0.9 }));
+
+        const mid = path[25];
+        add(L.marker(mid, {
+          icon: L.divIcon({
+            html: `<div style="width:32px;height:32px;background:#E31E24;border:2.5px solid white;border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 16px rgba(227,30,36,0.55);">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></svg>
+            </div>`,
+            className: "",
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+          }),
+          zIndexOffset: 1000,
+        }));
+
+        add(L.marker(fromLL, { icon: makeHubPinIcon(fromCode, 1, false, isDark, icaoToCountry(fromCode)) })
+          .bindPopup(`<div style="font-family:-apple-system,system-ui,sans-serif;"><div style="font-weight:800;font-size:14px">${fromCode}</div><div style="color:#64748b;font-size:12px">${leg.from.name}</div></div>`,
+            { closeButton: false, className: "nws-popup" }));
+        add(L.marker(toLL, { icon: makeDestPinIcon(toCode, true, isDark, icaoToCountry(toCode)) })
+          .bindPopup(`<div style="font-family:-apple-system,system-ui,sans-serif;"><div style="font-weight:800;font-size:14px">${toCode}</div><div style="color:#64748b;font-size:12px">${leg.to.name}</div></div>`,
+            { closeButton: false, className: "nws-popup" }));
+      });
+
+      fitOnce(`route|${route.id}`, () => {
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [80, 80] });
+      });
+      return;
+    }
+
+    // ── Mode: default multi-route ───────────────────────────────────────────
+    if (availableRoutes.length > 0) {
+      const destMarkers = new Map<string, Airport>();
+      const originCodes = new Set(availableRoutes.map((r) => (r.from.icao || r.from.code || "").toUpperCase()));
+      const effectiveOrigin = originAirport || availableRoutes[0]?.from || null;
+      const singleOrigin = originCodes.size <= 1;
+
+      if (effectiveOrigin && showOriginMarker && singleOrigin) {
+        const ll = L.latLng(effectiveOrigin.lat, effectiveOrigin.lon);
+        const hubCode = (effectiveOrigin.icao || effectiveOrigin.code || "HUB").toUpperCase();
+        bounds.extend(ll);
+        const originMarker = add(L.marker(ll, {
+          icon: makeHubPinIcon(hubCode, availableRoutes.length, false, isDark, icaoToCountry(effectiveOrigin.icao || effectiveOrigin.code)),
+          zIndexOffset: 2000,
+        }));
+        if (onHubHover) {
+          originMarker.on("mouseover", () => onHubHover(hubCode));
+          originMarker.on("mouseout", () => onHubHover(null));
+        }
+      }
+
+      availableRoutes.forEach((r) => {
+        const fromLL = L.latLng(r.from.lat, r.from.lon);
+        const toLL = L.latLng(r.to.lat, r.to.lon);
+        const destCode = (r.to.icao || r.to.code || "").toUpperCase();
+        const isActive = Boolean(r.active || (selectedAirportCode && destCode === selectedAirportCode));
+
+        bounds.extend(fromLL);
+        bounds.extend(toLL);
+
+        const path = createCurvedPath(fromLL, toLL);
+
+        if (isActive && isDark) {
+          add(L.polyline(path, { color: "#E31E24", weight: 10, opacity: 0.15 }));
+        }
+        const line = add(L.polyline(path, {
+          color: isActive ? "#E31E24" : inactiveColor,
+          weight: isActive ? 2.5 : inactiveWeight,
+          opacity: isActive ? 0.9 : inactiveOpacity,
+          dashArray: isActive ? undefined : (isDark ? "4 6" : "5 8"),
+        }).bindTooltip(r.label || `${r.from.icao || r.from.code} → ${r.to.icao || r.to.code}`, { direction: "top" }));
+
+        if (onAirportSelect && destCode) line.on("click", () => onAirportSelect(destCode));
+        if (destCode && !destMarkers.has(destCode)) destMarkers.set(destCode, r.to);
+      });
+
+      destMarkers.forEach((airport, code) => {
+        const ll = L.latLng(airport.lat, airport.lon);
+        const isSelected = code === selectedAirportCode;
+        const m = add(L.marker(ll, { icon: makeDestPinIcon(code, isSelected, isDark, icaoToCountry(code)), zIndexOffset: isSelected ? 500 : 0 })
+          .bindPopup(
+            `<div style="font-family:-apple-system,system-ui,sans-serif;"><div style="font-weight:800;font-size:14px">${code}</div><div style="color:#64748b;font-size:12px">${airport.name}</div></div>`,
+            { closeButton: false, className: "nws-popup" }
+          ));
+        if (onAirportSelect) m.on("click", () => onAirportSelect(code));
+      });
+
+      fitOnce(`multi|${availableRoutes.map((r) => r.id).join(",")}`, () => {
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [50, 50], maxZoom: 6 });
+      });
+      return;
+    }
+
+    // ── Fallback: plain airport pins ────────────────────────────────────────
+    airports.forEach((airport) => {
+      const code = (airport.icao || airport.code || "UNK").toUpperCase();
+      const ll = L.latLng(airport.lat, airport.lon);
+      bounds.extend(ll);
+      const m = add(L.marker(ll, { icon: makeDestPinIcon(code, false, isDark, icaoToCountry(code)) })
+        .bindPopup(
+          `<div style="font-family:-apple-system,system-ui,sans-serif;"><div style="font-weight:800;font-size:14px">${code}</div><div style="color:#64748b;font-size:12px">${airport.name}</div></div>`,
+          { closeButton: false, className: "nws-popup" }
+        ));
+      if (onAirportSelect) m.on("click", () => onAirportSelect(code));
+    });
+
+    fitOnce(`apts|${airports.map((a) => a.icao || a.code).join(",")}`, () => {
+      if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 5 });
+    });
+  }, [route, airports, availableRoutes, hubs, originAirport, selectedAirportCode, selectedHubCode, showOriginMarker, mode, theme, onAirportSelect, onHubSelect, onHubHover]);
 
   return (
-    <div
-      ref={mapContainerRef}
-      className="w-full h-full min-h-[400px] bg-gray-100"
-      style={{ zIndex: 0 }}
-    />
+    <>
+      <style>{`
+        .nws-popup .leaflet-popup-content-wrapper {
+          border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+          padding: 0;
+          border: 1px solid rgba(0,0,0,0.06);
+        }
+        .nws-popup .leaflet-popup-content { margin: 12px 14px; }
+        .nws-popup .leaflet-popup-tip { display: none; }
+        .nws-route-tip { background: rgba(15,23,42,0.92) !important; border: 1px solid rgba(255,255,255,0.1) !important; color: #e2e8f0 !important; font-size: 11px !important; font-weight: 600 !important; border-radius: 6px !important; box-shadow: 0 4px 12px rgba(0,0,0,0.3) !important; }
+        .nws-route-tip::before { display: none !important; }
+        .leaflet-container { font-family: -apple-system, system-ui, sans-serif; }
+        .nws-marker-scale {
+          transform: scale(var(--nws-marker-scale, 1));
+          transform-origin: center center;
+          transition: transform 0.15s ease-out;
+        }
+        .leaflet-control-zoom a {
+          background: rgba(15,23,42,0.85) !important;
+          color: #e2e8f0 !important;
+          border-color: rgba(255,255,255,0.1) !important;
+        }
+        .leaflet-control-zoom a:hover {
+          background: rgba(30,58,95,0.95) !important;
+          color: #fff !important;
+        }
+      `}</style>
+      <div ref={mapContainerRef} className="w-full h-full min-h-[400px]" style={{ zIndex: 0 }} />
+    </>
   );
 }
 
-// Helper function to create curved path
 function createCurvedPath(start: L.LatLng, end: L.LatLng): L.LatLng[] {
   const points: L.LatLng[] = [];
   const steps = 50;
@@ -372,17 +557,17 @@ function createCurvedPath(start: L.LatLng, end: L.LatLng): L.LatLng[] {
   const midLng = (start.lng + end.lng) / 2;
   const dx = end.lng - start.lng;
   const dy = end.lat - start.lat;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  const curvature = distance * 0.15; // Slightly less curvature
-  const controlLat = midLat - (dx / distance) * curvature;
-  const controlLng = midLng + (dy / distance) * curvature;
-
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist === 0) return [start, end];
+  const curv = dist * 0.14;
+  const ctrlLat = midLat - (dx / dist) * curv;
+  const ctrlLng = midLng + (dy / dist) * curv;
   for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const invT = 1 - t;
-    const lat = invT * invT * start.lat + 2 * invT * t * controlLat + t * t * end.lat;
-    const lng = invT * invT * start.lng + 2 * invT * t * controlLng + t * t * end.lng;
-    points.push(L.latLng(lat, lng));
+    const t = i / steps, inv = 1 - t;
+    points.push(L.latLng(
+      inv * inv * start.lat + 2 * inv * t * ctrlLat + t * t * end.lat,
+      inv * inv * start.lng + 2 * inv * t * ctrlLng + t * t * end.lng,
+    ));
   }
   return points;
 }

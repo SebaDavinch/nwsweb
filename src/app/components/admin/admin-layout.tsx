@@ -8,6 +8,8 @@ import { AdminPilots } from "./admin-pilots";
 import { AdminPilotProfile } from "./admin-pilot-profile";
 import { AdminFleet } from "./admin-fleet";
 import { AdminSettings } from "./admin-settings";
+import { AdminAppConfig } from "./admin-app-config";
+import { AdminEmail } from "./admin-email";
 import { AdminDocuments } from "./admin-documents";
 import { AdminStaff } from "./admin-staff";
 import { AdminEvents } from "./admin-events";
@@ -24,6 +26,7 @@ import { AdminAuthLogs } from "./admin-auth-logs";
 import { AdminBannerGeneratorPage } from "./admin-banner-generator";
 import { AdminGallery } from "./admin-gallery";
 import { AdminCallsignChecker } from "./admin-callsign-checker";
+import { AdminAchievements } from "./admin-achievements";
 import {
   Award,
   Bell,
@@ -36,6 +39,7 @@ import {
   FileSearch2,
   FileText,
   Images,
+  Mail,
   ImagePlus,
   LayoutDashboard,
   LogOut,
@@ -46,7 +50,9 @@ import {
   Route,
   Send,
   Settings,
+  Smartphone,
   ShieldCheck,
+  Trophy,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -62,7 +68,7 @@ import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
 
 const ADMIN_PAGES = new Set([
   "fleet", "news", "activities", "notams", "pilots", "pilot-profile", "documents",
-  "events", "staff", "badges", "bookings", "routes", "pireps", "pirep-detail",
+  "events", "staff", "badges", "achievements", "bookings", "routes", "pireps", "pirep-detail",
   "airports", "hubs", "tickets", "discord-bot", "telegram-bot", "vk-bot",
   "banner-generator", "acars", "settings", "audit-logs", "auth-logs", "gallery",
   "callsign-checker",
@@ -80,6 +86,7 @@ function AdminPageContent({ page, pageId }: { page: string; pageId: number }) {
   if (page === "events") return <AdminEvents />;
   if (page === "staff") return <AdminStaff />;
   if (page === "badges") return <AdminBadges />;
+  if (page === "achievements") return <AdminAchievements />;
   if (page === "bookings") return <AdminBookingsManagement />;
   if (page === "routes") return <AdminRoutesManagement />;
   if (page === "pireps") return <AdminPireps />;
@@ -94,6 +101,8 @@ function AdminPageContent({ page, pageId }: { page: string; pageId: number }) {
   if (page === "callsign-checker") return <AdminCallsignChecker />;
   if (page === "acars") return <AdminAcars />;
   if (page === "settings") return <AdminSettings />;
+  if (page === "app-config") return <AdminAppConfig />;
+  if (page === "email") return <AdminEmail />;
   if (page === "audit-logs") return <AdminAuditLogs />;
   if (page === "auth-logs") return <AdminAuthLogs />;
   return <AdminDashboard />;
@@ -206,9 +215,11 @@ export function AdminLayout() {
           { page: "news", icon: Bell, label: t("admin.nav.news") },
           { page: "tickets", icon: MessageSquare, label: tr("Тикеты", "Tickets") },
           { page: "badges", icon: Award, label: tr("Бейджи", "Badges") },
+          { page: "achievements", icon: Trophy, label: tr("Достижения", "Achievements") },
           { page: "activities", icon: Bell, label: tr("Активности", "Activities") },
           { page: "banner-generator", icon: ImagePlus, label: tr("Генератор баннеров", "Banner Generator"), standalone: "/banner-generator" },
           { page: "gallery", icon: Images, label: tr("Галерея", "Gallery") },
+          { page: "email", icon: Mail, label: tr("Рассылки", "Email") },
         ],
       },
       {
@@ -220,6 +231,7 @@ export function AdminLayout() {
           { page: "telegram-bot", icon: Send, label: tr("Telegram", "Telegram") },
           { page: "vk-bot", icon: Bot, label: tr("VK", "VK") },
           { page: "settings", icon: Settings, label: tr("Настройки", "Settings") },
+          { page: "app-config", icon: Smartphone, label: tr("Приложение", "Desktop App") },
           { page: "staff", icon: ShieldCheck, label: tr("Персонал", "Staff") },
           { page: "audit-logs", icon: ClipboardList, label: tr("Журнал аудита", "Audit Log") },
           { page: "auth-logs", icon: LogOut, label: tr("Журнал авторизации", "Auth Log") },

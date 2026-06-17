@@ -6,6 +6,7 @@ import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartToo
 import { Textarea } from "../ui/textarea";
 import { LiveMap } from "../live-map";
 import { PassengerManifest } from "./passenger-manifest";
+import { PirepScreenshots } from "./pirep-screenshots";
 
 interface TelemetryPoint {
   lat: number;
@@ -480,6 +481,13 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
               flightNumber={detail.flightNumber}
             />
           )}
+
+          {/* Screenshots (collapsible, drag-n-drop, feeds the gallery) */}
+          <PirepScreenshots
+            pirepId={detail.id}
+            callsign={detail.callsign}
+            route={`${detail.departure || ""}${detail.arrival ? ` → ${detail.arrival}` : ""}`}
+          />
         </div>
 
         {/* ── RIGHT: compact cards ── */}

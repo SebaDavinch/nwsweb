@@ -76,6 +76,12 @@ const CATEGORY_META: Record<NotificationCategory, {
     accentClass: "text-fuchsia-600",
     badgeClass: "border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700",
   },
+  achievement: {
+    labelKey: "notifications.category.achievement",
+    icon: Trophy,
+    accentClass: "text-amber-600",
+    badgeClass: "border-amber-200 bg-amber-50 text-amber-700",
+  },
   system: {
     labelKey: "notifications.category.system",
     icon: BellRing,

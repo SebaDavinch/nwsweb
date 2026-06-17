@@ -31,6 +31,7 @@ dist-ssr
 # Heavy release bundles and temp workspaces
 artifacts/
 website-release/
+website-release-*/
 website-release-1.8/
 website-release-assembled/
 website-release-original/

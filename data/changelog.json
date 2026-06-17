@@ -1,0 +1,62 @@
+{
+  "generatedAt": "2026-06-14T13:22:39.619Z",
+  "entries": [
+    {
+      "version": "0.0.0",
+      "date": "2026-06-09",
+      "count": 10,
+      "items": [
+        {
+          "type": "fix",
+          "text": "localize Save/Compare buttons in recent flights (ru/en)",
+          "hash": "fe8c4f2"
+        },
+        {
+          "type": "fix",
+          "text": "resolve Invariant failed on dashboard and crypto require error",
+          "hash": "860ae93"
+        },
+        {
+          "type": "feature",
+          "text": "major UI overhaul — hero redesign, live map, PIREP detail, stream widgets",
+          "hash": "1745cc8"
+        },
+        {
+          "type": "other",
+          "text": "Restore public feed fallbacks and hide gates nav item",
+          "hash": "9cf13d8"
+        },
+        {
+          "type": "other",
+          "text": "Implement Discord bot, admin, and dashboard updates",
+          "hash": "0f7580a"
+        },
+        {
+          "type": "feature",
+          "text": "ship new admin and pilot platform modules",
+          "hash": "c8e5699"
+        },
+        {
+          "type": "feature",
+          "text": "add Telegram pilot alerts and admin banner workflow",
+          "hash": "711937b"
+        },
+        {
+          "type": "other",
+          "text": "Update ticket workflow, pilot tools, and auth logging",
+          "hash": "e038ad6"
+        },
+        {
+          "type": "other",
+          "text": "апдейт локализации",
+          "hash": "9467488"
+        },
+        {
+          "type": "other",
+          "text": "Initial commit",
+          "hash": "0aa1cb7"
+        }
+      ]
+    }
+  ]
+}

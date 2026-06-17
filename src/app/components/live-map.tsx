@@ -5,7 +5,7 @@ import { useLanguage } from "../context/language-context";
 import { FlightDetailSidebar } from "./flight-detail-sidebar";
 import { RouteGeneratorModal } from "./route-generator-modal";
 
-interface Flight {
+export interface Flight {
   id?: number | null;
   flightNumber: string;
   departure: string;
@@ -68,12 +68,28 @@ const airports: Record<string, Airport> = {
   LEMD: { icao: "LEMD", name: "Madrid Barajas", lat: 40.4936, lon: -3.5668 },
 };
 
+export interface ScreenshotPin {
+  id: string;
+  lat: number;
+  lon: number;
+  altitude?: number | null;
+  mediaId?: string | null;
+  assetUrl?: string | null;
+  title?: string | null;
+  pilotName?: string;
+  pilotId?: number | null;
+  callsign?: string | null;
+  ageMs?: number;
+}
+
 interface LiveMapProps {
   flights: Flight[];
   selectedFlight?: Flight | null;
   onFlightSelect?: (flight: Flight) => void;
   onCloseDetail?: () => void;
   className?: string;
+  screenshotPins?: ScreenshotPin[];
+  onPinClick?: (pin: ScreenshotPin) => void;
 }
 
 const getVACColor = (vac: string) => {
@@ -220,8 +236,8 @@ const normalizeTelemetryTrack = (track: unknown): TelemetryPoint[] => {
 
       if (point && typeof point === "object") {
         const record = point as Record<string, unknown>;
-        const lat = Number(record.lat ?? record.latitude ?? record.currentLat);
-        const lon = Number(record.lon ?? record.lng ?? record.longitude ?? record.currentLon);
+        const lat = Number(record.lat ?? record.latitude ?? record.currentLat ?? record.positionLat ?? record.y);
+        const lon = Number(record.lon ?? record.lng ?? record.longitude ?? record.currentLon ?? record.positionLon ?? record.x);
         if (Number.isFinite(lat) && Number.isFinite(lon)) {
           return {
             lat,
@@ -398,7 +414,7 @@ const createAirplaneMarker = (angle = 0, color = "#E31E24", selected = false, al
     html: `<div style="transform:rotate(${angle}deg);width:${size}px;height:${size}px;filter:${glow}">
       <svg width="${size}" height="${size}" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
         ${ring}
-        <path d="M16 3 L19.5 13 L28 15.5 L19.5 18 L20.5 27 L16 24.5 L11.5 27 L12.5 18 L4 15.5 L12.5 13 Z"
+        <path d="M16 2 L17.2 13 L30 19 L30 21 L17.2 16.5 L16.8 25 L21 28 L21 29.5 L16 27.5 L11 29.5 L11 28 L15.2 25 L14.8 16.5 L2 21 L2 19 L14.8 13 Z"
           fill="${color}" stroke="rgba(255,255,255,0.9)" stroke-width="${selected ? 1.5 : 1}" stroke-linejoin="round"/>
       </svg>
     </div>`,
@@ -418,10 +434,13 @@ const createAirportDot = (color: string, label: string) => L.divIcon({
   iconAnchor: [5, 5],
 });
 
-export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail, className }: LiveMapProps) {
+export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail, className, screenshotPins = [], onPinClick }: LiveMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const pinsLayerRef = useRef<L.LayerGroup | null>(null);
+  const onPinClickRef = useRef(onPinClick);
+  onPinClickRef.current = onPinClick;
   const { t } = useLanguage();
   const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
   const smoothedMarkerRef = useRef<Map<string, TelemetryPoint>>(new Map());
@@ -542,7 +561,13 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
     }).addTo(map);
 
     mapInstanceRef.current = map;
+    // Отдельный pane для гео-меток скриншотов НИЖЕ маркеров бортов (markerPane=600),
+    // чтобы пины не перехватывали клик по самолёту.
+    map.createPane("nwsPins");
+    const pinsPane = map.getPane("nwsPins");
+    if (pinsPane) pinsPane.style.zIndex = "580";
     layerGroupRef.current = L.layerGroup().addTo(map);
+    pinsLayerRef.current = L.layerGroup().addTo(map);
 
     return () => {
       if (mapInstanceRef.current) {
@@ -729,6 +754,47 @@ export function LiveMap({ flights, selectedFlight, onFlightSelect, onCloseDetail
         });
     }
   }, [flights, selectedFlight, t, onFlightSelect]);
+
+  // Слой гео-меток скриншотов (Volanta-style)
+  useEffect(() => {
+    if (!pinsLayerRef.current) return;
+    pinsLayerRef.current.clearLayers();
+
+    const ageLabel = (ms?: number) => {
+      const m = Math.max(0, Math.round((Number(ms) || 0) / 60000));
+      if (m < 1) return "только что";
+      return `${m} мин назад`;
+    };
+
+    screenshotPins.forEach((pin) => {
+      if (!Number.isFinite(Number(pin.lat)) || !Number.isFinite(Number(pin.lon))) return;
+      const icon = L.divIcon({
+        className: "",
+        html: `
+          <div style="position:relative;width:34px;height:34px;">
+            <div style="position:absolute;inset:0;border-radius:50%;background:rgba(227,30,36,0.25);animation:pinPulse 2.4s infinite;"></div>
+            <div style="position:absolute;inset:3px;border-radius:50%;border:2px solid #fff;overflow:hidden;background:#1e293b;box-shadow:0 3px 8px rgba(0,0,0,0.45);">
+              ${pin.assetUrl ? `<img src="${pin.assetUrl}" style="width:100%;height:100%;object-fit:cover;display:block;" />` : `<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;color:#fff;font-size:14px;">📷</div>`}
+            </div>
+          </div>`,
+        iconSize: [34, 34],
+        iconAnchor: [17, 17],
+        popupAnchor: [0, -18],
+      });
+      const marker = L.marker([Number(pin.lat), Number(pin.lon)], { icon, pane: "nwsPins" });
+      const popup = `
+        <div style="width:180px;font-family:-apple-system,system-ui,sans-serif;">
+          ${pin.assetUrl ? `<img src="${pin.assetUrl}" style="width:100%;height:100px;object-fit:cover;border-radius:8px;display:block;margin-bottom:6px;" />` : ""}
+          <div style="font-weight:700;font-size:12px;color:#0f172a;">${pin.pilotName || "Pilot"}${pin.callsign ? ` · ${pin.callsign}` : ""}</div>
+          <div style="font-size:11px;color:#64748b;margin-top:2px;">${ageLabel(pin.ageMs)}</div>
+        </div>`;
+      marker.bindPopup(popup, { closeButton: true });
+      if (onPinClickRef.current) {
+        marker.on("click", () => onPinClickRef.current?.(pin));
+      }
+      marker.addTo(pinsLayerRef.current!);
+    });
+  }, [screenshotPins]);
 
   return (
     <div className={className ?? "w-full h-[800px] relative bg-[#0d1117]"}>

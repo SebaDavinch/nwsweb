@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Search } from "lucide-react";
-import { Card, CardContent } from "../ui/card";
+import { AlertTriangle, CheckCircle2, Loader2, Pencil, PlayCircle, Radar, Save, Search, Upload } from "lucide-react";
+import { useRef } from "react";
+import { Switch } from "../ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
@@ -56,6 +58,41 @@ interface HubItem {
   name: string;
 }
 
+interface AuditIssue {
+  routeId: number;
+  flight: string;
+  sector: string;
+  errors: string[];
+}
+
+interface AuditReport {
+  generatedAt: string;
+  navdataReady: boolean;
+  totalRoutes: number;
+  checkedRoutes: number;
+  issueCount: number;
+  issues: AuditIssue[];
+}
+
+interface AuditSettings {
+  enabled: boolean;
+  intervalHours: number;
+  discordNotify: boolean;
+  discordChannelId: string;
+  lastRunAt?: string;
+}
+
+interface AuditNavdataInfo {
+  ready: boolean;
+  fixes: number;
+  airways: number;
+  dir: string;
+  updatedAt?: string | null;
+  ageDays?: number | null;
+}
+
+const NAVDATA_STALE_AFTER_DAYS = 28;
+
 export function AdminRoutesPage() {
   const { language } = useLanguage();
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
@@ -71,6 +108,89 @@ export function AdminRoutesPage() {
   const [status, setStatus] = useState("active");
   const [priority, setPriority] = useState("normal");
   const [notes, setNotes] = useState("");
+
+  // Route network audit
+  const [auditSettings, setAuditSettings] = useState<AuditSettings>({ enabled: false, intervalHours: 24, discordNotify: true, discordChannelId: "" });
+  const [auditReport, setAuditReport] = useState<AuditReport | null>(null);
+  const [auditNavdata, setAuditNavdata] = useState<AuditNavdataInfo | null>(null);
+  const [isAuditRunning, setIsAuditRunning] = useState(false);
+  const [isAuditSaving, setIsAuditSaving] = useState(false);
+  const [isNavdataUploading, setIsNavdataUploading] = useState(false);
+  const [navdataUploadError, setNavdataUploadError] = useState("");
+  const navdataInputRef = useRef<HTMLInputElement>(null);
+
+  const uploadNavdata = async (file: File) => {
+    setIsNavdataUploading(true);
+    setNavdataUploadError("");
+    try {
+      const lower = file.name.toLowerCase();
+      let url = "";
+      if (lower.endsWith(".zip")) url = "/api/admin/route-audit/navdata-archive";
+      else if (lower.includes("fix")) url = "/api/admin/route-audit/navdata?file=fix";
+      else if (lower.includes("awy") || lower.includes("airway")) url = "/api/admin/route-audit/navdata?file=awy";
+      else {
+        setNavdataUploadError(tr("Не удалось определить тип файла: ожидается .zip, earth_fix.dat или earth_awy.dat", "Cannot detect file type: expected .zip, earth_fix.dat or earth_awy.dat"));
+        return;
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: file,
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok || !payload?.ok) {
+        setNavdataUploadError(String(payload?.error || tr("Не удалось загрузить файл", "Upload failed")));
+        return;
+      }
+      await loadAudit();
+    } catch (error) {
+      setNavdataUploadError(String(error || tr("Не удалось загрузить файл", "Upload failed")));
+    } finally {
+      setIsNavdataUploading(false);
+      if (navdataInputRef.current) navdataInputRef.current.value = "";
+    }
+  };
+
+  const loadAudit = async () => {
+    try {
+      const res = await fetch("/api/admin/route-audit", { credentials: "include" });
+      if (!res.ok) return;
+      const payload = await res.json();
+      if (payload?.settings) setAuditSettings(payload.settings);
+      if (payload?.report) setAuditReport(payload.report);
+      if (payload?.navdata) setAuditNavdata(payload.navdata);
+    } catch { /* ignore */ }
+  };
+
+  const saveAuditSettings = async () => {
+    setIsAuditSaving(true);
+    try {
+      const res = await fetch("/api/admin/route-audit/settings", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(auditSettings),
+      });
+      const payload = res.ok ? await res.json() : null;
+      if (payload?.settings) setAuditSettings(payload.settings);
+    } finally {
+      setIsAuditSaving(false);
+    }
+  };
+
+  const runAuditNow = async () => {
+    setIsAuditRunning(true);
+    try {
+      const res = await fetch("/api/admin/route-audit/run", { method: "POST", credentials: "include" });
+      const payload = res.ok ? await res.json() : null;
+      if (payload?.report) setAuditReport(payload.report);
+    } finally {
+      setIsAuditRunning(false);
+    }
+  };
+
+  useEffect(() => { void loadAudit(); }, []);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -152,6 +272,153 @@ export function AdminRoutesPage() {
         <h2 className="text-2xl font-bold text-gray-900">{tr("Маршруты", "Routes")}</h2>
         <p className="text-sm text-gray-500">{tr("Операционный каталог маршрутов с метаданными хабов и приоритета.", "Operational route catalog with hub and priority metadata.")}</p>
       </div>
+
+      <Card className="border-none shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Radar className="h-4 w-4 text-[#E31E24]" />
+              {tr("Аудит маршрутной сети", "Route Network Audit")}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <input
+                ref={navdataInputRef}
+                type="file"
+                accept=".zip,.dat"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadNavdata(f); }}
+              />
+              <Button variant="outline" size="sm" onClick={() => navdataInputRef.current?.click()} disabled={isNavdataUploading}>
+                {isNavdataUploading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Upload className="h-4 w-4 mr-2" />}
+                {tr("Загрузить AIRAC", "Upload AIRAC")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void runAuditNow()} disabled={isAuditRunning || !auditNavdata?.ready}>
+                {isAuditRunning ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <PlayCircle className="h-4 w-4 mr-2" />}
+                {tr("Запустить сейчас", "Run now")}
+              </Button>
+              <Button size="sm" onClick={() => void saveAuditSettings()} disabled={isAuditSaving} className="bg-[#E31E24] hover:bg-[#c91a1f]">
+                {isAuditSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                {tr("Сохранить", "Save")}
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {navdataUploadError && (
+            <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>{navdataUploadError}</div>
+            </div>
+          )}
+          {!auditNavdata?.ready ? (
+            <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                {tr("Навигационная база не загружена. Установите её одним из способов: ", "Navigation database is not loaded. Install it either way: ")}
+                <strong>{tr("1)", "1)")}</strong> {tr("нажмите «Загрузить AIRAC» и выберите ZIP-архив или файлы ", "click “Upload AIRAC” and pick a ZIP archive or the ")}
+                <code className="font-mono text-xs">earth_fix.dat</code> / <code className="font-mono text-xs">earth_awy.dat</code>
+                {tr(" (формат X-Plane / Navigraph); ", " files (X-Plane / Navigraph format); ")}
+                <strong>{tr("2)", "2)")}</strong> {tr("или положите эти файлы вручную в папку ", "or place those files manually into ")}
+                <code className="font-mono text-xs">data/navdata/</code>
+                {tr(" на сервере и обновите страницу.", " on the server and refresh this page.")}
+              </div>
+            </div>
+          ) : (
+            <>
+              {typeof auditNavdata.ageDays === "number" && auditNavdata.ageDays >= NAVDATA_STALE_AFTER_DAYS && (
+                <div className="flex items-start gap-2 rounded-lg border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800">
+                  <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    {tr(
+                      `Навигационная база не обновлялась ${auditNavdata.ageDays} дн. — AIRAC-цикл (28 дн.) истёк. Загрузите свежие earth_fix.dat и earth_awy.dat в data/navdata/.`,
+                      `Navigation database is ${auditNavdata.ageDays} days old — the AIRAC cycle (28 days) has expired. Upload fresh earth_fix.dat and earth_awy.dat to data/navdata/.`
+                    )}
+                  </div>
+                </div>
+              )}
+              <div className="text-xs text-gray-500">
+                {tr("Навданные загружены:", "Navdata loaded:")} {auditNavdata.fixes.toLocaleString()} {tr("точек", "fixes")} · {auditNavdata.airways.toLocaleString()} {tr("трасс", "airways")}
+                {auditNavdata.updatedAt ? <> · {tr("обновлены", "updated")} {new Date(auditNavdata.updatedAt).toLocaleDateString()}{typeof auditNavdata.ageDays === "number" ? ` (${auditNavdata.ageDays} ${tr("дн. назад", "days ago")})` : ""}</> : null}
+              </div>
+            </>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+              <div>
+                <div className="text-sm font-medium text-gray-900">{tr("Автопроверка", "Auto-audit")}</div>
+                <div className="text-[11px] text-gray-500">{tr("Запуск по расписанию", "Run on schedule")}</div>
+              </div>
+              <Switch checked={auditSettings.enabled} onCheckedChange={(checked) => setAuditSettings((prev) => ({ ...prev, enabled: Boolean(checked) }))} />
+            </div>
+            <div className="rounded-lg border border-gray-200 p-3">
+              <div className="text-sm font-medium text-gray-900 mb-1">{tr("Интервал (часы)", "Interval (hours)")}</div>
+              <Input
+                type="number"
+                min={1}
+                max={168}
+                value={auditSettings.intervalHours}
+                onChange={(e) => setAuditSettings((prev) => ({ ...prev, intervalHours: Math.max(1, Number(e.target.value) || 24) }))}
+              />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+              <div>
+                <div className="text-sm font-medium text-gray-900">{tr("Discord-сводка", "Discord summary")}</div>
+                <div className="text-[11px] text-gray-500">{tr("Присылать отчёт ботом", "Send report via bot")}</div>
+              </div>
+              <Switch checked={auditSettings.discordNotify} onCheckedChange={(checked) => setAuditSettings((prev) => ({ ...prev, discordNotify: Boolean(checked) }))} />
+            </div>
+            <div className="rounded-lg border border-gray-200 p-3">
+              <div className="text-sm font-medium text-gray-900 mb-1">{tr("Discord канал ID", "Discord channel ID")}</div>
+              <Input
+                value={auditSettings.discordChannelId}
+                onChange={(e) => setAuditSettings((prev) => ({ ...prev, discordChannelId: e.target.value.trim() }))}
+                placeholder={tr("по умолчанию — новости", "default — news channel")}
+              />
+            </div>
+          </div>
+
+          {auditReport && (
+            <div className="rounded-lg border border-gray-200 overflow-hidden">
+              <div className="flex items-center justify-between gap-3 flex-wrap px-4 py-2.5 bg-gray-50 border-b border-gray-200">
+                <div className="flex items-center gap-2 text-sm">
+                  {auditReport.issueCount === 0 ? (
+                    <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                  )}
+                  <span className="font-semibold text-gray-900">
+                    {auditReport.issueCount === 0
+                      ? tr("Проблем не найдено", "No issues found")
+                      : tr(`Проблем: ${auditReport.issueCount}`, `Issues: ${auditReport.issueCount}`)}
+                  </span>
+                  <span className="text-gray-400 text-xs">
+                    {tr("проверено", "checked")} {auditReport.checkedRoutes}/{auditReport.totalRoutes}
+                  </span>
+                </div>
+                <span className="text-xs text-gray-400">{new Date(auditReport.generatedAt).toLocaleString()}</span>
+              </div>
+              {auditReport.issues.length > 0 && (
+                <div className="max-h-72 overflow-y-auto divide-y divide-gray-100">
+                  {auditReport.issues.map((issue) => (
+                    <div key={`${issue.routeId}-${issue.flight}`} className="px-4 py-2 flex items-start gap-3">
+                      <div className="w-40 shrink-0">
+                        <div className="font-semibold text-sm text-gray-900">{issue.flight}</div>
+                        <div className="text-xs text-gray-500">{issue.sector}</div>
+                      </div>
+                      <div className="flex-1 min-w-0 flex flex-wrap gap-1.5 py-0.5">
+                        {issue.errors.map((err, i) => (
+                          <Badge key={i} variant="outline" className="border-amber-200 bg-amber-50 text-amber-700 font-normal">{err}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card className="border-none shadow-sm">
         <CardContent className="space-y-4 p-4">

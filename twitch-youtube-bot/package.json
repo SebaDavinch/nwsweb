@@ -1,0 +1,16 @@
+{
+  "name": "nws-chatbot",
+  "version": "1.0.0",
+  "description": "NWSBot — Twitch & YouTube chat bot for Nordwind Virtual",
+  "type": "module",
+  "main": "src/bot.js",
+  "scripts": {
+    "start": "node src/bot.js",
+    "dev": "node --watch src/bot.js"
+  },
+  "dependencies": {
+    "tmi.js": "^1.8.5",
+    "node-fetch": "^3.3.2",
+    "dotenv": "^16.4.5"
+  }
+}

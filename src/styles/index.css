@@ -3,6 +3,35 @@
 @import './theme.css';
 @import 'leaflet/dist/leaflet.css';
 
+/* Плавное парение декоративного борта на Главной */
+@keyframes nws-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50% { transform: translateY(-10px) rotate(-2deg); }
+}
+.nws-float {
+  animation: nws-float 7s ease-in-out infinite;
+}
+
+/* Бегущий блик по иконке статуса рейса */
+@keyframes nws-shine {
+  0% { transform: translateX(-100%); }
+  60%, 100% { transform: translateX(200%); }
+}
+
+/* Красивое переключение темы: круговой reveal новой темы поверх старой.
+   Отключаем дефолтный кроссфейд View Transitions — анимируем только clip-path новой темы. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 9999;
+}
+
 /* Leaflet custom styles */
 .leaflet-popup-content-wrapper {
   border-radius: 12px;
@@ -21,4 +50,44 @@
 .leaflet-container {
   background: #1a1a1a;
   font-family: inherit;
+}
+
+/* Thin custom scrollbar for dark sidebars/panels */
+.nws-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.nws-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.nws-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nws-scroll::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+.nws-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.28);
+}
+/* Hide the scrollbar until the area is hovered, keep layout stable */
+.nws-scroll-hover {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+.nws-scroll-hover::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.nws-scroll-hover::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+.nws-scroll-hover:hover {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+.nws-scroll-hover:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
 }

@@ -1,4 +1,4 @@
-import { MessageSquare, ExternalLink } from "lucide-react";
+import { MessageSquare, ExternalLink, Download } from "lucide-react";
 import { Link } from "react-router";
 import { useLanguage } from "../context/language-context";
 import { Button } from "./ui/button";
@@ -65,6 +65,15 @@ export function Footer() {
                   className="text-gray-300 hover:text-[#E31E24] transition-colors"
                 >
                   {t("nav.join")}
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/download"
+                  className="inline-flex items-center gap-1.5 text-gray-300 transition-colors hover:text-[#E31E24]"
+                >
+                  <Download size={14} />
+                  {tr("Приложение", "Desktop app")}
                 </Link>
               </li>
             </ul>

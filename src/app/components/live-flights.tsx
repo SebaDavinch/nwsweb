@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLanguage } from "../context/language-context";
 import { Plane, Clock, ChevronLeft, ChevronRight, Radio } from "lucide-react";
-import { LiveMap } from "./live-map";
+import { LiveMap, type ScreenshotPin } from "./live-map";
 
 interface Flight {
   id?: number | null;
@@ -13,6 +13,7 @@ interface Flight {
   destinationCity: string;
   status: string;
   pilot: string;
+  pilotVaId?: string;
   pilotId: string | number | null;
   aircraft: string;
   progress: number;
@@ -47,6 +48,48 @@ interface Flight {
   arrivalLat?: number | null;
   arrivalLon?: number | null;
 }
+
+// ICAO prefix → ISO2 country for flag
+const ICAO_FLAG: Record<string, string> = {
+  UU: "ru", UR: "ru", UW: "ru", UK: "ru", US: "ru",
+  UA: "ua", LT: "tr", LG: "gr", LF: "fr", ED: "de",
+  EG: "gb", LE: "es", LI: "it", EH: "nl", LO: "at",
+  LP: "pt", LK: "cz", EP: "pl", EY: "lt", EV: "lv",
+  EE: "ee", UB: "az", UT: "uz", UC: "kg", OA: "af",
+  OI: "ir", OR: "iq", OS: "sy", OB: "bh", OE: "sa",
+  OK: "kw", OO: "om", OP: "pk", OT: "qa", OM: "ae",
+  VN: "vn", VT: "th", WS: "sg", RK: "kr", ZS: "cn",
+  RC: "tw", RJ: "jp", LZ: "sk", LB: "bg", LR: "ro",
+  LH: "hu", LD: "hr", LJ: "si", LQ: "ba", LY: "rs",
+};
+
+const icaoToFlag = (icao?: string) => {
+  const code = String(icao || "").trim().toUpperCase();
+  return ICAO_FLAG[code] || ICAO_FLAG[code.slice(0, 2)] || "";
+};
+
+const abbreviatePilotName = (fullName: string) => {
+  const parts = fullName.trim().split(/\s+/);
+  if (parts.length < 2) return fullName;
+  return `${parts[0]} ${parts[parts.length - 1][0]}.`;
+};
+
+// Format duration/remaining time as HH:MM
+const formatETE = (value?: string) => {
+  if (!value) return null;
+  const raw = String(value).trim();
+  // already HH:MM or HH:MM:SS
+  const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (match) return `${String(match[1]).padStart(2, "0")}:${match[2]}`;
+  // total minutes as number
+  const mins = Number(raw);
+  if (Number.isFinite(mins) && mins >= 0) {
+    const h = Math.floor(mins / 60);
+    const m = Math.round(mins % 60);
+    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+  return raw || null;
+};
 
 const LIVE_REFRESH_ACTIVE_MS = 100;
 const LIVE_REFRESH_IDLE_MS = 30000;
@@ -188,6 +231,7 @@ export function LiveFlights() {
   const [completedFlights, setCompletedFlights] = useState<Flight[]>([]);
   const [isLoadingFlights, setIsLoadingFlights] = useState(true);
   const [hasFlightsError, setHasFlightsError] = useState(false);
+  const [screenshotPins, setScreenshotPins] = useState<ScreenshotPin[]>([]);
   const lastNonEmptyActiveRef = useRef<{ flights: Flight[]; updatedAt: number }>({
     flights: [],
     updatedAt: 0,
@@ -203,6 +247,27 @@ export function LiveFlights() {
     }, 1000);
 
     return () => clearInterval(timer);
+  }, []);
+
+  // Гео-метки скриншотов (только просмотр; для гостей эндпоинт вернёт 401 → меток нет)
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/pilot/screenshot-pins", { credentials: "include" });
+        if (!res.ok) return;
+        const payload = (await res.json().catch(() => null)) as { pins?: ScreenshotPin[] } | null;
+        if (active && Array.isArray(payload?.pins)) setScreenshotPins(payload!.pins!);
+      } catch {
+        /* ignore */
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
   }, []);
 
   useEffect(() => {
@@ -303,6 +368,7 @@ export function LiveFlights() {
               ""
           ).trim() || undefined,
         network: resolveNetworkLabel(row) || undefined,
+        pilotVaId: String(row.pilotVaId || row.pilotCallsign || row.pilot_callsign || row.pilot_va_id || "").trim() || undefined,
         hasLiveTelemetry: Boolean(row.hasLiveTelemetry),
         telemetryTrack,
         departureLat: toFiniteOrNull(row.departureLat),
@@ -341,6 +407,8 @@ export function LiveFlights() {
         duration: String(row.duration || "—").trim() || "—",
         completedDate: String(row.completedDate || "").trim() || "",
         completedTime: String(row.completedTime || "").trim() || "",
+        network: resolveNetworkLabel(row) || undefined,
+        pilotVaId: String(row.pilotVaId || row.pilotCallsign || row.pilot_callsign || row.pilot_va_id || "").trim() || undefined,
         vac,
       };
     };
@@ -569,42 +637,70 @@ export function LiveFlights() {
                       key={`${flight.flightNumber}-${String(flight.pilotId)}`}
                       type="button"
                       onClick={() => handleFlightSelect(flight)}
-                      className={`w-full text-left px-4 py-3 transition-all hover:bg-white/5 ${isSelected ? "bg-white/8" : ""}`}
+                      className={`group w-full text-left px-4 py-3 transition-all hover:bg-white/5 ${isSelected ? "bg-white/8" : ""}`}
                     >
+                      {/* Row 1: callsign + aircraft */}
                       <div className="flex items-center justify-between mb-1.5">
                         <div className="flex items-center gap-2">
-                          <div className="w-1 h-4 rounded-full" style={{ backgroundColor: color }} />
+                          <div className="w-1 h-4 rounded-full shrink-0" style={{ backgroundColor: color }} />
                           <span className="text-white font-bold text-sm" style={{ fontFamily: "var(--font-display)" }}>
                             {flight.callsign || flight.flightNumber}
                           </span>
+                          {flight.network && (
+                            <span className="text-[9px] border border-white/15 px-1.5 py-0.5 rounded text-white/35">{flight.network}</span>
+                          )}
                         </div>
-                        <span className="text-white/35 text-[10px] font-mono">{flight.aircraft}</span>
+                        <div className="text-right">
+                          <div className="text-white/40 text-[10px] font-mono leading-tight">{flight.aircraft}</div>
+                          {flight.aircraftRegistration && (
+                            <div className="text-white/25 text-[9px] font-mono leading-tight">{flight.aircraftRegistration}</div>
+                          )}
+                        </div>
                       </div>
+
+                      {/* Row 2: route with flags */}
                       <div className="flex items-center gap-1 text-white/50 text-[11px] mb-2">
-                        <span>{flight.departure}</span>
-                        <svg width="16" height="6" viewBox="0 0 16 6" fill="none">
-                          <line x1="0" y1="3" x2="12" y2="3" stroke="currentColor" strokeWidth="1"/>
-                          <path d="M10 1L12 3L10 5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
-                        </svg>
-                        <span>{flight.destination}</span>
-                        {flight.network && (
-                          <span className="ml-auto text-[9px] border border-white/15 px-1 rounded">{flight.network}</span>
+                        {icaoToFlag(flight.departure) && (
+                          <img src={`https://flagcdn.com/${icaoToFlag(flight.departure)}.svg`} alt="" className="h-2.5 w-3.5 rounded-[2px] object-cover shrink-0 opacity-70" loading="lazy" decoding="async" />
                         )}
+                        <span className="font-mono">{flight.departure}</span>
+                        <svg width="14" height="6" viewBox="0 0 14 6" fill="none" className="shrink-0 mx-0.5">
+                          <line x1="0" y1="3" x2="10" y2="3" stroke="currentColor" strokeWidth="1"/>
+                          <path d="M8 1L10 3L8 5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
+                        </svg>
+                        {icaoToFlag(flight.destination) && (
+                          <img src={`https://flagcdn.com/${icaoToFlag(flight.destination)}.svg`} alt="" className="h-2.5 w-3.5 rounded-[2px] object-cover shrink-0 opacity-70" loading="lazy" decoding="async" />
+                        )}
+                        <span className="font-mono">{flight.destination}</span>
                       </div>
+
+                      {/* Progress bar */}
                       <div className="w-full h-0.5 rounded-full bg-white/8 overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{ width: `${Math.min(100, flight.progress)}%`, backgroundColor: color }}
-                        />
+                        <div className="h-full rounded-full transition-all duration-300" style={{ width: `${Math.min(100, flight.progress)}%`, backgroundColor: color }} />
                       </div>
-                      <div className="flex items-center justify-between mt-1">
+
+                      {/* Row 3: progress % + telemetry */}
+                      <div className="flex items-center justify-between mt-1.5">
                         <span className="text-white/25 text-[10px]">{Math.round(flight.progress)}%</span>
-                        {flight.altitude ? (
-                          <span className="text-white/25 text-[10px]">
-                            {flight.altitude >= 1000 ? `FL${Math.round(flight.altitude / 100)}` : `${Math.round(flight.altitude)} ft`}
-                          </span>
-                        ) : null}
+                        <div className="flex items-center gap-2 text-[10px] text-white/25 font-mono">
+                          {flight.altitude ? (
+                            <span>{flight.altitude >= 1000 ? `FL${Math.round(flight.altitude / 100)}` : `${Math.round(flight.altitude)} ft`}</span>
+                          ) : null}
+                          {flight.speed ? <span>{Math.round(flight.speed)} kt</span> : null}
+                          {formatETE(flight.ete) && <span className="text-white/20">ETE {formatETE(flight.ete)}</span>}
+                        </div>
                       </div>
+
+                      {/* Hover telemetry row */}
+                      {(flight.altitude || flight.speed || flight.heading) && (
+                        <div className="mt-2 hidden group-hover:flex items-center gap-3 text-[10px] text-white/40 border-t border-white/6 pt-2 font-mono">
+                          {flight.altitude ? <span>↑ {flight.altitude >= 1000 ? `FL${Math.round(flight.altitude / 100)}` : `${Math.round(flight.altitude)} ft`}</span> : null}
+                          {flight.speed ? <span>▶ {Math.round(flight.speed)} kt</span> : null}
+                          {flight.heading ? <span>⊙ {Math.round(flight.heading)}°</span> : null}
+                          {flight.ete ? <span>ETE {formatETE(flight.ete)}</span> : null}
+                          {flight.eta ? <span className="ml-auto">ETA {flight.eta}</span> : null}
+                        </div>
+                      )}
                     </button>
                   );
                 })}
@@ -639,6 +735,7 @@ export function LiveFlights() {
           selectedFlight={selectedFlight}
           onFlightSelect={handleFlightSelect}
           onCloseDetail={() => setSelectedFlight(null)}
+          screenshotPins={screenshotPins}
           className="w-full h-full bg-[#0d1117]"
         />
 
@@ -698,7 +795,7 @@ export function LiveFlights() {
                     tr("Пилот", "Pilot"),
                     tr("ВС", "Aircraft"),
                     tr("Сеть", "Network"),
-                    tr("Время", "Time"),
+                    "ETE / UTC",
                   ].map((col) => (
                     <th key={col} className="text-left px-4 py-2 text-white/25 font-medium uppercase tracking-[0.12em] whitespace-nowrap">
                       {col}
@@ -724,12 +821,18 @@ export function LiveFlights() {
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-1.5 text-white/60">
-                          <span>{flight.departure}</span>
-                          <svg width="12" height="4" viewBox="0 0 12 4" fill="none">
+                          {icaoToFlag(flight.departure) && (
+                            <img src={`https://flagcdn.com/${icaoToFlag(flight.departure)}.svg`} alt="" className="h-2.5 w-3.5 rounded-[2px] object-cover shrink-0 opacity-60" loading="lazy" decoding="async" />
+                          )}
+                          <span className="font-mono">{flight.departure}</span>
+                          <svg width="12" height="4" viewBox="0 0 12 4" fill="none" className="shrink-0">
                             <line x1="0" y1="2" x2="9" y2="2" stroke="currentColor" strokeWidth="1"/>
                             <path d="M7 0.5L9 2L7 3.5" stroke="currentColor" strokeWidth="1" strokeLinecap="round"/>
                           </svg>
-                          <span>{flight.destination}</span>
+                          {icaoToFlag(flight.destination) && (
+                            <img src={`https://flagcdn.com/${icaoToFlag(flight.destination)}.svg`} alt="" className="h-2.5 w-3.5 rounded-[2px] object-cover shrink-0 opacity-60" loading="lazy" decoding="async" />
+                          )}
+                          <span className="font-mono">{flight.destination}</span>
                           {flight.departureCity && flight.destinationCity && (
                             <span className="text-white/25 hidden lg:inline">
                               ({flight.departureCity} – {flight.destinationCity})
@@ -737,8 +840,26 @@ export function LiveFlights() {
                           )}
                         </div>
                       </td>
-                      <td className="px-4 py-2.5 text-white/50 whitespace-nowrap">{flight.pilot || "—"}</td>
-                      <td className="px-4 py-2.5 text-white/40 whitespace-nowrap font-mono">{flight.aircraft || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <div className="text-white/50">
+                          {flight.pilotVaId ? (
+                            <span>
+                              <span className="text-white/70 font-semibold">{flight.pilotVaId}</span>
+                              {flight.pilot && flight.pilot !== "—" ? (
+                                <span className="text-white/35"> — {abbreviatePilotName(flight.pilot)}</span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            flight.pilot || "—"
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <div className="text-white/40 font-mono text-[11px] leading-tight">{flight.aircraft || "—"}</div>
+                        {flight.aircraftRegistration && (
+                          <div className="text-white/25 font-mono text-[10px] leading-tight">{flight.aircraftRegistration}</div>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         {flight.network ? (
                           <span className="text-[10px] border border-white/12 text-white/40 px-1.5 py-0.5 rounded">
@@ -746,8 +867,16 @@ export function LiveFlights() {
                           </span>
                         ) : <span className="text-white/20">—</span>}
                       </td>
-                      <td className="px-4 py-2.5 text-white/30 whitespace-nowrap font-mono">
-                        {flight.completedTime || flight.eta || "—"}
+                      <td className="px-4 py-2.5 whitespace-nowrap font-mono">
+                        {flight.duration && flight.duration !== "—" ? (
+                          <div className="text-white/40 text-[11px]">
+                            {formatETE(flight.duration) || flight.duration}
+                          </div>
+                        ) : null}
+                        {flight.completedTime ? (
+                          <div className="text-white/25 text-[10px]">{flight.completedTime}</div>
+                        ) : null}
+                        {!flight.duration && !flight.completedTime ? <span className="text-white/20">—</span> : null}
                       </td>
                     </tr>
                   );

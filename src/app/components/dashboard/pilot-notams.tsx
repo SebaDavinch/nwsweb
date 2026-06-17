@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNotifications } from "../../context/notifications-context";
 import {
   AlertTriangle,
   ExternalLink,
@@ -69,6 +70,12 @@ const TYPE_BADGE_CLASSNAMES: Record<NotamItem["type"], string> = {
   info: "border-slate-200 bg-slate-50 text-slate-700",
   warning: "border-amber-200 bg-amber-50 text-amber-700",
   critical: "border-red-200 bg-red-50 text-red-700",
+};
+
+const TYPE_ACCENT: Record<NotamItem["type"], { card: string; bar: string }> = {
+  info: { card: "border-l-4 border-l-sky-400", bar: "bg-sky-400" },
+  warning: { card: "border-l-4 border-l-amber-400", bar: "bg-amber-400" },
+  critical: { card: "border-l-4 border-l-red-500", bar: "bg-red-500" },
 };
 
 const PRIORITY_BADGE_CLASSNAMES: Record<NotamItem["priority"], string> = {
@@ -195,9 +202,13 @@ export function PilotNotams() {
         throw new Error(String(payload?.error || t("notams.toastReadError")));
       }
 
-      setNotams((current) => current.map((item) => (item.id === notamId ? { ...item, isRead: true } : item)));
+      patchNotamState(notamId, { isRead: true });
+      setSummary((prev) => ({
+        ...prev,
+        mustRead: Math.max(0, prev.mustRead - (targetNotam?.mustRead ? 1 : 0)),
+        highPriority: Math.max(0, prev.highPriority - (targetNotam?.priority === "high" ? 1 : 0)),
+      }));
       toast.success(t("notams.toastRead"));
-      void loadNotams({ silent: true });
     } catch (error) {
       toast.error(String(error || t("notams.toastReadError")));
     } finally {
@@ -324,20 +335,30 @@ export function PilotNotams() {
           <div className="mt-1 text-sm text-gray-500">{t("notams.emptyDesc")}</div>
         </div>
       ) : (
-        <div className="space-y-4">
-          {filteredNotams.map((item) => (
-            <Card key={item.id} className="border-none shadow-md overflow-hidden">
-              <CardContent className="p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="space-y-3">
+          {filteredNotams.map((item) => {
+            const accent = TYPE_ACCENT[item.type];
+            const isUrgent = item.type === "critical" || item.priority === "high";
+            return (
+            <Card key={item.id} className={`shadow-md overflow-hidden border-0 ${accent.card} ${isUrgent && !item.isRead ? "bg-red-50/40" : "bg-white"}`}>
+              <CardContent className="p-0">
+                <div className="flex flex-col gap-0 lg:flex-row lg:items-stretch lg:divide-x lg:divide-gray-100">
                   <button
                     type="button"
                     onClick={() => handleOpenNotam(item)}
-                    className="min-w-0 flex-1 text-left"
+                    className="min-w-0 flex-1 text-left p-5"
                   >
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <Badge variant="outline" className={TYPE_BADGE_CLASSNAMES[item.type]}>
-                        {t(`notams.type.${item.type}`)}
-                      </Badge>
+                    <div className="mb-2.5 flex flex-wrap items-center gap-2">
+                      {isUrgent && !item.isRead ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-red-500 px-2 py-0.5 text-[11px] font-bold text-white uppercase tracking-wide">
+                          <AlertTriangle className="h-3 w-3" />
+                          {item.type === "critical" ? t("notams.type.critical") : t(`notams.priority.${item.priority}`)}
+                        </span>
+                      ) : (
+                        <Badge variant="outline" className={TYPE_BADGE_CLASSNAMES[item.type]}>
+                          {t(`notams.type.${item.type}`)}
+                        </Badge>
+                      )}
                       <Badge variant="outline" className={PRIORITY_BADGE_CLASSNAMES[item.priority]}>
                         {t(`notams.priority.${item.priority}`)}
                       </Badge>
@@ -358,20 +379,20 @@ export function PilotNotams() {
                       ) : null}
                     </div>
 
-                    <div className="text-xl font-bold text-[#1d1d1f]">{item.title}</div>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-600">{item.content || "—"}</p>
+                    <div className={`font-bold text-[#1d1d1f] ${isUrgent && !item.isRead ? "text-lg" : "text-base"}`}>{item.title}</div>
+                    <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-500 line-clamp-3">{item.content || "—"}</p>
                   </button>
 
-                  <div className="w-full shrink-0 lg:w-56">
-                    <div className="rounded-2xl bg-gray-50 p-4 text-sm text-gray-600">
-                      <div className="flex items-start gap-2 text-[#1d1d1f]">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 text-[#E31E24]" />
-                        <div className="font-medium">{t("notams.posted")}</div>
-                      </div>
-                      <div className="mt-2">{formatDateTime(item.createdAt)}</div>
+                  <div className="shrink-0 lg:w-52 p-4 flex flex-col justify-between gap-3 bg-gray-50/60">
+                    <div className="text-xs text-gray-500">
+                      <div className="font-medium text-gray-700 mb-0.5">{t("notams.posted")}</div>
+                      {formatDateTime(item.createdAt)}
+                    </div>
+                    <div className="flex flex-col gap-2">
                       <Button
+                        size="sm"
                         variant="outline"
-                        className="mt-4 w-full"
+                        className="w-full"
                         onClick={() => handleOpenNotam(item)}
                       >
                         {t("notams.open")}
@@ -386,16 +407,17 @@ export function PilotNotams() {
                               void persistOpenedState(item.id);
                             }
                           }}
-                          className="mt-3 inline-flex items-center gap-2 text-sm font-medium text-[#E31E24] transition-colors hover:text-[#c41a20]"
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-[#E31E24] transition-colors hover:text-[#c41a20]"
                         >
-                          <ExternalLink className="h-4 w-4" />
+                          <ExternalLink className="h-3.5 w-3.5" />
                           {t("notams.readMore")}
                         </a>
                       ) : null}
                       {!item.isRead ? (
                         <Button
-                          variant="outline"
-                          className="mt-3 w-full"
+                          size="sm"
+                          variant={isUrgent ? "default" : "outline"}
+                          className={`w-full ${isUrgent ? "bg-[#E31E24] hover:bg-[#c41a20] text-white" : ""}`}
                           onClick={() => handleMarkAsRead(item.id)}
                           disabled={readingIds.includes(item.id) || !canMarkAsRead(item)}
                         >
@@ -403,14 +425,15 @@ export function PilotNotams() {
                         </Button>
                       ) : null}
                       {item.mustRead && !item.isOpened && !item.isRead ? (
-                        <div className="mt-2 text-xs text-amber-700">{t("notams.openBeforeRead")}</div>
+                        <div className="text-[11px] text-amber-700">{t("notams.openBeforeRead")}</div>
                       ) : null}
                     </div>
                   </div>
                 </div>
               </CardContent>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 

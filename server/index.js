@@ -6,7 +6,10 @@ import fs from "node:fs";
 import os from "node:os";
 import { execFile } from "node:child_process";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import zlib from "node:zlib";
 import { promisify } from "node:util";
+import { WebSocketServer } from "ws";
+import { mountEmailCampaigns } from "./email-campaigns.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -52,6 +55,16 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const DISCORD_OAUTH_REDIRECT_URI = process.env.DISCORD_OAUTH_REDIRECT_URI || "";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN || "";
+// Twitch OAuth (for pilot channel verification)
+const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || "";
+const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || "";
+const TWITCH_REDIRECT_URI = process.env.TWITCH_REDIRECT_URI || "";
+// YouTube / Google OAuth (for pilot channel verification)
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || "";
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || "";
+const GOOGLE_REDIRECT_URI = process.env.GOOGLE_REDIRECT_URI || "";
+// Bot-to-backend shared API key
+const CHATBOT_API_KEY = process.env.CHATBOT_API_KEY || "";
 const VK_BOT_CONFIG_TOKEN = process.env.VK_BOT_CONFIG_TOKEN || "";
 const WEBSITE_BASE_URL = String(
   process.env.WEBSITE_BASE_URL || process.env.PUBLIC_WEBSITE_URL || process.env.APP_BASE_URL || process.env.SITE_URL || ""
@@ -132,6 +145,7 @@ const PILOTS_ROSTER_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilots-rost
 const FLEET_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "fleet-snapshot.json");
 const STREAM_TOKENS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "stream-tokens.json");
 const STREAM_SETTINGS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "stream-settings.json");
+const CHATBOT_SETTINGS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "chatbot-settings.json");
 const DASHBOARD_CATALOG_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "dashboard-catalog-snapshot.json");
 const ADMIN_CONTENT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-content.json");
 const ADMIN_AUDIT_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "admin-audit-log.json");
@@ -139,11 +153,24 @@ const AUTH_ACTIVITY_LOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "auth-ac
 const TELEMETRY_HISTORY_FILE = path.join(path.dirname(AUTH_STORE_FILE), "telemetry-history-cache.json");
 const SOCIAL_GALLERY_FILE = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery.json");
 const SOCIAL_GALLERY_PICKS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-picks.json");
+const CHAT_STORE_FILE = path.join(path.dirname(AUTH_STORE_FILE), "chat-store.json");
+const APP_CONFIG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "app-config.json");
+const APP_CHANGELOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "changelog.json");
+const ACHIEVEMENTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "achievements-store.json");
+const ACHIEVEMENTS_CATALOG_FILE = path.join(path.dirname(AUTH_STORE_FILE), "achievements-catalog.json");
 const EVENT_COINS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "event-coins.json");
 const PILOT_BALANCE_ADJUSTMENTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-balance-adjustments.json");
 const PILOT_CHALLENGES_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-challenges.json");
 const SOCIAL_GALLERY_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-assets");
 const BANNER_GENERATOR_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "banner-generator-assets");
+// Релизы десктоп-приложения: метаданные + бинарники для скачивания с сайта.
+const APP_RELEASES_FILE = path.join(path.dirname(AUTH_STORE_FILE), "app-releases.json");
+const APP_RELEASES_DIR = path.join(path.dirname(AUTH_STORE_FILE), "app-releases");
+// Мировая база аэропортов (OurAirports, public domain) — кэш на диске.
+const WORLD_AIRPORTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "world-airports.json");
+const WORLD_AIRPORTS_SOURCE =
+  process.env.WORLD_AIRPORTS_URL || "https://davidmegginson.github.io/ourairports-data/airports.csv";
+const WORLD_AIRPORTS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // обновляем не чаще раза в 30 дней
 const ADMIN_AUDIT_MAX_ENTRIES = Math.max(Number(process.env.ADMIN_AUDIT_MAX_ENTRIES || 5000) || 5000, 500);
 const AUTH_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.AUTH_ACTIVITY_MAX_ENTRIES || 5000) || 5000, 500);
 const SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES || 4000) || 4000, 200);
@@ -362,6 +389,10 @@ const discordSessionCache = new Map();
 const vamsysOauthStateCache = new Map();
 const vamsysSessionCache = new Map();
 const pilotApiOauthStateCache = new Map();
+// Токены десктоп-приложения: token -> { kind, sessionId, pilotId, username, deviceId, createdAt, lastSeenAt, expiresAt, userAgent }
+// Отдельный секрет от cookie-сессии (привязка к устройству, свой TTL/ревокация) — см. createAppToken/resolveAppToken.
+// IP намеренно не храним (потребовал бы отдельной политики конфиденциальности).
+const appTokenCache = new Map();
 
 const authStoreTemplate = {
   version: 2,
@@ -2751,6 +2782,62 @@ const startPilotChallengesScheduler = () => {
   }, CHALLENGE_SCHEDULER_INTERVAL_MS);
 };
 
+// ─── Фоновая синхронизация локации пилотов с vAMSYS ───
+// Локация может меняться в vAMSYS — синкаем периодически по активным сессиям (не только при /me).
+const PILOT_LOCATION_SYNC_INTERVAL_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.PILOT_LOCATION_SYNC_INTERVAL_MS || 60 * 60 * 1000) || 60 * 60 * 1000 // по умолчанию ежечасно
+);
+let pilotLocationSchedulerTimer = null;
+
+// Лимит обновления: минимальный интервал между принудительными запросами локации из vAMSYS
+// на одного пилота (защита API от частых F5/перемонтирований). По умолчанию 10 мин, минимум 1 мин.
+const PILOT_LOCATION_MIN_REFRESH_MS = Math.max(
+  60 * 1000,
+  Number(process.env.PILOT_LOCATION_MIN_REFRESH_MS || 10 * 60 * 1000) || 10 * 60 * 1000
+);
+const pilotLocationRefreshAt = new Map(); // pilotId -> ms последнего форс-обновления локации
+
+const sweepPilotLocationSync = async () => {
+  if (!isPilotApiConfigured()) return;
+  const now = Date.now();
+  // Уникальные пилоты из активных vAMSYS-сессий, у кого есть Pilot API connection.
+  const seen = new Set();
+  const targets = [];
+  for (const session of vamsysSessionCache.values()) {
+    if (!session || now >= session.expiresAt) continue;
+    const pilotId = Number(session?.user?.id || 0) || 0;
+    if (pilotId <= 0 || seen.has(pilotId)) continue;
+    if (!getStoredPilotApiConnectionByPilotId(pilotId)) continue;
+    seen.add(pilotId);
+    targets.push({ pilotId, sessionUser: session.user || {}, session });
+  }
+  if (targets.length === 0) return;
+  const airportsMap = await loadAirportsLookup().catch(() => new Map());
+  for (const t of targets) {
+    try {
+      await syncPilotApiLocationFromVamsys({ pilotId: t.pilotId, sessionUser: t.sessionUser, airportsMap });
+      t.session.pilotApiLocationSyncedAt = Date.now();
+    } catch (error) {
+      logVamsys("warn", "pilot_location_scheduler_sync_failed", { pilotId: t.pilotId, error: String(error) });
+    }
+  }
+  persistAuthStore();
+  logger.info("[pilot-location] scheduler_swept", { pilots: targets.length });
+};
+
+const startPilotLocationSyncScheduler = () => {
+  if (pilotLocationSchedulerTimer) return;
+  // первый прогон через минуту после старта (дать прогреться)
+  setTimeout(() => {
+    void sweepPilotLocationSync().catch((e) => logger.warn("[pilot-location] scheduler_initial_failed", String(e)));
+  }, 60 * 1000).unref?.();
+  pilotLocationSchedulerTimer = setInterval(() => {
+    void sweepPilotLocationSync().catch((e) => logger.warn("[pilot-location] scheduler_tick_failed", String(e)));
+  }, PILOT_LOCATION_SYNC_INTERVAL_MS);
+  pilotLocationSchedulerTimer.unref?.();
+};
+
 const readSocialGalleryStore = () => {
   if (socialGalleryCache) {
     return socialGalleryCache;
@@ -3080,6 +3167,21 @@ const serializeSocialGalleryMedia = (media = {}, store = {}, viewerActor = null)
     isFeatured: Boolean(media?.isFeatured),
     ownerCallsign: normalizeAdminText(media?.ownerCallsign || media?.ownerUsername || "") || null,
     reportCount: Array.isArray(media?.reports) ? media.reports.length : 0,
+    flight: media?.flight && typeof media.flight === "object"
+      ? {
+          pirepId: Number(media.flight.pirepId || 0) || null,
+          bookingId: Number(media.flight.bookingId || 0) || null,
+          callsign: normalizeAdminText(media.flight.callsign || "") || null,
+          route: normalizeAdminText(media.flight.route || "") || null,
+        }
+      : null,
+    gear: media?.gear && typeof media.gear === "object"
+      ? {
+          aircraft: normalizeAdminText(media.gear.aircraft || "") || null,
+          registration: normalizeAdminText(media.gear.registration || "") || null,
+          addons: Array.isArray(media.gear.addons) ? media.gear.addons.map((x) => normalizeAdminText(x)).filter(Boolean) : [],
+        }
+      : null,
   };
 };
 
@@ -5410,6 +5512,345 @@ const upsertTicketConfigStore = (payload = {}) => {
   };
 };
 
+const ROUTE_REPORT_DEFAULT_COOLDOWN_MINUTES = 30;
+const ROUTE_REPORT_DEFAULT_DAILY_LIMIT = 5;
+
+const normalizeRouteReportBlockedPilot = (entry = {}) => {
+  const pilotId = Number(entry?.pilotId || 0) || 0;
+  const username = normalizeAdminText(entry?.username || "").toLowerCase();
+  if (!pilotId && !username) return null;
+  return {
+    pilotId: pilotId || null,
+    username: username || null,
+    name: normalizeAdminText(entry?.name || "") || null,
+    reason: normalizeAdminText(entry?.reason || "") || null,
+    blockedAt: normalizeAdminText(entry?.blockedAt || "") || new Date().toISOString(),
+  };
+};
+
+const getRouteReportSettingsStore = () => {
+  const store = readAdminContentStore();
+  const raw = store?.routeReportSettings && typeof store.routeReportSettings === "object" ? store.routeReportSettings : {};
+  const cooldownMinutes = Number(raw.cooldownMinutes);
+  const dailyLimit = Number(raw.dailyLimit);
+  return {
+    cooldownMinutes: Number.isFinite(cooldownMinutes) && cooldownMinutes >= 0 ? Math.min(cooldownMinutes, 1440) : ROUTE_REPORT_DEFAULT_COOLDOWN_MINUTES,
+    dailyLimit: Number.isFinite(dailyLimit) && dailyLimit >= 0 ? Math.min(dailyLimit, 100) : ROUTE_REPORT_DEFAULT_DAILY_LIMIT,
+    blockedPilots: (Array.isArray(raw.blockedPilots) ? raw.blockedPilots : [])
+      .map(normalizeRouteReportBlockedPilot)
+      .filter(Boolean),
+    updatedAt: normalizeAdminText(raw.updatedAt),
+  };
+};
+
+const upsertRouteReportSettingsStore = (payload = {}) => {
+  const current = getRouteReportSettingsStore();
+  const nextCooldown = Number(payload.cooldownMinutes);
+  const nextDaily = Number(payload.dailyLimit);
+  withAdminContentUpdate((draft) => {
+    draft.routeReportSettings = {
+      cooldownMinutes: Number.isFinite(nextCooldown) && nextCooldown >= 0 ? Math.min(nextCooldown, 1440) : current.cooldownMinutes,
+      dailyLimit: Number.isFinite(nextDaily) && nextDaily >= 0 ? Math.min(nextDaily, 100) : current.dailyLimit,
+      blockedPilots: (Array.isArray(payload.blockedPilots) ? payload.blockedPilots : current.blockedPilots)
+        .map(normalizeRouteReportBlockedPilot)
+        .filter(Boolean),
+      updatedAt: new Date().toISOString(),
+    };
+    return draft;
+  });
+  return getRouteReportSettingsStore();
+};
+
+const findRouteReportBlockEntry = (owner = {}, settings = getRouteReportSettingsStore()) => {
+  const pilotId = Number(owner?.pilotId || 0) || 0;
+  const username = normalizeAdminText(owner?.username || "").toLowerCase();
+  return settings.blockedPilots.find((entry) => {
+    const entryPilotId = Number(entry?.pilotId || 0) || 0;
+    const entryUsername = normalizeAdminText(entry?.username || "").toLowerCase();
+    return (pilotId > 0 && entryPilotId === pilotId) || Boolean(username && entryUsername && entryUsername === username);
+  }) || null;
+};
+
+const getRouteReportUsage = (owner = {}) => {
+  const pilotId = Number(owner?.pilotId || 0) || 0;
+  const username = normalizeAdminText(owner?.username || "").toLowerCase();
+  const now = Date.now();
+  let lastAt = 0;
+  let last24h = 0;
+  listTicketsStore().forEach((ticket) => {
+    if (ticket?.source !== "pilot-route-report") return;
+    const ticketOwner = ticket?.owner && typeof ticket.owner === "object" ? ticket.owner : {};
+    const ticketPilotId = Number(ticketOwner?.pilotId || 0) || 0;
+    const ticketUsername = normalizeAdminText(ticketOwner?.username || "").toLowerCase();
+    const isMine = (pilotId > 0 && ticketPilotId === pilotId) || Boolean(username && ticketUsername && ticketUsername === username);
+    if (!isMine) return;
+    const ts = Date.parse(String(ticket?.createdAt || ""));
+    if (!Number.isFinite(ts)) return;
+    if (ts > lastAt) lastAt = ts;
+    if (now - ts < 24 * 60 * 60 * 1000) last24h += 1;
+  });
+  return { lastAt, last24h };
+};
+
+// ── Route network audit (FPL validation against navdata) ─────────────────────
+// Навигационная база в формате X-Plane: data/navdata/earth_fix.dat + earth_awy.dat
+// (стандартный экспорт Navigraph/X-Plane; обновляется вручную раз в AIRAC-цикл)
+
+const NAVDATA_DIR = path.join(path.dirname(AUTH_STORE_FILE), "navdata");
+const NAVDATA_FIX_FILE = path.join(NAVDATA_DIR, "earth_fix.dat");
+const NAVDATA_AWY_FILE = path.join(NAVDATA_DIR, "earth_awy.dat");
+
+const navdataCache = { fixes: null, airways: null, fixMtime: 0, awyMtime: 0 };
+
+const loadNavdata = () => {
+  let fixMtime = 0;
+  let awyMtime = 0;
+  try { fixMtime = fs.statSync(NAVDATA_FIX_FILE).mtimeMs; } catch { /* missing */ }
+  try { awyMtime = fs.statSync(NAVDATA_AWY_FILE).mtimeMs; } catch { /* missing */ }
+
+  if (navdataCache.fixes && navdataCache.fixMtime === fixMtime && navdataCache.awyMtime === awyMtime) {
+    return navdataCache;
+  }
+
+  const fixes = new Set();
+  const airways = new Map(); // name -> Set of fixes on that airway
+
+  if (fixMtime > 0) {
+    try {
+      const lines = fs.readFileSync(NAVDATA_FIX_FILE, "utf8").split(/\r?\n/);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        // XP format: lat lon ident [terminal_area icao_region ...]
+        if (parts.length >= 3 && /^-?\d+(\.\d+)?$/.test(parts[0]) && /^-?\d+(\.\d+)?$/.test(parts[1])) {
+          fixes.add(parts[2].toUpperCase());
+        }
+      }
+    } catch { /* unreadable */ }
+  }
+
+  if (awyMtime > 0) {
+    try {
+      const lines = fs.readFileSync(NAVDATA_AWY_FILE, "utf8").split(/\r?\n/);
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        // XP1100 awy: fix1 region1 type1 fix2 region2 type2 dir class base top name1-name2
+        if (parts.length >= 11) {
+          const fix1 = parts[0].toUpperCase();
+          const fix2 = parts[3].toUpperCase();
+          const names = parts[parts.length - 1].split("-");
+          for (const rawName of names) {
+            const name = rawName.trim().toUpperCase();
+            if (!name) continue;
+            if (!airways.has(name)) airways.set(name, new Set());
+            airways.get(name).add(fix1);
+            airways.get(name).add(fix2);
+          }
+          // VOR/NDB идентификаторы из трасс тоже валидные точки маршрута
+          fixes.add(fix1);
+          fixes.add(fix2);
+        }
+      }
+    } catch { /* unreadable */ }
+  }
+
+  navdataCache.fixes = fixes;
+  navdataCache.airways = airways;
+  navdataCache.fixMtime = fixMtime;
+  navdataCache.awyMtime = awyMtime;
+  return navdataCache;
+};
+
+const ROUTE_TOKEN_SKIP = new Set(["DCT", "SID", "STAR", "IFR", "VFR", "GAT", "NAT"]);
+const isSpeedLevelToken = (token) => /^[NMK]\d{3,4}[FSAM]\d{2,4}$/.test(token);
+const isCoordToken = (token) => /^\d{2,4}[NS]\d{3,5}[EW]$/.test(token) || /^\d{2}[NS]\d{3}[EW]\d*$/.test(token);
+const looksLikeAirway = (token) => /^[A-Z]{1,3}\d{1,4}$/.test(token) && !/^\d/.test(token);
+const looksLikeProcedure = (token) => /^[A-Z]{2,6}\d[A-Z]?$/.test(token) && token.length >= 5;
+
+const validateRouteText = (routeText, navdata) => {
+  const errors = [];
+  const tokens = String(routeText || "")
+    .toUpperCase()
+    .split(/\s+/)
+    .map((t) => t.split("/")[0].trim()) // PNT/N0450F360 → PNT
+    .filter(Boolean);
+
+  if (!tokens.length) return errors;
+
+  const { fixes, airways } = navdata;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (ROUTE_TOKEN_SKIP.has(token)) continue;
+    if (isSpeedLevelToken(token) || isCoordToken(token)) continue;
+    if (/^[A-Z]{4}$/.test(token) && (i === 0 || i === tokens.length - 1)) continue; // ICAO аэропорта в начале/конце
+    // SID/STAR процедуры на первой/последней значимой позиции пропускаем
+    if ((i <= 1 || i >= tokens.length - 2) && looksLikeProcedure(token) && !airways.has(token)) continue;
+
+    if (airways.has(token)) {
+      // Трасса найдена — проверяем, что соседние точки на ней лежат
+      const onAirway = airways.get(token);
+      const prev = i > 0 ? tokens[i - 1] : "";
+      const next = i < tokens.length - 1 ? tokens[i + 1] : "";
+      if (prev && fixes.has(prev) && !onAirway.has(prev)) {
+        errors.push(`точка ${prev} не лежит на трассе ${token}`);
+      }
+      if (next && fixes.has(next) && !onAirway.has(next)) {
+        errors.push(`точка ${next} не лежит на трассе ${token}`);
+      }
+      continue;
+    }
+
+    if (fixes.has(token)) continue;
+
+    if (looksLikeAirway(token)) {
+      errors.push(`трасса ${token} не найдена`);
+    } else if (token.length >= 2 && token.length <= 5 && /^[A-Z]+$/.test(token)) {
+      errors.push(`точка ${token} не найдена`);
+    }
+    // прочие токены (мусор, нестандарт) молча пропускаем
+  }
+
+  return [...new Set(errors)];
+};
+
+const ROUTE_AUDIT_DEFAULT_INTERVAL_HOURS = 24;
+const ROUTE_AUDIT_MAX_ISSUES_STORED = 300;
+// AIRAC-цикл = 28 дней; после него навданные считаются устаревшими
+const NAVDATA_STALE_AFTER_DAYS = 28;
+
+const getRouteAuditSettingsStore = () => {
+  const store = readAdminContentStore();
+  const raw = store?.routeAuditSettings && typeof store.routeAuditSettings === "object" ? store.routeAuditSettings : {};
+  const intervalHours = Number(raw.intervalHours);
+  return {
+    enabled: normalizeAdminBoolean(raw.enabled, false),
+    intervalHours: Number.isFinite(intervalHours) && intervalHours >= 1 ? Math.min(intervalHours, 168) : ROUTE_AUDIT_DEFAULT_INTERVAL_HOURS,
+    discordNotify: normalizeAdminBoolean(raw.discordNotify, true),
+    discordChannelId: normalizeAdminText(raw.discordChannelId || ""),
+    lastRunAt: normalizeAdminText(raw.lastRunAt || ""),
+    updatedAt: normalizeAdminText(raw.updatedAt || ""),
+  };
+};
+
+const upsertRouteAuditSettingsStore = (payload = {}) => {
+  const current = getRouteAuditSettingsStore();
+  const nextInterval = Number(payload.intervalHours);
+  withAdminContentUpdate((draft) => {
+    draft.routeAuditSettings = {
+      enabled: normalizeAdminBoolean(payload.enabled, current.enabled),
+      intervalHours: Number.isFinite(nextInterval) && nextInterval >= 1 ? Math.min(nextInterval, 168) : current.intervalHours,
+      discordNotify: normalizeAdminBoolean(payload.discordNotify, current.discordNotify),
+      discordChannelId: normalizeAdminText(payload.discordChannelId ?? current.discordChannelId),
+      lastRunAt: current.lastRunAt,
+      updatedAt: new Date().toISOString(),
+    };
+    return draft;
+  });
+  return getRouteAuditSettingsStore();
+};
+
+const getRouteAuditLastReport = () => {
+  const store = readAdminContentStore();
+  return store?.routeAuditLastReport && typeof store.routeAuditLastReport === "object" ? store.routeAuditLastReport : null;
+};
+
+let routeAuditRunPromise = null;
+
+const runRouteNetworkAudit = async ({ trigger = "manual" } = {}) => {
+  if (routeAuditRunPromise) return routeAuditRunPromise;
+  routeAuditRunPromise = (async () => {
+    const navdata = loadNavdata();
+    const navdataReady = navdata.fixes.size > 0;
+
+    const routesPayload = await loadRoutesData().catch(() => null);
+    const routes = Array.isArray(routesPayload?.routes) ? routesPayload.routes : [];
+
+    const issues = [];
+    let checkedRoutes = 0;
+
+    if (navdataReady) {
+      for (const route of routes) {
+        const routeText = normalizeAdminMultilineText(route?.routeText || "");
+        if (!routeText) continue;
+        checkedRoutes += 1;
+        const errors = validateRouteText(routeText, navdata);
+        if (errors.length > 0) {
+          issues.push({
+            routeId: Number(route?.id || 0) || 0,
+            flight: normalizeAdminText(route?.flightNumber || route?.callsign || "") || `Route ${route?.id}`,
+            sector: `${normalizeAdminText(route?.fromCode || "").toUpperCase() || "—"} → ${normalizeAdminText(route?.toCode || "").toUpperCase() || "—"}`,
+            errors,
+          });
+        }
+      }
+    }
+
+    const report = {
+      generatedAt: new Date().toISOString(),
+      trigger,
+      navdataReady,
+      navdataInfo: {
+        fixes: navdata.fixes.size,
+        airways: navdata.airways.size,
+        fixFile: navdataCache.fixMtime > 0,
+        awyFile: navdataCache.awyMtime > 0,
+      },
+      totalRoutes: routes.length,
+      checkedRoutes,
+      issueCount: issues.length,
+      issues: issues.slice(0, ROUTE_AUDIT_MAX_ISSUES_STORED),
+    };
+
+    withAdminContentUpdate((draft) => {
+      draft.routeAuditLastReport = report;
+      if (draft.routeAuditSettings && typeof draft.routeAuditSettings === "object") {
+        draft.routeAuditSettings.lastRunAt = report.generatedAt;
+      } else {
+        draft.routeAuditSettings = { ...getRouteAuditSettingsStore(), lastRunAt: report.generatedAt };
+      }
+      return draft;
+    });
+
+    const settings = getRouteAuditSettingsStore();
+    if (settings.discordNotify && navdataReady) {
+      const newestMtime = Math.max(navdataCache.fixMtime || 0, navdataCache.awyMtime || 0);
+      const navAgeDays = newestMtime > 0 ? Math.floor((Date.now() - newestMtime) / (24 * 60 * 60 * 1000)) : null;
+      const staleNote = navAgeDays !== null && navAgeDays >= NAVDATA_STALE_AFTER_DAYS
+        ? `\n\n⚠️ Навигационная база не обновлялась ${navAgeDays} дн. — пора загрузить новый AIRAC в data/navdata/`
+        : "";
+      const top = issues.slice(0, 12).map((issue) => `**${issue.flight}** ${issue.sector}: ${issue.errors.join("; ")}`);
+      const description = (issues.length === 0
+        ? `Проверено маршрутов: ${checkedRoutes} из ${routes.length}. Проблем не найдено ✅`
+        : [`Проверено маршрутов: ${checkedRoutes} из ${routes.length}. Найдено проблем: **${issues.length}**`, "", ...top, issues.length > 12 ? `…и ещё ${issues.length - 12}` : ""].filter(Boolean).join("\n")) + staleNote;
+      void sendDiscordBotNotification({
+        eventKey: "routeAudit",
+        title: `Сводка аудита маршрутов — ${issues.length} проблем(ы)`,
+        description: description.slice(0, 3500),
+        category: "Route Audit",
+        color: issues.length > 0 ? 0xf59e0b : 0x22c55e,
+        overrideChannelId: settings.discordChannelId || "",
+        variables: { issueCount: issues.length, checkedRoutes, totalRoutes: routes.length },
+      }).catch(() => {});
+    }
+
+    return report;
+  })().finally(() => { routeAuditRunPromise = null; });
+  return routeAuditRunPromise;
+};
+
+const ROUTE_AUDIT_SCAN_TICK_MS = 15 * 60 * 1000;
+setInterval(() => {
+  try {
+    const settings = getRouteAuditSettingsStore();
+    if (!settings.enabled) return;
+    const lastRun = Date.parse(settings.lastRunAt || "");
+    const intervalMs = settings.intervalHours * 60 * 60 * 1000;
+    if (!Number.isFinite(lastRun) || Date.now() - lastRun >= intervalMs) {
+      void runRouteNetworkAudit({ trigger: "schedule" }).catch(() => {});
+    }
+  } catch { /* scheduler must never throw */ }
+}, ROUTE_AUDIT_SCAN_TICK_MS).unref?.();
+
 const listTicketsStore = () => {
   const store = readAdminContentStore();
   const items = Array.isArray(store?.tickets) ? store.tickets : [];
@@ -5580,7 +6021,7 @@ const findActiveOutdatedRouteReportTicket = (tickets = [], routeId, owner = {}) 
   }) || null;
 };
 
-const buildOutdatedRouteReportTicket = ({ route = {}, owner = {}, config = getTicketConfigStore() } = {}) => {
+const buildOutdatedRouteReportTicket = ({ route = {}, owner = {}, config = getTicketConfigStore(), reason = "", comment = "" } = {}) => {
   const category = resolveOperationsTicketCategory(config);
   if (!category) {
     return null;
@@ -5594,13 +6035,19 @@ const buildOutdatedRouteReportTicket = ({ route = {}, owner = {}, config = getTi
   const fromCode = normalizeAdminText(route?.fromCode || "").toUpperCase() || "—";
   const toCode = normalizeAdminText(route?.toCode || "").toUpperCase() || "—";
   const routeText = normalizeAdminMultilineText(route?.routeText || "") || null;
+  const reasonText = normalizeAdminText(reason || "") || "the flight appears to be no longer active and should be reviewed by staff.";
+  const commentText = normalizeAdminMultilineText(comment || "") || "";
   const contentLines = [
     `Pilot reported route ${flightLabel} as outdated.`,
     `Route ID: ${routeId || "unknown"}`,
     `Sector: ${fromCode} -> ${toCode}`,
     `Reporter: ${owner?.name || "Pilot"} (${owner?.username || "unknown"})`,
-    "Reason: the flight appears to be no longer active and should be reviewed by staff.",
+    `Reason: ${reasonText}`,
   ];
+
+  if (commentText) {
+    contentLines.push(`Details: ${commentText}`);
+  }
 
   if (routeText) {
     contentLines.push(`Filed route: ${routeText}`);
@@ -5643,12 +6090,14 @@ const buildOutdatedRouteReportTicket = ({ route = {}, owner = {}, config = getTi
       fromCode,
       toCode,
       routeText,
+      reason: reasonText,
+      comment: commentText || null,
       reportedAt: now,
     },
   };
 };
 
-const createOutdatedRouteReportTicket = ({ route = {}, context = {} } = {}) => {
+const createOutdatedRouteReportTicket = ({ route = {}, context = {}, reason = "", comment = "" } = {}) => {
   const config = getTicketConfigStore();
   if (!config.enabled) {
     return { ticket: null, duplicate: false, error: "Ticket system is temporarily disabled" };
@@ -5660,7 +6109,7 @@ const createOutdatedRouteReportTicket = ({ route = {}, context = {} } = {}) => {
     return { ticket: existingTicket, duplicate: true, error: null };
   }
 
-  const ticket = buildOutdatedRouteReportTicket({ route, owner, config });
+  const ticket = buildOutdatedRouteReportTicket({ route, owner, config, reason, comment });
   if (!ticket) {
     return { ticket: null, duplicate: false, error: "No enabled ticket category is available" };
   }
@@ -8443,6 +8892,11 @@ const _doWriteAuthStore = () => {
     currentToursCatalog[id] = tour;
   }
 
+  const currentAppTokens = {};
+  for (const [token, entry] of appTokenCache.entries()) {
+    currentAppTokens[token] = entry;
+  }
+
   const payload = {
     version: 2,
     discordOauthStates,
@@ -8458,6 +8912,7 @@ const _doWriteAuthStore = () => {
     curatedPilots: currentCuratedPilots,
     pilotBadgeAwards: currentPilotBadgeAwards,
     toursCatalog: currentToursCatalog,
+    appTokens: currentAppTokens,
   };
 
   ensureAuthStoreDir();
@@ -9322,6 +9777,15 @@ const loadAuthStore = () => {
       vamsysSessionCache.set(sessionId, session);
     }
 
+    const appTokens =
+      parsed?.appTokens && typeof parsed.appTokens === "object" ? parsed.appTokens : {};
+    const nowTs = Date.now();
+    for (const [token, entry] of Object.entries(appTokens)) {
+      if (entry && typeof entry === "object" && nowTs < Number(entry.expiresAt || 0)) {
+        appTokenCache.set(token, entry);
+      }
+    }
+
     const pilotApiOauthStates =
       parsed?.pilotApiOauthStates && typeof parsed.pilotApiOauthStates === "object"
         ? parsed.pilotApiOauthStates
@@ -9602,6 +10066,55 @@ const applyManualVamsysMappings = () => {
 applyManualVamsysMappings();
 
 const app = express();
+
+// CORS для упакованного десктоп-приложения (Tauri webview origin).
+// В вебе фронтенд на одном origin с API, CORS не нужен; для .exe origin —
+// http(s)://tauri.localhost. Разрешаем только эти origin + credentials (куки сессии).
+const APP_ALLOWED_ORIGINS = new Set(
+  [
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "tauri://localhost",
+    ...String(process.env.APP_CORS_ORIGINS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  ]
+);
+app.use((req, res, next) => {
+  const origin = String(req.headers.origin || "");
+  if (origin && APP_ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS");
+    if (req.method === "OPTIONS") {
+      res.status(204).end();
+      return;
+    }
+  }
+  next();
+});
+
+// Десктоп-приложение шлёт app-токен заголовком (куки webview ≠ куки браузера, где шёл OAuth).
+// Резолвим токен → нижележащую cookie-сессию и инжектим в req.headers.cookie, чтобы весь
+// cookie-based код сессий работал без изменений.
+app.use((req, _res, next) => {
+  const token = String(req.headers["x-nws-session"] || "").trim();
+  if (token) {
+    const entry = resolveAppToken(token, req);
+    if (entry) {
+      const cookieName = entry.kind === "discord" ? DISCORD_SESSION_COOKIE : VAMSYS_SESSION_COOKIE;
+      const existing = req.headers.cookie ? `${req.headers.cookie}; ` : "";
+      req.headers.cookie = `${existing}${cookieName}=${entry.sessionId}`;
+      req.appToken = token;
+      req.appTokenEntry = entry;
+    }
+  }
+  next();
+});
+
 app.use(express.json());
 
 const VAMSYS_LOG_PREFIX = "[vamsys]";
@@ -9801,29 +10314,139 @@ const shouldUseSecureCookie = (req = null) => {
   return false;
 };
 
+// SameSite политика сессионных куки.
+// По умолчанию "Lax" (поведение сайта неизменно). Для входа в упакованный десктоп-app
+// (cross-origin tauri.localhost → vnws.org) нужен "None" — выставляется через COOKIE_SAMESITE=None.
+// SameSite=None требует Secure (только HTTPS), поэтому Secure форсится при None.
+const resolveSameSite = () => {
+  const raw = String(process.env.COOKIE_SAMESITE || "Lax").trim().toLowerCase();
+  if (raw === "none") return "None";
+  if (raw === "strict") return "Strict";
+  return "Lax";
+};
+
 const buildCookie = (name, value, maxAgeSeconds, req = null) => {
+  const sameSite = resolveSameSite();
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    `SameSite=${sameSite}`,
     `Max-Age=${maxAgeSeconds}`,
   ];
-  if (shouldUseSecureCookie(req)) parts.push("Secure");
+  if (shouldUseSecureCookie(req) || sameSite === "None") parts.push("Secure");
   return parts.join("; ");
 };
 
 const clearCookie = (name, req = null) => {
+  const sameSite = resolveSameSite();
   const parts = [
     `${name}=`,
     "Path=/",
     "HttpOnly",
-    "SameSite=Lax",
+    `SameSite=${sameSite}`,
     "Max-Age=0",
     "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
   ];
-  if (shouldUseSecureCookie(req)) parts.push("Secure");
+  if (shouldUseSecureCookie(req) || sameSite === "None") parts.push("Secure");
   return parts.join("; ");
+};
+
+// ── Авторизация упакованного десктоп-приложения (deep-link) ──
+// В .exe браузерный OAuth-редирект не возвращается в окно, а куки системного браузера
+// недоступны webview. Поэтому при входе из приложения (флаг ?app=1) после создания
+// сессии сервер редиректит на кастом-схему nordwind://auth?kind=&session=<sessionId>.
+// Приложение ловит deep-link, сохраняет токен и шлёт его заголовком X-NWS-Session(-Kind),
+// который раннее middleware инжектит в req.headers.cookie.
+const APP_DEEP_LINK_SCHEME = String(process.env.APP_DEEP_LINK_SCHEME || "nordwind").trim() || "nordwind";
+const isAppLoginRequest = (req) => String(req.query?.app || "").trim() === "1";
+const buildAppAuthRedirect = (kind, token, extra = {}) => {
+  const params = new URLSearchParams({ kind, session: token, ...extra });
+  return `${APP_DEEP_LINK_SCHEME}://auth?${params.toString()}`;
+};
+
+// ── Токены десктоп-приложения ──
+// Отдельный от cookie секрет: выдаётся при входе из .exe, шлётся заголовком X-NWS-Session
+// (или в WS-query), резолвится в нижележащую cookie-сессию. Свой TTL, привязка к устройству, ревокация.
+const APP_TOKEN_TTL_MS = Number(process.env.APP_TOKEN_TTL_MS || 30 * 24 * 60 * 60 * 1000) || 30 * 24 * 60 * 60 * 1000;
+const APP_TOKEN_RENEW_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000; // продлеваем, когда осталось < 7 дней
+const APP_TOKEN_MAX_PER_PILOT = 10; // не копим бесконечно токенов на пилота
+
+const createAppToken = ({ kind, sessionId, pilotId = null, username = null, req = null, deviceId = "" } = {}) => {
+  if (!sessionId || (kind !== "vamsys" && kind !== "discord")) return null;
+  const token = `${randomUUID()}${randomUUID()}`.replace(/-/g, "");
+  const now = Date.now();
+  appTokenCache.set(token, {
+    kind,
+    sessionId,
+    pilotId: Number(pilotId || 0) || null,
+    username: String(username || "").trim().toLowerCase() || null,
+    deviceId: String(deviceId || "").slice(0, 80) || null,
+    createdAt: new Date(now).toISOString(),
+    lastSeenAt: new Date(now).toISOString(),
+    expiresAt: now + APP_TOKEN_TTL_MS,
+    userAgent: String(req?.headers?.["user-agent"] || "").slice(0, 220) || null,
+  });
+
+  // Ограничиваем число токенов на пилота (выкидываем самые старые).
+  const pid = Number(pilotId || 0) || 0;
+  if (pid > 0) {
+    const owned = [...appTokenCache.entries()].filter(([, e]) => Number(e.pilotId || 0) === pid);
+    if (owned.length > APP_TOKEN_MAX_PER_PILOT) {
+      owned
+        .sort((a, b) => Date.parse(a[1].createdAt || 0) - Date.parse(b[1].createdAt || 0))
+        .slice(0, owned.length - APP_TOKEN_MAX_PER_PILOT)
+        .forEach(([t]) => appTokenCache.delete(t));
+    }
+  }
+  persistAuthStore();
+  return token;
+};
+
+const resolveAppToken = (token, req = null) => {
+  const key = String(token || "").trim();
+  if (!key) return null;
+  const entry = appTokenCache.get(key);
+  if (!entry) return null;
+  const now = Date.now();
+  if (now >= Number(entry.expiresAt || 0)) {
+    appTokenCache.delete(key);
+    return null;
+  }
+  // Скользящее продление + обновление last-seen (без блокирующего I/O — persist debounced).
+  let changed = false;
+  if (Number(entry.expiresAt || 0) - now < APP_TOKEN_RENEW_THRESHOLD_MS) {
+    entry.expiresAt = now + APP_TOKEN_TTL_MS;
+    changed = true;
+  }
+  const nowIso = new Date(now).toISOString();
+  if (entry.lastSeenAt !== nowIso) {
+    entry.lastSeenAt = nowIso;
+    changed = true;
+  }
+  if (changed) persistAuthStore();
+  return entry;
+};
+
+const revokeAppToken = (token) => {
+  const key = String(token || "").trim();
+  if (key && appTokenCache.delete(key)) {
+    persistAuthStore();
+    return true;
+  }
+  return false;
+};
+
+const pruneExpiredAppTokens = () => {
+  const now = Date.now();
+  let removed = 0;
+  for (const [token, entry] of appTokenCache.entries()) {
+    if (now >= Number(entry?.expiresAt || 0)) {
+      appTokenCache.delete(token);
+      removed += 1;
+    }
+  }
+  return removed;
 };
 
 // ── Auth rate limiting ────────────────────────────────────────────────────────
@@ -9903,6 +10526,7 @@ const cleanupDiscordCaches = () => {
       hasChanges = true;
     }
   }
+  if (pruneExpiredAppTokens() > 0) hasChanges = true;
   // Enforce size limits on OAuth state caches
   pruneOauthCache(discordOauthStateCache);
   pruneOauthCache(vamsysOauthStateCache);
@@ -10706,8 +11330,11 @@ const syncPilotApiLocationFromVamsys = async ({ pilotId, sessionUser = {}, conne
     return { connection, synced: false, airport: null };
   }
 
+  // forceFresh: тянем живую локацию из vAMSYS (а не из устаревшего session.user),
+  // иначе сравнение всегда «совпадает» и смена локации в vAMSYS не подхватывается.
   const vamsysProfile = await loadPilotProfileById(resolvedPilotId, {
     seedPilot: sessionUser,
+    forceFresh: true,
   }).catch(() => null);
   const vamsysLocationId = Number(vamsysProfile?.locationId || 0) || 0;
   if (vamsysLocationId <= 0) {
@@ -12000,6 +12627,7 @@ app.get("/api/auth/discord/login", (req, res) => {
     successUrl,
     failureUrl,
     intent: oauthIntent,
+    app: isAppLoginRequest(req),
   });
 
   persistAuthStore();
@@ -12274,6 +12902,18 @@ app.get("/api/auth/discord/callback", async (req, res) => {
         matchType: vamsysMatch.matchType,
       },
     });
+    // Вход из десктоп-приложения: вернуть app-токен через deep-link.
+    if (redirectTargets?.app && oauthIntent !== DISCORD_OAUTH_INTENT_LINK && sessionId) {
+      const appToken = createAppToken({
+        kind: "discord",
+        sessionId,
+        pilotId: Number(vamsysMatch.pilot?.id || 0) || null,
+        username: vamsysMatch.pilot?.username || sessionUser?.username,
+        req,
+      });
+      res.redirect(buildAppAuthRedirect("discord", appToken || sessionId));
+      return;
+    }
     res.redirect(successUrl);
   } catch (error) {
     recordAuthActivity({
@@ -12942,6 +13582,107 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
   }
 });
 
+// ── Формальный auth-API (унифицированный статус сессии для сайта и приложения) ──
+// GET /api/auth/session — кто я: провайдер, базовые поля, isAdmin/isStaff, инфо об app-токене.
+app.get("/api/auth/session", (req, res) => {
+  const vamsysSession = getVamsysSessionFromRequest(req);
+  const discordSession = vamsysSession ? null : getDiscordSessionFromRequest(req);
+  const session = vamsysSession || discordSession;
+  if (!session) {
+    res.status(200).json({ authenticated: false });
+    return;
+  }
+  const provider = vamsysSession ? "vamsys" : "discord";
+  const user = session.user || {};
+  const isAdmin = vamsysSession ? isVamsysAdmin(user) : Boolean(user?.isStaff);
+  const appEntry = req.appTokenEntry || null;
+  res.status(200).json({
+    authenticated: true,
+    provider,
+    user: {
+      id: String(user?.id || user?.vamsysPilotId || "") || null,
+      username: String(user?.username || user?.vamsysPilotUsername || user?.callsign || "") || null,
+      name: String(user?.name || user?.vamsysPilotName || user?.globalName || "") || null,
+      email: String(user?.email || "") || null,
+      rank: String(user?.rank || "") || null,
+      avatar: String(user?.avatar || "") || null,
+    },
+    isAdmin,
+    isStaff: Boolean(user?.isStaff || isAdmin),
+    app: appEntry
+      ? {
+          token: true,
+          kind: appEntry.kind,
+          deviceId: appEntry.deviceId || null,
+          createdAt: appEntry.createdAt || null,
+          lastSeenAt: appEntry.lastSeenAt || null,
+          expiresAt: appEntry.expiresAt ? new Date(appEntry.expiresAt).toISOString() : null,
+        }
+      : null,
+  });
+});
+
+// POST /api/auth/session/revoke — выход приложения: ревокация текущего app-токена.
+app.post("/api/auth/session/revoke", (req, res) => {
+  const token = req.appToken || String(req.headers["x-nws-session"] || "").trim();
+  const revoked = token ? revokeAppToken(token) : false;
+  res.json({ ok: true, revoked });
+});
+
+// POST /api/auth/session/revoke-all — отозвать ВСЕ app-токены пилота (выйти на всех устройствах).
+app.post("/api/auth/session/revoke-all", (req, res) => {
+  const identity = resolveLoggedInPilotIdentity(req);
+  const pilotId = Number(identity?.pilotId || 0) || 0;
+  const username = String(identity?.username || "").trim().toLowerCase();
+  if (!pilotId && !username) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  let revoked = 0;
+  for (const [token, entry] of appTokenCache.entries()) {
+    const matchPilot = pilotId > 0 && Number(entry.pilotId || 0) === pilotId;
+    const matchUser = username && String(entry.username || "") === username;
+    if (matchPilot || matchUser) {
+      appTokenCache.delete(token);
+      revoked += 1;
+    }
+  }
+  if (revoked > 0) persistAuthStore();
+  res.json({ ok: true, revoked });
+});
+
+// GET /api/pilot/auth/history — история входов текущего пользователя (из журнала auth-активности).
+app.get("/api/pilot/auth/history", (req, res) => {
+  const identity = resolveLoggedInPilotIdentity(req);
+  const pilotId = Number(identity?.pilotId || 0) || 0;
+  const username = String(identity?.username || "").trim().toLowerCase();
+  if (!pilotId && !username) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  const limit = Math.max(1, Math.min(100, Number(req.query.limit || 30) || 30));
+  const entries = readAuthActivityLogStore()
+    .filter((entry) => {
+      const actor = entry?.actor || {};
+      const actorId = String(actor.id || "").trim();
+      const actorUser = String(actor.username || "").trim().toLowerCase();
+      return (
+        (pilotId > 0 && actorId === String(pilotId)) ||
+        (username && actorUser === username)
+      );
+    })
+    .slice(0, limit)
+    .map((entry) => ({
+      id: entry.id,
+      createdAt: entry.createdAt,
+      provider: entry.provider,
+      type: entry.type,
+      outcome: entry.outcome,
+      userAgent: entry.request?.userAgent || null,
+    }));
+  res.json({ ok: true, history: entries });
+});
+
 app.get("/api/auth/vamsys/me", async (req, res) => {
   const session = getVamsysSessionFromRequest(req);
   if (!session) {
@@ -13090,6 +13831,7 @@ app.get("/api/auth/pilot-api/connect", (req, res) => {
     codeVerifier,
     successUrl,
     failureUrl,
+    app: isAppLoginRequest(req),
   });
   persistAuthStore();
 
@@ -13289,6 +14031,12 @@ app.get("/api/auth/pilot-api/callback", async (req, res) => {
     });
 
     res.setHeader("Set-Cookie", nextCookies);
+    // Вход из десктоп-приложения: вернуть app-токен через deep-link, а не на страницу сайта.
+    if (stateEntry?.app && intent === "login" && sessionId) {
+      const appToken = createAppToken({ kind: "vamsys", sessionId, pilotId: targetPilotId, username: sessionUser?.username, req });
+      res.redirect(buildAppAuthRedirect("vamsys", appToken || sessionId));
+      return;
+    }
     res.redirect(stateEntry?.successUrl || resolveRedirectUrl(PILOT_API_SUCCESS_URL, "/dashboard?tab=settings&pilot_api=success"));
   } catch (error) {
     recordAuthActivity({
@@ -13728,6 +14476,23 @@ const computePilotBookingCascadeIds = ({ bookings = [], targetBookingId = 0 } = 
 
 const normalizePilotSimbriefPayload = (payload) => {
   const node = getPilotApiItem(payload) || (payload && typeof payload === "object" ? payload : {});
+  // PDF-ссылка OFP: явные поля + вложенная структура SimBrief (files.pdf / fms_downloads / links).
+  const pdfCandidates = [
+    node?.pdf_url,
+    node?.pdfUrl,
+    node?.pdf?.link,
+    node?.files?.pdf?.link,
+    node?.files?.pdf?.url,
+    node?.links?.pdf,
+    node?.download_url,
+  ]
+    .map((v) => String(v || "").trim())
+    .filter(Boolean);
+  // Если directory + pdf.name есть — собираем полный URL.
+  const dir = String(node?.files?.directory || node?.directory || "").trim();
+  const pdfName = String(node?.files?.pdf?.name || "").trim();
+  if (dir && pdfName) pdfCandidates.push(`${dir.replace(/\/$/, "")}/${pdfName}`);
+
   const url = String(
     node?.url ||
       node?.ofp_url ||
@@ -13737,11 +14502,13 @@ const normalizePilotSimbriefPayload = (payload) => {
       node?.link ||
       ""
   ).trim();
+  const pdfUrl = pdfCandidates.find((v) => /\.pdf(\?|$)/i.test(v)) || pdfCandidates[0] || (/\.pdf(\?|$)/i.test(url) ? url : "");
   const html = String(node?.html || node?.ofp_html || node?.briefing_html || "").trim();
 
   return {
-    available: Boolean(url || html || (node && typeof node === "object" && Object.keys(node).length > 0)),
+    available: Boolean(url || html || pdfUrl || (node && typeof node === "object" && Object.keys(node).length > 0)),
     url: url || null,
+    pdfUrl: pdfUrl || null,
     html: html || null,
     raw: node && typeof node === "object" ? node : null,
   };
@@ -15125,26 +15892,34 @@ app.get("/api/pilot/location", async (req, res) => {
 
   try {
     const pilotId = Number(session?.user?.id || 0) || 0;
+    // Лимит: тяжёлый форс-синк с vAMSYS — не чаще раза в PILOT_LOCATION_MIN_REFRESH_MS на пилота.
+    // В пределах окна (частые F5) отдаём кэшированную локацию из соединения — без обращений к vAMSYS.
+    const lastRefresh = pilotLocationRefreshAt.get(pilotId) || 0;
+    const shouldForce = Date.now() - lastRefresh >= PILOT_LOCATION_MIN_REFRESH_MS;
+
     let connection = await ensurePilotApiConnection({
       pilotId,
       sessionUser: session.user || {},
-      forceProfileRefresh: true,
+      forceProfileRefresh: shouldForce,
     });
 
     const airportsMap = await loadAirportsLookup().catch(() => new Map());
-    try {
-      const synced = await syncPilotApiLocationFromVamsys({
-        pilotId,
-        sessionUser: session.user || {},
-        connection,
-        airportsMap,
-      });
-      connection = synced?.connection || connection;
-    } catch (syncError) {
-      logVamsys("warn", "pilot_location_sync_failed", {
-        pilotId,
-        error: String(syncError),
-      });
+    if (shouldForce) {
+      pilotLocationRefreshAt.set(pilotId, Date.now());
+      try {
+        const synced = await syncPilotApiLocationFromVamsys({
+          pilotId,
+          sessionUser: session.user || {},
+          connection,
+          airportsMap,
+        });
+        connection = synced?.connection || connection;
+      } catch (syncError) {
+        logVamsys("warn", "pilot_location_sync_failed", {
+          pilotId,
+          error: String(syncError),
+        });
+      }
     }
 
     const extracted = extractPilotApiProfile(connection?.profile || {}) || {};
@@ -18482,6 +19257,77 @@ const buildUnifiedFleetEntry = async (fleet = {}, aircraftColor = "#E31E24") => 
   };
 };
 
+// ── Unified catalog disk snapshot (instant warm start) ───────────────────────
+// После рестарта каталог поднимается с диска сразу (stale), а полный синк
+// с vAMSYS идёт в фоне — страницы доступны без 10–15с холодного ожидания.
+
+const UNIFIED_CATALOG_SNAPSHOT_FILE = path.join(path.dirname(AUTH_STORE_FILE), "unified-catalog-snapshot.json");
+let unifiedCatalogPersistTimer = null;
+
+const persistUnifiedCatalogSnapshot = () => {
+  // Троттлинг: пишем не чаще раза в 30с (дельта-синки могут идти часто)
+  if (unifiedCatalogPersistTimer) return;
+  unifiedCatalogPersistTimer = setTimeout(() => {
+    unifiedCatalogPersistTimer = null;
+    try {
+      const payload = {
+        savedAt: new Date().toISOString(),
+        airports: Array.from(unifiedCatalogCache.airportsById.values()),
+        hubs: Array.from(unifiedCatalogCache.hubsById.values()),
+        routes: Array.from(unifiedCatalogCache.routesById.values()),
+        fleets: Array.from(unifiedCatalogCache.fleetsById.values()),
+      };
+      const tempPath = `${UNIFIED_CATALOG_SNAPSHOT_FILE}.tmp`;
+      fs.writeFileSync(tempPath, JSON.stringify(payload));
+      fs.renameSync(tempPath, UNIFIED_CATALOG_SNAPSHOT_FILE);
+      logger.info("[catalog] snapshot_persisted", {
+        airports: payload.airports.length,
+        routes: payload.routes.length,
+        fleets: payload.fleets.length,
+      });
+    } catch (error) {
+      logger.warn("[catalog] snapshot_persist_failed", { error: String(error) });
+    }
+  }, 30 * 1000);
+  unifiedCatalogPersistTimer.unref?.();
+};
+
+const restoreUnifiedCatalogFromDisk = () => {
+  try {
+    if (!fs.existsSync(UNIFIED_CATALOG_SNAPSHOT_FILE)) return false;
+    const raw = JSON.parse(fs.readFileSync(UNIFIED_CATALOG_SNAPSHOT_FILE, "utf8"));
+    const airports = Array.isArray(raw?.airports) ? raw.airports : [];
+    const routes = Array.isArray(raw?.routes) ? raw.routes : [];
+    if (airports.length === 0 && routes.length === 0) return false;
+
+    unifiedCatalogCache.airportsById = mapByNumericId(airports);
+    unifiedCatalogCache.hubsById = mapByNumericId(Array.isArray(raw?.hubs) ? raw.hubs : []);
+    unifiedCatalogCache.routesById = mapByNumericId(routes);
+    unifiedCatalogCache.fleetsById = mapByNumericId(Array.isArray(raw?.fleets) ? raw.fleets : []);
+    // initialized=true открывает все страницы сразу; lastFullSyncAt=0 заставит
+    // планировщик выполнить полный синк в фоне при первом же тике
+    unifiedCatalogCache.initialized = true;
+    unifiedCatalogCache.lastFullSyncAt = 0;
+    unifiedCatalogCache.lastDeltaSyncAt = 0;
+
+    const fleets = Array.from(unifiedCatalogCache.fleetsById.values());
+    if (fleets.length > 0) {
+      fleetCache = { data: { fleets }, expiresAt: Number.MAX_SAFE_INTEGER };
+    }
+
+    logger.info("[catalog] snapshot_restored", {
+      savedAt: raw?.savedAt || "unknown",
+      airports: airports.length,
+      routes: routes.length,
+      fleets: fleets.length,
+    });
+    return true;
+  } catch (error) {
+    logger.warn("[catalog] snapshot_restore_failed", { error: String(error) });
+    return false;
+  }
+};
+
 const runUnifiedCatalogFullSync = async () => {
   const [airports, hubs, routes, fleets] = await Promise.all([
     fetchAllPages("/airports?page[size]=300&sort=-updated_at"),
@@ -18518,6 +19364,7 @@ const runUnifiedCatalogFullSync = async () => {
     expiresAt: Number.MAX_SAFE_INTEGER,
   };
   persistFleetSnapshot(fleetSnapshot);
+  persistUnifiedCatalogSnapshot();
 };
 
 const mergeIncrementalEntities = (targetMap, items, mapper = (entry) => entry) => {
@@ -18588,6 +19435,8 @@ const runUnifiedCatalogDeltaSync = async () => {
   if (!airportsDelta.isComplete || !hubsDelta.isComplete || !routesDelta.isComplete || !fleetsDelta.isComplete) {
     unifiedCatalogCache.lastFullSyncAt = 0;
   }
+
+  persistUnifiedCatalogSnapshot();
 };
 
 const syncUnifiedCatalog = async ({ forceFull = false } = {}) => {
@@ -18637,9 +19486,17 @@ const startUnifiedCatalogSyncScheduler = () => {
     return;
   }
 
-  void ensureUnifiedCatalogReady().catch((error) => {
-    logger.warn("[catalog] initial_sync_failed", { error: String(error) });
-  });
+  // Мгновенный тёплый старт: каталог с диска доступен сразу, синк — в фоне
+  const restored = restoreUnifiedCatalogFromDisk();
+  if (restored) {
+    void syncUnifiedCatalog({ forceFull: true }).catch((error) => {
+      logger.warn("[catalog] background_refresh_failed", { error: String(error) });
+    });
+  } else {
+    void ensureUnifiedCatalogReady().catch((error) => {
+      logger.warn("[catalog] initial_sync_failed", { error: String(error) });
+    });
+  }
 
   unifiedCatalogCache.periodicTimer = setInterval(() => {
     void syncUnifiedCatalog({ forceFull: false });
@@ -18829,7 +19686,7 @@ const resolvePilotNameFromPirep = async (pirep) => {
   return "";
 };
 
-const loadPilotProfileById = async (pilotId, { seedPilot = null } = {}) => {
+const loadPilotProfileById = async (pilotId, { seedPilot = null, forceFresh = false } = {}) => {
   const key = Number(pilotId);
   if (!Number.isFinite(key) || key <= 0) {
     return null;
@@ -18860,8 +19717,21 @@ const loadPilotProfileById = async (pilotId, { seedPilot = null } = {}) => {
     const startedAt = Date.now();
     let node = null;
 
-    if (seedPilot && typeof seedPilot === "object") {
+    // forceFresh: не доверяем seed (устаревший session.user) — тянем живой профиль из vAMSYS,
+    // чтобы подхватить смену локации, сделанную пилотом в vAMSYS. seed остаётся как фолбэк ниже.
+    if (seedPilot && typeof seedPilot === "object" && !forceFresh) {
       node = normalizePilotPayload(seedPilot);
+    }
+
+    if (forceFresh) {
+      try {
+        const direct = await apiFetch(`/pilots/${key}`).catch(() => null);
+        if (direct) {
+          node = normalizePilotPayload(direct);
+        }
+      } catch (freshErr) {
+        logVamsys("warn", "pilot_profile_force_fresh_failed", { pilotId: key, error: String(freshErr) });
+      }
     }
 
     if (VAMSYS_TRY_DOCS_PILOT_ENDPOINT) {
@@ -18892,6 +19762,11 @@ const loadPilotProfileById = async (pilotId, { seedPilot = null } = {}) => {
       } catch (fallbackErr) {
         logVamsys('warn', 'pilot_profile_fallback_direct_failed', { pilotId: key, error: String(fallbackErr) });
       }
+    }
+
+    // Страховка для forceFresh: если живой профиль не получили — используем seed, чтобы не вернуть null.
+    if ((!node || !node.id) && forceFresh && seedPilot && typeof seedPilot === "object") {
+      node = normalizePilotPayload(seedPilot);
     }
 
     if (!node || !node.id) {
@@ -19158,6 +20033,20 @@ const loadPilotsRoster = async ({ force = false } = {}) => {
         flights: Number(pilot?.flights || pilot?.total_flights || 0) || 0,
         status,
         joinedAt: String(pilot?.created_at || pilot?.joined_at || ""),
+        // Согласие на рассылку: vAMSYS может назвать поле по-разному. Пробрасываем
+        // первое найденное; undefined = поля нет в API (значит управляем вручную).
+        marketingConsent: (() => {
+          const candidates = [
+            pilot?.marketing_consent, pilot?.marketingConsent,
+            pilot?.newsletter, pilot?.newsletter_opt_in, pilot?.newsletterOptIn,
+            pilot?.email_opt_in, pilot?.emailOptIn,
+            pilot?.subscribed, pilot?.mailing, pilot?.email_marketing,
+            pilot?.accepts_marketing, pilot?.acceptsMarketing,
+          ];
+          const found = candidates.find((v) => v !== undefined && v !== null);
+          if (found === undefined || found === null) return undefined;
+          return Boolean(found === true || found === 1 || found === "1" || found === "true" || found === "yes");
+        })(),
       };
     });
 
@@ -23085,6 +23974,28 @@ app.post("/api/pilot/social-gallery/media", express.json({ limit: "12mb" }), asy
       fileName: req.body?.fileName,
     });
     const validCategoryIds = new Set((Array.isArray(store?.categories) ? store.categories : []).map((item) => String(item?.id || "")));
+    const flightMeta =
+      req.body?.flight && typeof req.body.flight === "object"
+        ? {
+            pirepId: Number(req.body.flight.pirepId || 0) || null,
+            bookingId: Number(req.body.flight.bookingId || 0) || null,
+            callsign: normalizeAdminText(req.body.flight.callsign || "") || null,
+            route: normalizeAdminText(req.body.flight.route || "") || null,
+          }
+        : null;
+    // Дополнительные теги: тип ВС (ICAO), регистрация, аддоны.
+    const gearMeta =
+      req.body?.gear && typeof req.body.gear === "object"
+        ? {
+            aircraft: normalizeAdminText(req.body.gear.aircraft || "").slice(0, 24) || null,
+            registration: normalizeAdminText(req.body.gear.registration || "").slice(0, 24) || null,
+            addons: String(req.body.gear.addons || "")
+              .split(",")
+              .map((x) => normalizeAdminText(x))
+              .filter(Boolean)
+              .slice(0, 10),
+          }
+        : null;
     const media = {
       id: `shot-${randomUUID()}`,
       title: normalizeAdminText(req.body?.title || req.body?.fileName || "Untitled screenshot") || "Untitled screenshot",
@@ -23111,6 +24022,8 @@ app.post("/api/pilot/social-gallery/media", express.json({ limit: "12mb" }), asy
         .slice(0, 12),
       likes: [],
       size: asset.size,
+      flight: flightMeta,
+      gear: gearMeta,
     };
 
     withSocialGalleryUpdate((current) => {
@@ -23144,6 +24057,48 @@ app.post("/api/pilot/social-gallery/media", express.json({ limit: "12mb" }), asy
   } catch (error) {
     res.status(400).json({ error: String(error?.message || "Failed to upload screenshot") });
   }
+});
+
+// Скриншоты, привязанные к конкретному PIREP (для блока в карточке рейса).
+app.get("/api/pilot/pireps/:id/screenshots", async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  const pirepId = Number(req.params.id || 0) || 0;
+  if (!pirepId) {
+    res.json({ ok: true, screenshots: [] });
+    return;
+  }
+  const store = readSocialGalleryStore();
+  const screenshots = (Array.isArray(store?.media) ? store.media : [])
+    .filter(
+      (m) => socialGalleryEntryMatchesActor(m, viewer) && Number(m?.flight?.pirepId || 0) === pirepId
+    )
+    .sort((a, b) => Date.parse(String(b?.createdAt || "")) - Date.parse(String(a?.createdAt || "")))
+    .map((m) => serializeSocialGalleryMedia(m, store, viewer));
+  res.json({ ok: true, screenshots });
+});
+
+// Скриншоты, привязанные к брони (для вкладки «Скриншоты» на странице «Полёт»).
+app.get("/api/pilot/bookings/:id/screenshots", async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  const bookingId = Number(req.params.id || 0) || 0;
+  if (!bookingId) {
+    res.json({ ok: true, screenshots: [] });
+    return;
+  }
+  const store = readSocialGalleryStore();
+  const screenshots = (Array.isArray(store?.media) ? store.media : [])
+    .filter((m) => socialGalleryEntryMatchesActor(m, viewer) && Number(m?.flight?.bookingId || 0) === bookingId)
+    .sort((a, b) => Date.parse(String(b?.createdAt || "")) - Date.parse(String(a?.createdAt || "")))
+    .map((m) => serializeSocialGalleryMedia(m, store, viewer));
+  res.json({ ok: true, screenshots });
 });
 
 app.post("/api/pilot/social-gallery/media/:id/like", express.json({ limit: "256kb" }), async (req, res) => {
@@ -25032,6 +25987,408 @@ app.get("/api/weather/taf/:icao", async (req, res) => {
   }
 });
 
+// ─── Мировая база аэропортов (OurAirports) ───
+// Единая база для поиска ближайшего аэропорта (напр. при диверте). Наша база компании
+// (loadAirportsLookup, ~68) остаётся в приоритете — см. /api/airports/nearest.
+let worldAirportsCache = null; // [{ icao, iata, name, city, country, lat, lon, type }]
+
+// Парсер одной CSV-строки с учётом кавычек (name может содержать запятые).
+const parseCsvLine = (line) => {
+  const out = [];
+  let cur = "";
+  let inQ = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i += 1; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') inQ = true;
+    else if (ch === ",") { out.push(cur); cur = ""; }
+    else cur += ch;
+  }
+  out.push(cur);
+  return out;
+};
+
+const parseWorldAirportsCsv = (csv) => {
+  const lines = String(csv || "").split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const header = parseCsvLine(lines[0]);
+  const idx = (name) => header.indexOf(name);
+  const iIdent = idx("ident");
+  const iType = idx("type");
+  const iName = idx("name");
+  const iLat = idx("latitude_deg");
+  const iLon = idx("longitude_deg");
+  const iCountry = idx("iso_country");
+  const iMuni = idx("municipality");
+  const iGps = idx("gps_code");
+  const iIata = idx("iata_code");
+  const keepType = new Set(["large_airport", "medium_airport", "small_airport"]);
+  const out = [];
+  for (let i = 1; i < lines.length; i += 1) {
+    if (!lines[i]) continue;
+    const f = parseCsvLine(lines[i]);
+    const type = f[iType];
+    if (!keepType.has(type)) continue;
+    const icao = String(f[iGps] || f[iIdent] || "").trim().toUpperCase();
+    if (!/^[A-Z]{4}$/.test(icao)) continue;
+    const lat = Number(f[iLat]);
+    const lon = Number(f[iLon]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    out.push({
+      icao,
+      iata: String(f[iIata] || "").trim().toUpperCase() || null,
+      name: String(f[iName] || icao).trim(),
+      city: String(f[iMuni] || "").trim() || null,
+      country: String(f[iCountry] || "").trim().toUpperCase() || null,
+      lat,
+      lon,
+      type,
+    });
+  }
+  return out;
+};
+
+const loadWorldAirports = async () => {
+  if (Array.isArray(worldAirportsCache)) return worldAirportsCache;
+  // 1) свежий кэш с диска
+  try {
+    if (fs.existsSync(WORLD_AIRPORTS_FILE)) {
+      const stat = fs.statSync(WORLD_AIRPORTS_FILE);
+      if (Date.now() - stat.mtimeMs < WORLD_AIRPORTS_TTL_MS) {
+        const parsed = JSON.parse(fs.readFileSync(WORLD_AIRPORTS_FILE, "utf8"));
+        if (Array.isArray(parsed?.airports) && parsed.airports.length > 0) {
+          worldAirportsCache = parsed.airports;
+          return worldAirportsCache;
+        }
+      }
+    }
+  } catch (e) {
+    logger.warn("[world-airports] disk_read_failed", String(e));
+  }
+  // 2) скачиваем OurAirports CSV
+  try {
+    const r = await fetch(WORLD_AIRPORTS_SOURCE, {
+      headers: { "User-Agent": "NordwindSite/1.0" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) throw new Error(`http ${r.status}`);
+    const csv = await r.text();
+    const airports = parseWorldAirportsCsv(csv);
+    if (airports.length > 0) {
+      worldAirportsCache = airports;
+      try {
+        ensureAuthStoreDir();
+        const tmp = `${WORLD_AIRPORTS_FILE}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify({ updatedAt: new Date().toISOString(), airports }), "utf8");
+        fs.renameSync(tmp, WORLD_AIRPORTS_FILE);
+      } catch (e) {
+        logger.warn("[world-airports] disk_write_failed", String(e));
+      }
+      logger.info("[world-airports] loaded", { count: airports.length });
+      return worldAirportsCache;
+    }
+  } catch (e) {
+    logger.warn("[world-airports] fetch_failed", String(e));
+  }
+  // 3) последний шанс — устаревший кэш с диска
+  try {
+    if (fs.existsSync(WORLD_AIRPORTS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(WORLD_AIRPORTS_FILE, "utf8"));
+      if (Array.isArray(parsed?.airports)) {
+        worldAirportsCache = parsed.airports;
+        return worldAirportsCache;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  worldAirportsCache = [];
+  return worldAirportsCache;
+};
+
+const haversineNm = (lat1, lon1, lat2, lon2) => {
+  const toR = (d) => (d * Math.PI) / 180;
+  const R = 3440.065;
+  const dLat = toR(lat2 - lat1);
+  const dLon = toR(lon2 - lon1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+};
+
+// Ближайший аэропорт к точке: база компании в приоритете (если в пределах companyBiasNm
+// от ближайшего мирового — предпочитаем её), иначе — мировой.
+app.get("/api/airports/nearest", async (req, res) => {
+  const lat = Number(req.query.lat);
+  const lon = Number(req.query.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    res.status(400).json({ error: "lat and lon required" });
+    return;
+  }
+  const exclude = new Set(
+    String(req.query.exclude || "")
+      .split(",")
+      .map((s) => s.trim().toUpperCase())
+      .filter(Boolean)
+  );
+  const companyBiasNm = Number(req.query.companyBiasNm || 40) || 40;
+
+  const [companyMap, world] = await Promise.all([
+    loadAirportsLookup().catch(() => new Map()),
+    loadWorldAirports().catch(() => []),
+  ]);
+
+  let companyNearest = null;
+  for (const a of companyMap.values()) {
+    const code = String(a?.icao || a?.code || "").toUpperCase();
+    if (!code || exclude.has(code) || a?.latitude == null || a?.longitude == null) continue;
+    const d = haversineNm(lat, lon, Number(a.latitude), Number(a.longitude));
+    if (!companyNearest || d < companyNearest.distanceNm) {
+      companyNearest = {
+        distanceNm: d,
+        isCompany: true,
+        icao: code,
+        iata: a.iata || null,
+        name: a.name || code,
+        city: a.city || null,
+        country: a.countryIso2 || a.countryName || null,
+        base: Boolean(a.base),
+        lat: Number(a.latitude),
+        lon: Number(a.longitude),
+      };
+    }
+  }
+
+  let worldNearest = null;
+  for (const a of world) {
+    if (exclude.has(a.icao)) continue;
+    const d = haversineNm(lat, lon, a.lat, a.lon);
+    if (!worldNearest || d < worldNearest.distanceNm) {
+      worldNearest = {
+        distanceNm: d,
+        isCompany: false,
+        icao: a.icao,
+        iata: a.iata,
+        name: a.name,
+        city: a.city,
+        country: a.country,
+        base: false,
+        lat: a.lat,
+        lon: a.lon,
+      };
+    }
+  }
+
+  // Приоритет компании: берём её, если она в пределах companyBiasNm от мирового ближайшего.
+  let nearest = worldNearest;
+  if (companyNearest && (!worldNearest || companyNearest.distanceNm <= worldNearest.distanceNm + companyBiasNm)) {
+    nearest = companyNearest;
+  }
+
+  res.json({ ok: true, nearest, company: companyNearest, world: worldNearest });
+});
+
+// Поиск аэропорта по ICAO (для ручного выбора пункта диверта). База компании в приоритете.
+app.get("/api/airports/lookup", async (req, res) => {
+  const icao = String(req.query.icao || "").trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(icao)) {
+    res.status(400).json({ error: "icao required (4 letters)" });
+    return;
+  }
+  const [companyMap, world] = await Promise.all([
+    loadAirportsLookup().catch(() => new Map()),
+    loadWorldAirports().catch(() => []),
+  ]);
+  for (const a of companyMap.values()) {
+    if (String(a?.icao || a?.code || "").toUpperCase() === icao && a?.latitude != null && a?.longitude != null) {
+      res.json({
+        ok: true,
+        airport: {
+          icao,
+          iata: a.iata || null,
+          name: a.name || icao,
+          city: a.city || null,
+          country: a.countryIso2 || a.countryName || null,
+          base: Boolean(a.base),
+          isCompany: true,
+          lat: Number(a.latitude),
+          lon: Number(a.longitude),
+        },
+      });
+      return;
+    }
+  }
+  const w = world.find((a) => a.icao === icao);
+  if (w) {
+    res.json({
+      ok: true,
+      airport: { icao: w.icao, iata: w.iata, name: w.name, city: w.city, country: w.country, base: false, isCompany: false, lat: w.lat, lon: w.lon },
+    });
+    return;
+  }
+  res.status(404).json({ error: "Airport not found" });
+});
+
+// ─── Гид по пункту назначения (для IFE-страницы «Полёт») ───
+// По ICAO собирает: город/страна/координаты (каталог), описание+фото города (Wikipedia/Wikimedia),
+// и поисковые ссылки на видео (YouTube). Кэш в памяти (7 дней). Внешние данные — best-effort.
+const destinationCache = new Map(); // icao -> { data, expiresAt }
+const DESTINATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+const findAirportByIcao = async (icao) => {
+  const code = String(icao || "").trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(code)) return null;
+  const map = await loadAirportsLookup().catch(() => new Map());
+  for (const a of map.values()) {
+    if (String(a?.icao || "").toUpperCase() === code) return a;
+  }
+  return null;
+};
+
+const fetchWikipediaSummary = async (title, lang) => {
+  try {
+    const url = `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
+    const r = await fetch(url, { headers: { "User-Agent": "NordwindSite/1.0" }, signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (j?.type === "disambiguation" || !j?.extract) return null;
+    return {
+      title: String(j.title || title),
+      extract: String(j.extract || ""),
+      thumbnail: j.thumbnail?.source || null,
+      lat: Number(j.coordinates?.lat) || null,
+      lon: Number(j.coordinates?.lon) || null,
+      url: j.content_urls?.desktop?.page || null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+// Убирает «аэропортовые» слова из названия, чтобы не искать в Wikipedia статью про аэропорт.
+const cleanCityName = (raw) => {
+  let s = String(raw || "").trim();
+  s = s.replace(/\b(international|intl\.?|regional|municipal|airport|airfield|air base)\b/gi, "");
+  s = s.replace(/\b(аэропорт|международный|имени[^,]*)\b/gi, "");
+  s = s.replace(/\s{2,}/g, " ").replace(/[,\-–]\s*$/, "").trim();
+  return s;
+};
+const looksLikeAirport = (title) => /airport|airfield|аэропорт|air base|station/i.test(String(title || ""));
+
+// Находит ближайший населённый пункт по координатам через Wikipedia geosearch (gsradius ≤ 10км).
+const fetchNearestCity = async (lat, lon, lang) => {
+  if (lat == null || lon == null) return null;
+  try {
+    const url =
+      `https://${lang}.wikipedia.org/w/api.php?action=query&format=json&origin=*` +
+      `&list=geosearch&gsradius=10000&gslimit=15&gscoord=${lat}%7C${lon}`;
+    const r = await fetch(url, { headers: { "User-Agent": "NordwindSite/1.0" }, signal: AbortSignal.timeout(6000) });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const hits = Array.isArray(j?.query?.geosearch) ? j.query.geosearch : [];
+    for (const h of hits) {
+      if (looksLikeAirport(h?.title)) continue;
+      const sum = await fetchWikipediaSummary(h.title, lang);
+      if (sum && !looksLikeAirport(sum.title)) return sum;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+};
+
+const fetchCommonsPhotos = async (lat, lon, limit = 6) => {
+  if (lat == null || lon == null) return [];
+  try {
+    const url =
+      `https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*` +
+      `&generator=geosearch&ggsprimary=all&ggsnamespace=6&ggsradius=10000&ggslimit=24` +
+      `&ggscoord=${lat}%7C${lon}` +
+      `&prop=imageinfo&iiprop=url%7Cextmetadata&iiurlwidth=900`;
+    const r = await fetch(url, { headers: { "User-Agent": "NordwindSite/1.0" }, signal: AbortSignal.timeout(7000) });
+    if (!r.ok) return [];
+    const j = await r.json();
+    const pages = j?.query?.pages ? Object.values(j.query.pages) : [];
+    const photos = [];
+    for (const p of pages) {
+      const info = Array.isArray(p?.imageinfo) ? p.imageinfo[0] : null;
+      const src = info?.thumburl || info?.url || "";
+      if (!src || !/\.(jpe?g|png)$/i.test(src)) continue;
+      // отсеиваем карты/флаги/гербы/логотипы по названию
+      const titleLow = String(p?.title || "").toLowerCase();
+      if (/(map|flag|coat|logo|icon|seal|emblem|locator|svg|diagram)/.test(titleLow)) continue;
+      photos.push({
+        url: src,
+        title: String(info?.extmetadata?.ObjectName?.value || p?.title || "").replace(/^File:/, "").replace(/\.[a-z]+$/i, ""),
+        descriptionUrl: info?.descriptionurl || null,
+      });
+      if (photos.length >= limit) break;
+    }
+    return photos;
+  } catch {
+    return [];
+  }
+};
+
+app.get("/api/pilot/destination/:icao", async (req, res) => {
+  const icao = String(req.params.icao || "").trim().toUpperCase();
+  if (!/^[A-Z]{4}$/.test(icao)) return res.status(400).json({ error: "Invalid ICAO" });
+
+  const cached = destinationCache.get(icao);
+  if (cached && Date.now() < cached.expiresAt) return res.json(cached.data);
+
+  const lang = String(req.query.lang || "ru").toLowerCase() === "en" ? "en" : "ru";
+  // Аэропорт из нашей кэш-базы vAMSYS (источник истины по городу/стране/координатам).
+  const airport = await findAirportByIcao(icao);
+  const country = airport?.countryName || "";
+  // Город из базы — основной; очищаем «Airport» и пр. для поиска статьи.
+  const baseCity = cleanCityName(airport?.city || "") || cleanCityName(airport?.name || "");
+
+  // Статья города: сперва по названию из базы, затем geosearch ближайшего города по координатам аэропорта.
+  let summary = null;
+  if (baseCity) {
+    summary = (await fetchWikipediaSummary(baseCity, lang)) || (await fetchWikipediaSummary(baseCity, "en"));
+    if (summary && looksLikeAirport(summary.title)) summary = null;
+    if (!summary && country) summary = await fetchWikipediaSummary(`${baseCity}, ${country}`, lang);
+  }
+  if (!summary) {
+    summary =
+      (await fetchNearestCity(airport?.latitude ?? null, airport?.longitude ?? null, lang)) ||
+      (await fetchNearestCity(airport?.latitude ?? null, airport?.longitude ?? null, "en"));
+  }
+
+  // Отображаемый город — из базы vAMSYS (как просили); если пусто — из найденной статьи.
+  const city = baseCity || summary?.title || airport?.name || "";
+  // Фото — вокруг координат города (из статьи) либо аэропорта.
+  const photoLat = summary?.lat ?? airport?.latitude ?? null;
+  const photoLon = summary?.lon ?? airport?.longitude ?? null;
+  const photos = await fetchCommonsPhotos(photoLat, photoLon, 6);
+
+  const videoQuery = `${city || icao} ${lang === "ru" ? "достопримечательности обзор" : "city travel guide"}`;
+  const data = {
+    icao,
+    city,
+    country,
+    countryIso2: airport?.countryIso2 || null,
+    latitude: airport?.latitude ?? null,
+    longitude: airport?.longitude ?? null,
+    summary: summary ? { extract: summary.extract, url: summary.url } : null,
+    photos,
+    video: {
+      searchUrl: `https://www.youtube.com/results?search_query=${encodeURIComponent(videoQuery)}`,
+      query: videoQuery,
+    },
+  };
+  // Полный результат кэшируем надолго; деградированный (внешние API не ответили) — лишь на 10 мин,
+  // чтобы транзиентный сетевой сбой не отравил кэш на неделю.
+  const degraded = !data.summary && data.photos.length === 0;
+  destinationCache.set(icao, { data, expiresAt: Date.now() + (degraded ? 10 * 60 * 1000 : DESTINATION_TTL_MS) });
+  res.json(data);
+});
+
 app.put("/api/admin/fleet/:fleetId/liveries/:liveryId", async (req, res) => {
   try {
     const updated = await updateFleetLiveryStatus(req.params.fleetId, req.params.liveryId, req.body || {});
@@ -25090,7 +26447,40 @@ app.post("/api/pilot/routes/:id/report-outdated", async (req, res) => {
       return;
     }
 
-    const result = createOutdatedRouteReportTicket({ route, context });
+    // Moderation: blocklist, cooldown and daily limit (duplicates handled inside create)
+    const reportOwner = resolvePilotSupportTicketOwner(context);
+    const reportSettings = getRouteReportSettingsStore();
+
+    const blockEntry = findRouteReportBlockEntry(reportOwner, reportSettings);
+    if (blockEntry) {
+      res.status(403).json({ ok: false, code: "report_blocked", error: "Route reports are blocked for your account" });
+      return;
+    }
+
+    const existingDuplicate = findActiveOutdatedRouteReportTicket(listTicketsStore(), route?.id, reportOwner);
+    if (!existingDuplicate) {
+      const usage = getRouteReportUsage(reportOwner);
+      if (reportSettings.cooldownMinutes > 0 && usage.lastAt > 0) {
+        const elapsedMs = Date.now() - usage.lastAt;
+        const cooldownMs = reportSettings.cooldownMinutes * 60 * 1000;
+        if (elapsedMs < cooldownMs) {
+          const retryMinutes = Math.max(1, Math.ceil((cooldownMs - elapsedMs) / 60000));
+          res.status(429).json({ ok: false, code: "report_cooldown", retryMinutes, error: `Please wait ${retryMinutes} min before sending another report` });
+          return;
+        }
+      }
+      if (reportSettings.dailyLimit > 0 && usage.last24h >= reportSettings.dailyLimit) {
+        res.status(429).json({ ok: false, code: "report_daily_limit", error: "Daily route report limit reached" });
+        return;
+      }
+    }
+
+    const result = createOutdatedRouteReportTicket({
+      route,
+      context,
+      reason: String(req.body?.reason || "").slice(0, 200),
+      comment: String(req.body?.comment || "").slice(0, 500),
+    });
     if (result.error) {
       res.status(503).json({ ok: false, error: result.error, code: "ticket_unavailable" });
       return;
@@ -26710,6 +28100,163 @@ app.put("/api/admin/tickets/config", express.json({ limit: "1mb" }), (req, res) 
     res.json({ ok: true, ticketConfig });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/admin/route-reports/settings", (_req, res) => {
+  res.json({ settings: getRouteReportSettingsStore() });
+});
+
+app.put("/api/admin/route-reports/settings", express.json({ limit: "256kb" }), (req, res) => {
+  try {
+    const settings = upsertRouteReportSettingsStore(req.body && typeof req.body === "object" ? req.body : {});
+    res.json({ ok: true, settings });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.get("/api/admin/route-audit", (_req, res) => {
+  const navdata = loadNavdata();
+  const newestMtime = Math.max(navdataCache.fixMtime || 0, navdataCache.awyMtime || 0);
+  res.json({
+    settings: getRouteAuditSettingsStore(),
+    report: getRouteAuditLastReport(),
+    navdata: {
+      ready: navdata.fixes.size > 0,
+      fixes: navdata.fixes.size,
+      airways: navdata.airways.size,
+      dir: NAVDATA_DIR,
+      updatedAt: newestMtime > 0 ? new Date(newestMtime).toISOString() : null,
+      ageDays: newestMtime > 0 ? Math.floor((Date.now() - newestMtime) / (24 * 60 * 60 * 1000)) : null,
+    },
+  });
+});
+
+// ── Navdata installation (AIRAC update via admin) ────────────────────────────
+
+const NAVDATA_TARGET_BY_KEY = {
+  fix: NAVDATA_FIX_FILE,
+  awy: NAVDATA_AWY_FILE,
+};
+
+const looksLikeNavdataDat = (buffer) => {
+  const head = buffer.slice(0, 4096).toString("utf8");
+  // Файлы X-Plane начинаются с маркера I/A + строки версии "1100 Version" и т.п.
+  return /^[IA]\s*\r?\n\s*\d{3,4}\s+/.test(head) || /\d{2,}\.\d+\s+-?\d{1,3}\.\d+/.test(head);
+};
+
+const saveNavdataFile = (key, buffer) => {
+  const target = NAVDATA_TARGET_BY_KEY[key];
+  if (!target) throw new Error("Unknown navdata file key");
+  if (!buffer || buffer.length < 64) throw new Error("File is empty or too small");
+  if (!looksLikeNavdataDat(buffer)) throw new Error("File does not look like an X-Plane navdata .dat file");
+  fs.mkdirSync(NAVDATA_DIR, { recursive: true });
+  fs.writeFileSync(target, buffer);
+  // Сбрасываем кэш — следующий loadNavdata() перечитает файлы
+  navdataCache.fixMtime = 0;
+  navdataCache.awyMtime = 0;
+};
+
+// Минимальный ZIP-экстрактор (deflate/store) без внешних зависимостей
+const extractZipEntries = (zipBuffer, wantedNames) => {
+  const wanted = new Set(wantedNames.map((n) => n.toLowerCase()));
+  const found = new Map();
+  // End of Central Directory
+  let eocd = -1;
+  for (let i = zipBuffer.length - 22; i >= Math.max(0, zipBuffer.length - 22 - 65536); i--) {
+    if (zipBuffer.readUInt32LE(i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error("Not a valid ZIP archive");
+  const cdOffset = zipBuffer.readUInt32LE(eocd + 16);
+  const cdCount = zipBuffer.readUInt16LE(eocd + 10);
+
+  let p = cdOffset;
+  for (let i = 0; i < cdCount && p + 46 <= zipBuffer.length; i++) {
+    if (zipBuffer.readUInt32LE(p) !== 0x02014b50) break;
+    const method = zipBuffer.readUInt16LE(p + 10);
+    const compSize = zipBuffer.readUInt32LE(p + 20);
+    const nameLen = zipBuffer.readUInt16LE(p + 28);
+    const extraLen = zipBuffer.readUInt16LE(p + 30);
+    const commentLen = zipBuffer.readUInt16LE(p + 32);
+    const localOffset = zipBuffer.readUInt32LE(p + 42);
+    const rawName = zipBuffer.slice(p + 46, p + 46 + nameLen).toString("utf8");
+    const baseName = rawName.split("/").pop().split("\\").pop().toLowerCase();
+
+    if (wanted.has(baseName) && !found.has(baseName)) {
+      // Локальный заголовок: длины имени/extra могут отличаться от CD
+      if (zipBuffer.readUInt32LE(localOffset) === 0x04034b50) {
+        const lNameLen = zipBuffer.readUInt16LE(localOffset + 26);
+        const lExtraLen = zipBuffer.readUInt16LE(localOffset + 28);
+        const dataStart = localOffset + 30 + lNameLen + lExtraLen;
+        const compData = zipBuffer.slice(dataStart, dataStart + compSize);
+        if (method === 0) {
+          found.set(baseName, compData);
+        } else if (method === 8) {
+          found.set(baseName, zlib.inflateRawSync(compData));
+        }
+        // прочие методы сжатия пропускаем
+      }
+    }
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return found;
+};
+
+const navdataUploadBody = express.raw({ type: () => true, limit: "150mb" });
+
+app.post("/api/admin/route-audit/navdata", navdataUploadBody, (req, res) => {
+  try {
+    const key = String(req.query?.file || "").toLowerCase();
+    if (!NAVDATA_TARGET_BY_KEY[key]) {
+      res.status(400).json({ ok: false, error: "Query param ?file= must be 'fix' or 'awy'" });
+      return;
+    }
+    saveNavdataFile(key, Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0));
+    const navdata = loadNavdata();
+    res.json({ ok: true, navdata: { ready: navdata.fixes.size > 0, fixes: navdata.fixes.size, airways: navdata.airways.size } });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/admin/route-audit/navdata-archive", navdataUploadBody, (req, res) => {
+  try {
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    const entries = extractZipEntries(buffer, ["earth_fix.dat", "earth_awy.dat"]);
+    if (entries.size === 0) {
+      res.status(400).json({ ok: false, error: "Archive does not contain earth_fix.dat or earth_awy.dat" });
+      return;
+    }
+    const installed = [];
+    if (entries.has("earth_fix.dat")) { saveNavdataFile("fix", entries.get("earth_fix.dat")); installed.push("earth_fix.dat"); }
+    if (entries.has("earth_awy.dat")) { saveNavdataFile("awy", entries.get("earth_awy.dat")); installed.push("earth_awy.dat"); }
+    const navdata = loadNavdata();
+    res.json({
+      ok: true,
+      installed,
+      navdata: { ready: navdata.fixes.size > 0, fixes: navdata.fixes.size, airways: navdata.airways.size },
+    });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.put("/api/admin/route-audit/settings", express.json({ limit: "64kb" }), (req, res) => {
+  try {
+    const settings = upsertRouteAuditSettingsStore(req.body && typeof req.body === "object" ? req.body : {});
+    res.json({ ok: true, settings });
+  } catch (error) {
+    res.status(400).json({ ok: false, error: String(error?.message || error) });
+  }
+});
+
+app.post("/api/admin/route-audit/run", async (_req, res) => {
+  try {
+    const report = await runRouteNetworkAudit({ trigger: "manual" });
+    res.json({ ok: true, report });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: String(error?.message || error) });
   }
 });
 
@@ -28622,6 +30169,94 @@ app.get("/api/public/activities", async (_req, res) => {
   }
 });
 
+// ── Единая лента активности сообщества (сайт + приложение) ──
+// Агрегирует: галерея (загрузки/лайки/альбомы), завершённые рейсы (кто куда летал),
+// новости и события. Нормализует к общему виду и сортирует по времени. Публичный.
+const FEED_VAC_FROM_CALLSIGN = (callsign) => {
+  const s = String(callsign || "").toUpperCase();
+  if (s.includes("KAR")) return "KAR";
+  if (s.includes("STW")) return "STW";
+  return "NWS";
+};
+
+app.get("/api/feed", async (req, res) => {
+  const limit = Math.max(1, Math.min(60, Number(req.query.limit || 30) || 30));
+  const items = [];
+
+  // 1) Галерея — загрузки/лайки/альбомы (viewer=null → только публичное).
+  try {
+    const store = readSocialGalleryStore();
+    for (const entry of buildSocialGalleryFeed(store, null, 30)) {
+      const media = entry.media || null;
+      items.push({
+        id: `gallery:${entry.id}`,
+        type: entry.type === "like" ? "like" : entry.type === "album" ? "album" : "screenshot",
+        createdAt: entry.createdAt || null,
+        actor: entry.actor || null,
+        title: entry.title || "",
+        summary: entry.summary || "",
+        media: media ? { url: media.url || media.assetUrl || null, likeCount: Number(media.likeCount || 0) || 0 } : null,
+        route: null,
+        vac: null,
+        href: "/gallery",
+      });
+    }
+  } catch { /* ignore source */ }
+
+  // 2) Завершённые рейсы — «кто куда летал».
+  if ((CLIENT_ID && CLIENT_SECRET) || API_TOKEN) {
+    try {
+      const { flights } = await loadCompletedFlights({ limit: 24 });
+      for (const f of Array.isArray(flights) ? flights : []) {
+        const createdAt = f.completedDate ? `${f.completedDate}T${f.completedTime || "00:00:00"}Z` : null;
+        items.push({
+          id: `flight:${f.id || `${f.flightNumber}-${createdAt}`}`,
+          type: "flight",
+          createdAt,
+          actor: { name: f.pilot || "Pilot", pilotId: f.pilotId || null, username: null },
+          title: f.flightNumber || "—",
+          summary: `${f.departureCity || f.departure} → ${f.destinationCity || f.destination}${f.aircraft ? ` · ${f.aircraft}` : ""}`,
+          media: null,
+          route: { from: f.departure || "—", to: f.destination || "—" },
+          vac: f.vac || FEED_VAC_FROM_CALLSIGN(f.flightNumber),
+          href: "/dashboard?tab=recent",
+        });
+      }
+    } catch { /* ignore source */ }
+  }
+
+  // 3) Новости + события (из админ-коллекции activities).
+  try {
+    const managed = listManagedAdminCollection("activities")
+      .filter((item) => normalizeAdminBoolean(item?.published, true))
+      .filter((item) => normalizePublicActivityStatus(item?.status, "Published") === "Published")
+      .map((item) => ({ pub: toPublicManualActivity(item), cat: normalizePublicActivityCategory(item?.category || item?.type) }))
+      .filter((x) => x.cat === "News" || x.cat === "Event");
+    for (const { pub, cat } of managed) {
+      const isEvent = cat === "Event";
+      items.push({
+        id: `${isEvent ? "event" : "news"}:${pub.id || pub.slug || pub.title}`,
+        type: isEvent ? "event" : "news",
+        createdAt: pub.date || null,
+        actor: pub.author ? { name: pub.author, pilotId: null, username: null } : null,
+        title: pub.title || (isEvent ? "Event" : "News"),
+        summary: pub.summary || "",
+        media: pub.imageUrl ? { url: pub.imageUrl, likeCount: 0 } : null,
+        route: null,
+        vac: null,
+        href: isEvent ? "/events" : "/news",
+      });
+    }
+  } catch { /* ignore source */ }
+
+  const sorted = items
+    .filter((it) => it.createdAt)
+    .sort((a, b) => Date.parse(String(b.createdAt)) - Date.parse(String(a.createdAt)))
+    .slice(0, limit);
+
+  res.json({ feed: sorted });
+});
+
 app.get("/api/public/social-gallery/assets/:fileName", (req, res) => {
   try {
     const requested = path.basename(String(req.params.fileName || "").trim());
@@ -29354,6 +30989,79 @@ app.post("/api/public/ai-chat", async (req, res) => {
   }
 });
 
+// Авторизованный ИИ-ассистент пилота (для приложения NordwindHub).
+// Персонализирован под пилота, заземлён на контент сайта.
+app.post("/api/pilot/assistant", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!XAI_API_KEY) {
+    res.status(503).json({ error: "AI not configured" });
+    return;
+  }
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+
+  // Rate-limit по пилоту
+  const key = String(viewer.pilotId || viewer.username || "anon");
+  const now = Date.now();
+  const last = aiChatLastRequestByIp.get(`pilot:${key}`) || 0;
+  if (now - last < AI_CHAT_RATE_LIMIT_MS) {
+    res.status(429).json({ error: "Too many requests, please wait a moment" });
+    return;
+  }
+  aiChatLastRequestByIp.set(`pilot:${key}`, now);
+
+  const message = String(req.body?.message || "").trim().slice(0, 1500);
+  if (!message) {
+    res.status(400).json({ error: "Message is required" });
+    return;
+  }
+  const history = Array.isArray(req.body?.history)
+    ? req.body.history.slice(-8).filter((m) => String(m?.content || "").trim())
+    : [];
+
+  let siteContext = "";
+  try {
+    siteContext = await buildAiSiteContext();
+  } catch {
+    siteContext = "";
+  }
+
+  const pilotLine = `Ты помогаешь пилоту: ${viewer.name || "Pilot"}${viewer.username ? ` (callsign ${viewer.username})` : ""}${viewer.rank ? `, звание: ${viewer.rank}` : ""}. Обращайся дружелюбно, по делу, на языке пользователя.`;
+  const appKnowledge =
+    "Это приложение NordwindHub — десктоп-компаньон пилота Nordwind Virtual (VNWS). Возможности: бронирование/просмотр рейсов, PIREP, статистика, баланс, паспорт, галерея скриншотов (авто-импорт папки сима, гео-метки на карте), живая карта рейсов, чат, радио (станции по регионам + YouTube), уведомления о начале/посадке рейса, Discord Rich Presence. Помогай по вопросам ВАК, как забронировать/завершить рейс (в Pegasus после заруливания), SimBrief, документы.";
+
+  const systemContent = `${AI_SYSTEM_PROMPT}\n\n${appKnowledge}\n\n${pilotLine}\n\n---\nАКТУАЛЬНЫЙ КОНТЕНТ САЙТА:\n${siteContext}`;
+
+  const messages = [
+    { role: "system", content: systemContent },
+    ...history.map((item) => ({
+      role: String(item?.role || "user") === "assistant" ? "assistant" : "user",
+      content: String(item?.content || "").slice(0, 800),
+    })),
+    { role: "user", content: message },
+  ];
+
+  try {
+    const response = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${XAI_API_KEY}` },
+      body: JSON.stringify({ model: "grok-3-mini", messages, max_tokens: 1200, temperature: 0.4 }),
+    });
+    if (!response.ok) {
+      res.status(502).json({ error: "AI service error" });
+      return;
+    }
+    const data = await response.json();
+    const answer = String(data?.choices?.[0]?.message?.content || "").trim();
+    res.json({ answer });
+  } catch (error) {
+    logger.warn("[assistant] request_failed", { error: String(error) });
+    res.status(502).json({ error: "Failed to reach AI service" });
+  }
+});
+
 // ── Stream token + settings storage ──────────────────────────────────────────
 
 let streamTokens = {};
@@ -29456,6 +31164,264 @@ app.put("/api/pilot/stream-settings", express.json(), (req, res) => {
   };
   saveStreamSettings();
   res.json({ ok: true, settings: streamSettings[pid] });
+});
+
+// ── Chatbot settings storage ──────────────────────────────────────────────────
+
+let chatbotSettings = {};
+try { chatbotSettings = JSON.parse(fs.readFileSync(CHATBOT_SETTINGS_FILE, "utf8")); } catch {}
+const saveChatbotSettings = () => {
+  try { fs.writeFileSync(CHATBOT_SETTINGS_FILE, JSON.stringify(chatbotSettings, null, 2)); } catch {}
+};
+
+// GET /api/pilot/chatbot-settings
+app.get("/api/pilot/chatbot-settings", (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+  const pid = String(pilotId);
+  const s = chatbotSettings[pid] || {};
+  res.json({
+    twitch: s.twitch || null,
+    youtube: s.youtube || null,
+    enabledPlatforms: s.enabledPlatforms || [],
+  });
+});
+
+// POST /api/pilot/chatbot-settings — save enabled platforms + Twitch channel name (manual entry)
+app.post("/api/pilot/chatbot-settings", express.json(), (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+  const pid = String(pilotId);
+  const { enabledPlatforms, twitchChannel } = req.body || {};
+  const current = chatbotSettings[pid] || {};
+
+  if (Array.isArray(enabledPlatforms)) {
+    current.enabledPlatforms = enabledPlatforms.filter((p) => ["twitch", "youtube"].includes(p));
+  }
+  if (typeof twitchChannel === "string") {
+    const ch = twitchChannel.trim().toLowerCase().replace(/^#/, "");
+    if (ch) {
+      current.twitch = { ...(current.twitch || {}), channel: ch };
+    }
+  }
+  chatbotSettings[pid] = current;
+  saveChatbotSettings();
+  res.json({ ok: true, settings: chatbotSettings[pid] });
+});
+
+// DELETE /api/pilot/chatbot-settings/:platform — disconnect a platform
+app.delete("/api/pilot/chatbot-settings/:platform", (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+  const pid = String(pilotId);
+  const platform = String(req.params.platform || "");
+  if (!["twitch", "youtube"].includes(platform)) {
+    res.status(400).json({ error: "Unknown platform" }); return;
+  }
+  if (chatbotSettings[pid]) {
+    delete chatbotSettings[pid][platform];
+    chatbotSettings[pid].enabledPlatforms = (chatbotSettings[pid].enabledPlatforms || [])
+      .filter((p) => p !== platform);
+    saveChatbotSettings();
+  }
+  res.json({ ok: true });
+});
+
+// GET /api/auth/twitch/login — start Twitch OAuth for channel verification
+app.get("/api/auth/twitch/login", (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+  if (!TWITCH_CLIENT_ID || !TWITCH_REDIRECT_URI) {
+    res.status(503).json({ error: "Twitch OAuth not configured" }); return;
+  }
+  const state = Buffer.from(JSON.stringify({ pilotId: String(pilotId), ts: Date.now() })).toString("base64url");
+  const params = new URLSearchParams({
+    client_id: TWITCH_CLIENT_ID,
+    redirect_uri: TWITCH_REDIRECT_URI,
+    response_type: "code",
+    scope: "user:read:email",
+    state,
+  });
+  res.redirect(`https://id.twitch.tv/oauth2/authorize?${params}`);
+});
+
+// GET /api/auth/twitch/callback
+app.get("/api/auth/twitch/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code || !state) {
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=twitch_error"); return;
+  }
+  let pilotId;
+  try {
+    const decoded = JSON.parse(Buffer.from(String(state), "base64url").toString("utf8"));
+    pilotId = String(decoded.pilotId || "");
+  } catch {
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=twitch_error"); return;
+  }
+  if (!pilotId) { res.redirect("/dashboard?tab=stream-widgets&chatbot=twitch_error"); return; }
+
+  try {
+    const tokenRes = await fetch("https://id.twitch.tv/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: TWITCH_CLIENT_ID,
+        client_secret: TWITCH_CLIENT_SECRET,
+        code: String(code),
+        grant_type: "authorization_code",
+        redirect_uri: TWITCH_REDIRECT_URI,
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) throw new Error("No access token");
+
+    const userRes = await fetch("https://api.twitch.tv/helix/users", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}`, "Client-Id": TWITCH_CLIENT_ID },
+    });
+    const userData = await userRes.json();
+    const twitchUser = userData?.data?.[0];
+    if (!twitchUser) throw new Error("No user data");
+
+    const current = chatbotSettings[pilotId] || {};
+    current.twitch = {
+      channel: twitchUser.login,
+      displayName: twitchUser.display_name,
+      userId: twitchUser.id,
+      connectedAt: new Date().toISOString(),
+    };
+    if (!Array.isArray(current.enabledPlatforms)) current.enabledPlatforms = [];
+    if (!current.enabledPlatforms.includes("twitch")) current.enabledPlatforms.push("twitch");
+    chatbotSettings[pilotId] = current;
+    saveChatbotSettings();
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=twitch_ok");
+  } catch {
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=twitch_error");
+  }
+});
+
+// GET /api/auth/youtube/login — start Google OAuth for YouTube channel verification
+app.get("/api/auth/youtube/login", (req, res) => {
+  const pilotId = resolveLoggedInPilotId(req);
+  if (!pilotId) { res.status(401).json({ error: "Authentication required" }); return; }
+  if (!GOOGLE_CLIENT_ID || !GOOGLE_REDIRECT_URI) {
+    res.status(503).json({ error: "YouTube OAuth not configured" }); return;
+  }
+  const state = Buffer.from(JSON.stringify({ pilotId: String(pilotId), ts: Date.now() })).toString("base64url");
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    redirect_uri: GOOGLE_REDIRECT_URI,
+    response_type: "code",
+    scope: "https://www.googleapis.com/auth/youtube.readonly",
+    access_type: "offline",
+    prompt: "consent",
+    state,
+  });
+  res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params}`);
+});
+
+// GET /api/auth/youtube/callback
+app.get("/api/auth/youtube/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+  if (error || !code || !state) {
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=youtube_error"); return;
+  }
+  let pilotId;
+  try {
+    const decoded = JSON.parse(Buffer.from(String(state), "base64url").toString("utf8"));
+    pilotId = String(decoded.pilotId || "");
+  } catch {
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=youtube_error"); return;
+  }
+  if (!pilotId) { res.redirect("/dashboard?tab=stream-widgets&chatbot=youtube_error"); return; }
+
+  try {
+    const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: GOOGLE_CLIENT_ID,
+        client_secret: GOOGLE_CLIENT_SECRET,
+        code: String(code),
+        grant_type: "authorization_code",
+        redirect_uri: GOOGLE_REDIRECT_URI,
+      }),
+    });
+    const tokenData = await tokenRes.json();
+    if (!tokenData.access_token) throw new Error("No access token");
+
+    const channelRes = await fetch(
+      "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true",
+      { headers: { Authorization: `Bearer ${tokenData.access_token}` } }
+    );
+    const channelData = await channelRes.json();
+    const channel = channelData?.items?.[0];
+    if (!channel) throw new Error("No channel data");
+
+    const current = chatbotSettings[pilotId] || {};
+    current.youtube = {
+      channelId: channel.id,
+      channelName: channel.snippet?.title || "",
+      accessToken: tokenData.access_token,
+      refreshToken: tokenData.refresh_token || null,
+      expiresAt: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : null,
+      connectedAt: new Date().toISOString(),
+    };
+    if (!Array.isArray(current.enabledPlatforms)) current.enabledPlatforms = [];
+    if (!current.enabledPlatforms.includes("youtube")) current.enabledPlatforms.push("youtube");
+    chatbotSettings[pilotId] = current;
+    saveChatbotSettings();
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=youtube_ok");
+  } catch {
+    res.redirect("/dashboard?tab=stream-widgets&chatbot=youtube_error");
+  }
+});
+
+// GET /api/bot/channels — for the bot process (API key auth), returns all active channels
+app.get("/api/bot/channels", (req, res) => {
+  const key = String(req.headers["x-bot-api-key"] || req.query.apiKey || "").trim();
+  if (!CHATBOT_API_KEY || key !== CHATBOT_API_KEY) {
+    res.status(401).json({ error: "Unauthorized" }); return;
+  }
+  const channels = [];
+  for (const [pilotId, s] of Object.entries(chatbotSettings)) {
+    const enabled = Array.isArray(s.enabledPlatforms) ? s.enabledPlatforms : [];
+    if (enabled.includes("twitch") && s.twitch?.channel) {
+      channels.push({ pilotId, platform: "twitch", channel: s.twitch.channel });
+    }
+    if (enabled.includes("youtube") && s.youtube?.channelId) {
+      channels.push({
+        pilotId,
+        platform: "youtube",
+        channelId: s.youtube.channelId,
+        accessToken: s.youtube.accessToken,
+        refreshToken: s.youtube.refreshToken,
+        expiresAt: s.youtube.expiresAt,
+      });
+    }
+  }
+  res.json({ channels });
+});
+
+// GET /api/bot/pilot-data?callsign=xxx — public pilot info for bot commands
+app.get("/api/bot/pilot-data", async (req, res) => {
+  const key = String(req.headers["x-bot-api-key"] || req.query.apiKey || "").trim();
+  if (!CHATBOT_API_KEY || key !== CHATBOT_API_KEY) {
+    res.status(401).json({ error: "Unauthorized" }); return;
+  }
+  const callsign = String(req.query.callsign || "").trim().toUpperCase();
+  if (!callsign) { res.status(400).json({ error: "callsign required" }); return; }
+
+  try {
+    const flightMap = await loadFlightMap();
+    const flights = Array.isArray(flightMap?.flights) ? flightMap.flights : [];
+    const flight = flights.find((f) =>
+      String(f.callsign || f.flightNumber || "").toUpperCase() === callsign ||
+      String(f.flightNumber || "").toUpperCase() === callsign
+    );
+    res.json({ flight: flight ? buildStreamFlightPayload(flight) : null });
+  } catch {
+    res.status(502).json({ error: "Failed to load data" });
+  }
 });
 
 app.get("/api/public/stream/flight", async (req, res) => {
@@ -30989,6 +32955,1379 @@ app.get("/api/admin/gates/custom-status", (req, res) => {
   res.json({ airports: summary });
 });
 
+// ─────────────────── Конфигурация десктоп-приложения ───────────────────
+// Управляется из админки сайта, читается приложением (фиче-флаги, ссылки, радио и т.п.).
+const buildDefaultAppConfig = () => ({
+  features: {
+    chat: true,
+    map: true,
+    radio: true,
+    screenshots: true,
+    notifications: true,
+    discordPresence: true,
+  },
+  links: {
+    site: "https://vnws.org",
+    discord: "https://discord.gg/MfTT8KU5yC",
+  },
+  discordAppId: "",
+  screenshotPinTtlMinutes: 30,
+  defaultTheme: "dark", // light | dark
+  defaultLanguage: "ru", // ru | en
+  radioStations: [
+    // Россия
+    { id: "record", name: "Radio Record", url: "https://radiorecord.hostingradio.ru/rr_main96.aacp", kind: "stream", region: "russia" },
+    { id: "energy-ru", name: "Energy (NRJ) Россия", url: "https://pub0302.101.ru:8443/stream/air/aac/64/99", kind: "stream", region: "russia" },
+    { id: "nashe", name: "Наше Радио", url: "https://nashe1.hostingradio.ru/nashe-128.mp3", kind: "stream", region: "russia" },
+    // Европа
+    { id: "somafm-groove", name: "SomaFM Groove Salad", url: "https://ice2.somafm.com/groovesalad-128-mp3", kind: "stream", region: "europe" },
+    { id: "bbc-r1", name: "BBC Radio 1", url: "http://stream.live.vc.bbcmedia.co.uk/bbc_radio_one", kind: "stream", region: "europe" },
+    // СНГ
+    { id: "europaplus-kz", name: "Europa Plus Казахстан", url: "https://stream.europaplus.kz/europaplus", kind: "stream", region: "cis" },
+  ],
+  announcement: { enabled: false, text: "", level: "info" }, // info | warning
+  minVersion: "",
+  // Модераторы чата — vAMSYS username или pilotId (строки). Управляются из админки.
+  chatModerators: [],
+  updatedAt: null,
+});
+
+let appConfigCache = null;
+const readAppConfig = () => {
+  if (appConfigCache) return appConfigCache;
+  const base = buildDefaultAppConfig();
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(APP_CONFIG_FILE)) {
+      fs.writeFileSync(APP_CONFIG_FILE, `${JSON.stringify(base, null, 2)}\n`, "utf8");
+      appConfigCache = base;
+      return appConfigCache;
+    }
+    const parsed = JSON.parse(fs.readFileSync(APP_CONFIG_FILE, "utf8"));
+    // глубокое слияние с дефолтом, чтобы новые поля подхватывались
+    appConfigCache = {
+      ...base,
+      ...(parsed && typeof parsed === "object" ? parsed : {}),
+      features: { ...base.features, ...(parsed?.features || {}) },
+      links: { ...base.links, ...(parsed?.links || {}) },
+      announcement: { ...base.announcement, ...(parsed?.announcement || {}) },
+      radioStations: Array.isArray(parsed?.radioStations) ? parsed.radioStations : base.radioStations,
+      chatModerators: Array.isArray(parsed?.chatModerators) ? parsed.chatModerators : base.chatModerators,
+    };
+  } catch (error) {
+    logger.warn("[app-config] read_failed", String(error));
+    appConfigCache = base;
+  }
+  return appConfigCache;
+};
+
+const persistAppConfig = (content) => {
+  try {
+    ensureAuthStoreDir();
+    const tmp = `${APP_CONFIG_FILE}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(content, null, 2)}\n`, "utf8");
+    fs.renameSync(tmp, APP_CONFIG_FILE);
+    appConfigCache = content;
+  } catch (error) {
+    logger.warn("[app-config] persist_failed", String(error));
+  }
+};
+
+// Публичный конфиг для приложения (без секретов — здесь их и нет).
+app.get("/api/app/config", (_req, res) => {
+  res.json(readAppConfig());
+});
+
+// ─────────────────────────── Достижения ───────────────────────────
+// Наш слой поверх статистики пилота. Многоуровневые ачивки (tiers) по метрикам.
+// Связка с бейджами: у тира можно указать badgeId. Хранилище фиксирует момент
+// разблокировки (unlockedAt) для дедупа Steam-style уведомлений.
+// Двуязычный каталог достижений (ru/en) — сид по умолчанию.
+// Боевой каталог хранится в data/achievements-catalog.json (редактируемая «база»);
+// при отсутствии файла он засевается отсюда. У каждой цели есть необязательное
+// поле rewardBadgeId для будущей привязки наградного бейджа (пока не выдаётся).
+// Клиент рендерит по языку; для обратной совместимости эндпоинт также отдаёт
+// title/label = русские.
+const DEFAULT_ACHIEVEMENTS_CATALOG = [
+  {
+    id: "hours",
+    metric: "hours",
+    categoryId: "progress",
+    titleRu: "Налёт",
+    titleEn: "Flight hours",
+    icon: "clock",
+    tiers: [
+      { id: "hours-10", threshold: 10, labelRu: "10 часов", labelEn: "10 hours" },
+      { id: "hours-50", threshold: 50, labelRu: "50 часов", labelEn: "50 hours" },
+      { id: "hours-100", threshold: 100, labelRu: "100 часов", labelEn: "100 hours" },
+      { id: "hours-250", threshold: 250, labelRu: "250 часов", labelEn: "250 hours" },
+      { id: "hours-500", threshold: 500, labelRu: "500 часов", labelEn: "500 hours" },
+      { id: "hours-1000", threshold: 1000, labelRu: "1000 часов", labelEn: "1000 hours" },
+    ],
+  },
+  {
+    id: "flights",
+    metric: "flights",
+    categoryId: "progress",
+    titleRu: "Рейсы",
+    titleEn: "Flights",
+    icon: "plane",
+    tiers: [
+      { id: "flights-1", threshold: 1, labelRu: "Первый рейс", labelEn: "First flight" },
+      { id: "flights-10", threshold: 10, labelRu: "10 рейсов", labelEn: "10 flights" },
+      { id: "flights-50", threshold: 50, labelRu: "50 рейсов", labelEn: "50 flights" },
+      { id: "flights-100", threshold: 100, labelRu: "100 рейсов", labelEn: "100 flights" },
+      { id: "flights-250", threshold: 250, labelRu: "250 рейсов", labelEn: "250 flights" },
+      { id: "flights-500", threshold: 500, labelRu: "500 рейсов", labelEn: "500 flights" },
+    ],
+  },
+  {
+    id: "badges",
+    metric: "badges",
+    categoryId: "collection",
+    titleRu: "Коллекционер бейджей",
+    titleEn: "Badge collector",
+    icon: "award",
+    tiers: [
+      { id: "badges-1", threshold: 1, labelRu: "Первый бейдж", labelEn: "First badge" },
+      { id: "badges-5", threshold: 5, labelRu: "5 бейджей", labelEn: "5 badges" },
+      { id: "badges-10", threshold: 10, labelRu: "10 бейджей", labelEn: "10 badges" },
+      { id: "badges-25", threshold: 25, labelRu: "25 бейджей", labelEn: "25 badges" },
+    ],
+  },
+  {
+    id: "screenshots",
+    metric: "screenshots",
+    categoryId: "collection",
+    titleRu: "Фотограф",
+    titleEn: "Photographer",
+    icon: "camera",
+    tiers: [
+      { id: "shots-1", threshold: 1, labelRu: "Первый скриншот", labelEn: "First screenshot" },
+      { id: "shots-10", threshold: 10, labelRu: "10 скриншотов", labelEn: "10 screenshots" },
+      { id: "shots-50", threshold: 50, labelRu: "50 скриншотов", labelEn: "50 screenshots" },
+    ],
+  },
+];
+
+// Категории достижений (сид по умолчанию). Хранятся в том же файле каталога.
+const DEFAULT_ACHIEVEMENT_CATEGORIES = [
+  { id: "progress", titleRu: "Прогресс", titleEn: "Progress", icon: "trophy", order: 1 },
+  { id: "collection", titleRu: "Коллекции", titleEn: "Collections", icon: "award", order: 2 },
+];
+
+// Редактируемый каталог достижений («база»): читается из файла, при отсутствии —
+// засевается из дефолтов. Модель: { categories:[...], achievements:[...] }.
+// У каждой цели есть необязательное поле rewardBadgeId (пока не выдаётся),
+// у каждого достижения — необязательный categoryId.
+let achievementsCatalogCache = null;
+
+const normalizeAchievementCategories = (raw) => {
+  const list = Array.isArray(raw) ? raw : [];
+  return list
+    .map((cat, i) => {
+      const id = String(cat?.id || "").trim();
+      if (!id) return null;
+      return {
+        id,
+        titleRu: String(cat?.titleRu || cat?.title || id).trim(),
+        titleEn: String(cat?.titleEn || cat?.title || id).trim(),
+        icon: String(cat?.icon || "trophy").trim(),
+        order: Number.isFinite(Number(cat?.order)) ? Number(cat.order) : i + 1,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.order - b.order);
+};
+
+const normalizeAchievementCatalog = (raw) => {
+  const list = Array.isArray(raw?.achievements) ? raw.achievements : Array.isArray(raw) ? raw : [];
+  const achievements = list
+    .map((ach) => {
+      const id = String(ach?.id || "").trim();
+      const metric = String(ach?.metric || ach?.id || "").trim();
+      if (!id || !metric) return null;
+      const titleRu = String(ach?.titleRu || ach?.title || id).trim();
+      const titleEn = String(ach?.titleEn || ach?.title || id).trim();
+      const icon = String(ach?.icon || "trophy").trim();
+      const categoryId = ach?.categoryId ? String(ach.categoryId).trim() : null;
+      // Цели: либо объекты {threshold,labelRu,labelEn,rewardBadgeId}, либо числа.
+      const rawTiers = Array.isArray(ach?.tiers) ? ach.tiers : Array.isArray(ach?.goals) ? ach.goals : [];
+      const tiers = rawTiers
+        .map((tier, i) => {
+          if (typeof tier === "number") {
+            return {
+              id: `${id}-${tier}`,
+              threshold: tier,
+              labelRu: `${tier}`,
+              labelEn: `${tier}`,
+              rewardBadgeId: null,
+            };
+          }
+          const threshold = Number(tier?.threshold);
+          if (!Number.isFinite(threshold)) return null;
+          return {
+            id: String(tier?.id || `${id}-${threshold}-${i}`).trim(),
+            threshold,
+            labelRu: String(tier?.labelRu || tier?.label || `${threshold}`).trim(),
+            labelEn: String(tier?.labelEn || tier?.label || `${threshold}`).trim(),
+            rewardBadgeId: tier?.rewardBadgeId ? String(tier.rewardBadgeId).trim() : null,
+          };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.threshold - b.threshold);
+      if (!tiers.length) return null;
+      return { id, metric, categoryId, titleRu, titleEn, icon, tiers };
+    })
+    .filter(Boolean);
+  // Категории: если ключ отсутствует вовсе — берём дефолтные; пустой массив уважаем.
+  const categories =
+    raw && typeof raw === "object" && !Array.isArray(raw) && "categories" in raw
+      ? normalizeAchievementCategories(raw.categories)
+      : normalizeAchievementCategories(DEFAULT_ACHIEVEMENT_CATEGORIES);
+  return { categories, achievements };
+};
+
+const writeAchievementsCatalogFile = (full) => {
+  ensureAuthStoreDir();
+  const tmp = `${ACHIEVEMENTS_CATALOG_FILE}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(full, null, 2)}\n`, "utf8");
+  fs.renameSync(tmp, ACHIEVEMENTS_CATALOG_FILE);
+};
+
+const readAchievementsCatalog = () => {
+  if (achievementsCatalogCache) return achievementsCatalogCache;
+  try {
+    ensureAuthStoreDir();
+    if (fs.existsSync(ACHIEVEMENTS_CATALOG_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(ACHIEVEMENTS_CATALOG_FILE, "utf8"));
+      const normalized = normalizeAchievementCatalog(parsed);
+      if (normalized.achievements.length) {
+        achievementsCatalogCache = normalized;
+        return achievementsCatalogCache;
+      }
+    }
+  } catch (e) {
+    logger.warn("[achievements] catalog_read_failed", String(e));
+  }
+  // Засев из дефолта.
+  achievementsCatalogCache = normalizeAchievementCatalog({
+    categories: DEFAULT_ACHIEVEMENT_CATEGORIES,
+    achievements: DEFAULT_ACHIEVEMENTS_CATALOG,
+  });
+  try {
+    writeAchievementsCatalogFile(achievementsCatalogCache);
+  } catch (e) {
+    logger.warn("[achievements] catalog_seed_failed", String(e));
+  }
+  return achievementsCatalogCache;
+};
+
+const persistAchievementsCatalog = (catalog) => {
+  const normalized = normalizeAchievementCatalog(catalog);
+  writeAchievementsCatalogFile(normalized);
+  achievementsCatalogCache = normalized;
+  return normalized;
+};
+
+// Метрики, которые умеет считать сервер (для выпадашки в редакторе).
+const ACHIEVEMENT_METRICS = [
+  { id: "hours", labelRu: "Налёт (часы)", labelEn: "Flight hours" },
+  { id: "flights", labelRu: "Рейсы", labelEn: "Flights" },
+  { id: "badges", labelRu: "Бейджи", labelEn: "Badges" },
+  { id: "screenshots", labelRu: "Скриншоты", labelEn: "Screenshots" },
+];
+const ACHIEVEMENT_ICONS = ["clock", "plane", "award", "camera", "trophy"];
+
+let achievementsCache = null;
+const readAchievementsStore = () => {
+  if (achievementsCache) return achievementsCache;
+  try {
+    ensureAuthStoreDir();
+    achievementsCache = fs.existsSync(ACHIEVEMENTS_FILE)
+      ? JSON.parse(fs.readFileSync(ACHIEVEMENTS_FILE, "utf8"))
+      : { pilots: {} };
+    if (!achievementsCache.pilots) achievementsCache.pilots = {};
+  } catch {
+    achievementsCache = { pilots: {} };
+  }
+  return achievementsCache;
+};
+const persistAchievements = () => {
+  try {
+    ensureAuthStoreDir();
+    const tmp = `${ACHIEVEMENTS_FILE}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify(achievementsCache || { pilots: {} }, null, 2)}\n`, "utf8");
+    fs.renameSync(tmp, ACHIEVEMENTS_FILE);
+  } catch (e) {
+    logger.warn("[achievements] persist_failed", String(e));
+  }
+};
+
+app.get("/api/pilot/achievements", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId && !context?.pilot?.username) {
+    res.status(401).json({ ok: false, error: "Authentication required" });
+    return;
+  }
+  const pilot = context.pilot || {};
+  const pilotKey = String(context.pilotId || pilot.username || "anon");
+
+  // метрики
+  let badgesCount = 0;
+  try {
+    const bs = await syncPilotBadges({ pilot, claimsCount: context.claimsCount }).catch(() => null);
+    badgesCount = Array.isArray(bs?.badges) ? bs.badges.filter((b) => b.awarded || b.earned || b.owned).length : 0;
+  } catch {
+    badgesCount = 0;
+  }
+  let screenshotsCount = 0;
+  try {
+    const viewer = await resolveSocialGalleryViewer(req);
+    if (viewer) {
+      const store = readSocialGalleryStore();
+      screenshotsCount = (Array.isArray(store?.media) ? store.media : []).filter((m) =>
+        socialGalleryEntryMatchesActor(m, viewer)
+      ).length;
+    }
+  } catch {
+    screenshotsCount = 0;
+  }
+  const metrics = {
+    hours: Math.floor(Number(pilot.hours || 0) || 0),
+    flights: Number(pilot.flights || 0) || 0,
+    badges: badgesCount,
+    screenshots: screenshotsCount,
+  };
+
+  // состояние разблокировок
+  const store = readAchievementsStore();
+  const unlocked = store.pilots[pilotKey] || (store.pilots[pilotKey] = {});
+  const now = new Date().toISOString();
+  const newlyUnlocked = [];
+
+  const catalog = readAchievementsCatalog();
+  const result = catalog.achievements.map((ach) => {
+    const value = Number(metrics[ach.metric] || 0);
+    const tiers = ach.tiers.map((tier) => {
+      const done = value >= tier.threshold;
+      if (done && !unlocked[tier.id]) {
+        unlocked[tier.id] = now;
+        newlyUnlocked.push({
+          achievement: ach.titleRu,
+          achievementRu: ach.titleRu,
+          achievementEn: ach.titleEn,
+          tier: tier.labelRu,
+          tierRu: tier.labelRu,
+          tierEn: tier.labelEn,
+          icon: ach.icon,
+          id: tier.id,
+        });
+      }
+      return {
+        id: tier.id,
+        threshold: tier.threshold,
+        // back-compat: label = русский
+        label: tier.labelRu,
+        labelRu: tier.labelRu,
+        labelEn: tier.labelEn,
+        rewardBadgeId: tier.rewardBadgeId || null,
+        unlocked: done,
+        unlockedAt: unlocked[tier.id] || null,
+      };
+    });
+    const current = tiers.filter((tier) => tier.unlocked).length;
+    const next = tiers.find((tier) => !tier.unlocked) || null;
+    return {
+      id: ach.id,
+      // back-compat: title/nextLabel = русские
+      title: ach.titleRu,
+      titleRu: ach.titleRu,
+      titleEn: ach.titleEn,
+      icon: ach.icon,
+      metric: ach.metric,
+      categoryId: ach.categoryId || null,
+      value,
+      tiersUnlocked: current,
+      tiersTotal: tiers.length,
+      nextThreshold: next?.threshold ?? null,
+      nextLabel: next?.label ?? null,
+      nextLabelRu: next?.labelRu ?? null,
+      nextLabelEn: next?.labelEn ?? null,
+      progressToNext: next ? Math.max(0, Math.min(100, Math.round((value / next.threshold) * 100))) : 100,
+      tiers,
+    };
+  });
+
+  if (newlyUnlocked.length) persistAchievements();
+  res.json({ ok: true, achievements: result, categories: catalog.categories, metrics, newlyUnlocked });
+});
+
+// Админ: каталог достижений (определения из data/achievements-catalog.json) +
+// справочники для редактора (метрики, иконки, доступные наградные бейджи).
+app.get("/api/admin/achievements/catalog", requireAdmin, async (_req, res) => {
+  let badges = [];
+  try {
+    const ops = await loadOperationsBadgesCatalog().catch(() => []);
+    const local = LOCAL_BADGES_CATALOG.map((b) => ({ id: b.id, title: b.title, source: "local" }));
+    const operations = (Array.isArray(ops) ? ops : []).map((b) => ({ id: b.id, title: b.title, source: "operations" }));
+    // Уникализируем по id (локальные приоритетнее).
+    const seen = new Set();
+    badges = [...local, ...operations].filter((b) => {
+      if (!b.id || seen.has(b.id)) return false;
+      seen.add(b.id);
+      return true;
+    });
+  } catch {
+    badges = LOCAL_BADGES_CATALOG.map((b) => ({ id: b.id, title: b.title, source: "local" }));
+  }
+  const catalog = readAchievementsCatalog();
+  res.json({
+    ok: true,
+    achievements: catalog.achievements,
+    categories: catalog.categories,
+    metrics: ACHIEVEMENT_METRICS,
+    icons: ACHIEVEMENT_ICONS,
+    badges,
+  });
+});
+
+// Админ: сохранить каталог достижений целиком (достижения + категории).
+app.put("/api/admin/achievements/catalog", requireAdmin, (req, res) => {
+  const list = Array.isArray(req.body?.achievements) ? req.body.achievements : null;
+  if (!list) {
+    res.status(400).json({ ok: false, error: "achievements array required" });
+    return;
+  }
+  const categories = Array.isArray(req.body?.categories) ? req.body.categories : [];
+  try {
+    const saved = persistAchievementsCatalog({ categories, achievements: list });
+    res.json({ ok: true, achievements: saved.achievements, categories: saved.categories });
+  } catch (e) {
+    logger.warn("[achievements] catalog_save_failed", String(e));
+    res.status(500).json({ ok: false, error: "save_failed" });
+  }
+});
+
+// Админ: сбросить каталог достижений к значениям по умолчанию.
+app.post("/api/admin/achievements/catalog/reset", requireAdmin, (_req, res) => {
+  try {
+    const saved = persistAchievementsCatalog({
+      categories: DEFAULT_ACHIEVEMENT_CATEGORIES,
+      achievements: DEFAULT_ACHIEVEMENTS_CATALOG,
+    });
+    res.json({ ok: true, achievements: saved.achievements, categories: saved.categories });
+  } catch (e) {
+    logger.warn("[achievements] catalog_reset_failed", String(e));
+    res.status(500).json({ ok: false, error: "reset_failed" });
+  }
+});
+
+// Changelog приложения (генерируется из git скриптом scripts/changelog-from-git.mjs).
+app.get("/api/app/changelog", (_req, res) => {
+  try {
+    if (!fs.existsSync(APP_CHANGELOG_FILE)) {
+      res.json({ entries: [] });
+      return;
+    }
+    const parsed = JSON.parse(fs.readFileSync(APP_CHANGELOG_FILE, "utf8"));
+    res.json({ entries: Array.isArray(parsed?.entries) ? parsed.entries : [] });
+  } catch {
+    res.json({ entries: [] });
+  }
+});
+
+// Лидерборд по суммарным лайкам скриншотов галереи.
+app.get("/api/pilot/gallery-leaderboard", (_req, res) => {
+  try {
+    const store = readSocialGalleryStore();
+    const picks = readSocialGalleryPicksStore();
+    const ranking = buildSocialGalleryPilotRanking(store, picks);
+    const leaders = ranking
+      .filter((r) => Number(r.likesReceived || 0) > 0)
+      .sort((a, b) => Number(b.likesReceived || 0) - Number(a.likesReceived || 0))
+      .slice(0, 20)
+      .map((r, i) => ({
+        rank: i + 1,
+        pilotId: r.pilotId,
+        username: r.username,
+        name: r.name,
+        likes: Number(r.likesReceived || 0),
+        uploads: Number(r.uploads || 0),
+        featured: Number(r.featured || 0),
+      }));
+    res.json({ ok: true, leaders });
+  } catch (e) {
+    res.json({ ok: false, leaders: [], error: String(e?.message || e) });
+  }
+});
+
+// Админка: чтение и сохранение конфига.
+app.get("/api/admin/app-config", requireAdmin, (_req, res) => {
+  res.json(readAppConfig());
+});
+
+app.put("/api/admin/app-config", requireAdmin, express.json({ limit: "256kb" }), (req, res) => {
+  const base = readAppConfig();
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const next = {
+    ...base,
+    ...body,
+    features: { ...base.features, ...(body.features || {}) },
+    links: { ...base.links, ...(body.links || {}) },
+    announcement: { ...base.announcement, ...(body.announcement || {}) },
+    radioStations: Array.isArray(body.radioStations) ? body.radioStations : base.radioStations,
+    chatModerators: Array.isArray(body.chatModerators)
+      ? body.chatModerators.map((m) => normalizeAdminText(m)).filter(Boolean).slice(0, 100)
+      : base.chatModerators,
+    screenshotPinTtlMinutes:
+      Number.isFinite(Number(body.screenshotPinTtlMinutes)) && Number(body.screenshotPinTtlMinutes) > 0
+        ? Math.min(240, Math.round(Number(body.screenshotPinTtlMinutes)))
+        : base.screenshotPinTtlMinutes,
+    defaultTheme: body.defaultTheme === "light" || body.defaultTheme === "dark" ? body.defaultTheme : base.defaultTheme,
+    defaultLanguage: body.defaultLanguage === "ru" || body.defaultLanguage === "en" ? body.defaultLanguage : base.defaultLanguage,
+    updatedAt: new Date().toISOString(),
+  };
+  persistAppConfig(next);
+  res.json({ ok: true, config: next });
+});
+
+// ─── Релизы десктоп-приложения (хранение билдов + раздача для скачивания) ───
+// Стор: data/app-releases.json — [{ version, notes, platform, fileName, size, contentType, uploadedAt, downloads }]
+// Бинарники: data/app-releases/<fileName>.
+const readAppReleases = () => {
+  try {
+    if (!fs.existsSync(APP_RELEASES_FILE)) return [];
+    const parsed = JSON.parse(fs.readFileSync(APP_RELEASES_FILE, "utf8"));
+    return Array.isArray(parsed?.releases) ? parsed.releases : Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+const writeAppReleases = (releases) => {
+  try {
+    ensureAuthStoreDir();
+    const tmp = `${APP_RELEASES_FILE}.tmp`;
+    fs.writeFileSync(tmp, `${JSON.stringify({ releases }, null, 2)}\n`, "utf8");
+    fs.renameSync(tmp, APP_RELEASES_FILE);
+  } catch (error) {
+    logger.warn("[app-releases] persist_failed", String(error));
+  }
+};
+const normalizeReleaseVersion = (v) =>
+  String(v || "").trim().replace(/^v/i, "").replace(/[^0-9A-Za-z.+_-]/g, "").slice(0, 40);
+// Сортировка версий: числовые сегменты по убыванию (свежая первой).
+const compareVersionsDesc = (a, b) => {
+  const pa = String(a || "").split(/[.+-]/).map((x) => Number(x) || 0);
+  const pb = String(b || "").split(/[.+-]/).map((x) => Number(x) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    if ((pb[i] || 0) !== (pa[i] || 0)) return (pb[i] || 0) - (pa[i] || 0);
+  }
+  return 0;
+};
+const publicReleaseView = (r) => ({
+  version: r.version,
+  notes: r.notes || "",
+  platform: r.platform || "windows",
+  size: r.size || 0,
+  uploadedAt: r.uploadedAt || null,
+  downloads: r.downloads || 0,
+  downloadUrl: `/api/app/download/${encodeURIComponent(r.version)}`,
+});
+
+// Публичный список релизов + последний.
+app.get("/api/app/releases", (_req, res) => {
+  const releases = readAppReleases().sort((a, b) => compareVersionsDesc(a.version, b.version));
+  res.json({
+    latest: releases[0] ? publicReleaseView(releases[0]) : null,
+    releases: releases.map(publicReleaseView),
+  });
+});
+
+// Публичное скачивание: latest или конкретная версия. Инкрементит счётчик загрузок.
+const streamReleaseDownload = (res, release) => {
+  const filePath = path.join(APP_RELEASES_DIR, release.fileName);
+  if (!filePath.startsWith(APP_RELEASES_DIR) || !fs.existsSync(filePath)) {
+    res.status(404).json({ error: "Release file not found" });
+    return;
+  }
+  // Инкремент счётчика (best-effort).
+  try {
+    const releases = readAppReleases();
+    const match = releases.find((r) => r.version === release.version);
+    if (match) {
+      match.downloads = (match.downloads || 0) + 1;
+      writeAppReleases(releases);
+    }
+  } catch {
+    /* ignore */
+  }
+  const downloadName = `NordwindHub-${release.version}-${release.platform || "windows"}${path.extname(release.fileName)}`;
+  res.download(filePath, downloadName);
+};
+
+app.get("/api/app/download/latest", (_req, res) => {
+  const releases = readAppReleases().sort((a, b) => compareVersionsDesc(a.version, b.version));
+  if (!releases[0]) return res.status(404).json({ error: "No releases available" });
+  streamReleaseDownload(res, releases[0]);
+});
+
+app.get("/api/app/download/:version", (req, res) => {
+  const version = normalizeReleaseVersion(req.params.version);
+  const release = readAppReleases().find((r) => r.version === version);
+  if (!release) return res.status(404).json({ error: "Release not found" });
+  streamReleaseDownload(res, release);
+});
+
+// Админ: список релизов (с именами файлов).
+app.get("/api/admin/app-releases", requireAdmin, (_req, res) => {
+  res.json({ releases: readAppReleases().sort((a, b) => compareVersionsDesc(a.version, b.version)) });
+});
+
+// Админ: загрузка нового билда. Тело — бинарник (raw); метаданные в query (?version=&platform=&ext=) + заголовок X-Release-Notes.
+const appReleaseUploadBody = express.raw({ type: () => true, limit: "400mb" });
+app.post("/api/admin/app-releases", requireAdmin, appReleaseUploadBody, (req, res) => {
+  try {
+    const version = normalizeReleaseVersion(req.query?.version);
+    if (!version) return res.status(400).json({ error: "Query param ?version= required" });
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) return res.status(400).json({ error: "Empty upload body" });
+
+    const platform = String(req.query?.platform || "windows").trim().toLowerCase().slice(0, 20) || "windows";
+    const extRaw = String(req.query?.ext || "exe").trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 8) || "exe";
+    let notes = String(req.headers["x-release-notes"] || req.query?.notes || "");
+    try { notes = decodeURIComponent(notes); } catch { /* keep raw */ }
+    notes = notes.slice(0, 4000);
+
+    if (!fs.existsSync(APP_RELEASES_DIR)) fs.mkdirSync(APP_RELEASES_DIR, { recursive: true });
+    const fileName = `nordwindhub-${version}-${platform}.${extRaw}`;
+    fs.writeFileSync(path.join(APP_RELEASES_DIR, fileName), buffer);
+
+    const releases = readAppReleases();
+    const existingIdx = releases.findIndex((r) => r.version === version);
+    // Если перезаписываем версию другим файлом — удалим старый бинарник.
+    if (existingIdx >= 0) {
+      const old = releases[existingIdx];
+      if (old.fileName && old.fileName !== fileName) {
+        try { fs.unlinkSync(path.join(APP_RELEASES_DIR, old.fileName)); } catch { /* ignore */ }
+      }
+    }
+    const entry = {
+      version,
+      notes,
+      platform,
+      fileName,
+      size: buffer.length,
+      contentType: String(req.headers["content-type"] || "application/octet-stream"),
+      uploadedAt: new Date().toISOString(),
+      downloads: existingIdx >= 0 ? releases[existingIdx].downloads || 0 : 0,
+    };
+    if (existingIdx >= 0) releases[existingIdx] = entry;
+    else releases.push(entry);
+    writeAppReleases(releases);
+    res.json({ ok: true, release: entry });
+  } catch (error) {
+    logger.warn("[app-releases] upload_failed", String(error));
+    res.status(400).json({ error: String(error?.message || error) });
+  }
+});
+
+// Админ: удалить релиз (метаданные + бинарник).
+app.delete("/api/admin/app-releases/:version", requireAdmin, (req, res) => {
+  const version = normalizeReleaseVersion(req.params.version);
+  const releases = readAppReleases();
+  const idx = releases.findIndex((r) => r.version === version);
+  if (idx < 0) return res.status(404).json({ error: "Release not found" });
+  const [removed] = releases.splice(idx, 1);
+  if (removed?.fileName) {
+    try { fs.unlinkSync(path.join(APP_RELEASES_DIR, removed.fileName)); } catch { /* ignore */ }
+  }
+  writeAppReleases(releases);
+  res.json({ ok: true });
+});
+
+// Админка: репорты чата.
+// ─── Чат: комнаты ───
+// Список доступных пользователю комнат (public + те, где он owner/member/invited).
+app.get("/api/pilot/chat/rooms", async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) return res.status(401).json({ error: "Authentication required" });
+  const store = readChatStore();
+  const isMod = isChatModerator(viewer);
+  const key = chatActorKey(viewer);
+  const rooms = Object.values(store.roomMeta || {})
+    .filter((m) => canAccessRoom(store, m.id, viewer, isMod))
+    .map((m) => {
+      if (m.type === "dm") {
+        const peer = (m.members || []).map((x) => String(x).toLowerCase()).find((x) => x !== key) || "";
+        return {
+          id: m.id,
+          name: (m.participants && m.participants[peer]) || peer || "DM",
+          type: "dm",
+          dm: true,
+          peer,
+          system: false,
+          isOwner: false,
+          memberCount: (m.members || []).length,
+        };
+      }
+      return {
+        id: m.id,
+        name: m.name,
+        type: m.type,
+        system: Boolean(m.system),
+        isOwner: String(m.ownerId || "").toLowerCase() === key,
+        memberCount: (m.members || []).length,
+      };
+    })
+    .sort((a, b) => (a.system ? -1 : b.system ? 1 : a.name.localeCompare(b.name)));
+  res.json({ ok: true, rooms, emojis: store.customEmojis || [] });
+});
+
+// Открыть/создать личную переписку (ЛС) с пользователем по username.
+app.post("/api/pilot/chat/dm", express.json({ limit: "8kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) return res.status(401).json({ error: "Authentication required" });
+  const key = chatActorKey(viewer);
+  const target = String(req.body?.username || "").trim().toLowerCase().replace(/^@+/, "");
+  if (!key) return res.status(400).json({ error: "no actor key" });
+  if (!target || !/^[a-z0-9_.-]{1,40}$/.test(target)) return res.status(400).json({ error: "invalid username" });
+  if (target === key) return res.status(400).json({ error: "cannot DM yourself" });
+
+  const store = readChatStore();
+  const id = dmRoomId(key, target);
+  const existing = store.roomMeta[id];
+  if (existing) {
+    // Обновим отображаемое имя инициатора (вдруг изменилось).
+    existing.participants = { ...(existing.participants || {}), [key]: viewer.name || viewer.username || key };
+    persistChatStore();
+  } else {
+    store.roomMeta[id] = {
+      id,
+      type: "dm",
+      members: [key, target],
+      participants: { [key]: viewer.name || viewer.username || key },
+      createdAt: new Date().toISOString(),
+    };
+    persistChatStore();
+  }
+  const peerName = (store.roomMeta[id].participants && store.roomMeta[id].participants[target]) || target;
+  res.json({ ok: true, room: { id, type: "dm", dm: true, peer: target, name: peerName } });
+});
+
+// Создать комнату.
+app.post("/api/pilot/chat/rooms", express.json({ limit: "16kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) return res.status(401).json({ error: "Authentication required" });
+  const name = normalizeAdminText(req.body?.name || "").slice(0, 60);
+  if (!name) return res.status(400).json({ error: "name required" });
+  const type = req.body?.type === "private" ? "private" : "public";
+  const store = readChatStore();
+  const id = `room-${randomUUID()}`;
+  const key = chatActorKey(viewer);
+  store.roomMeta[id] = {
+    id,
+    name,
+    type,
+    ownerId: key,
+    ownerName: viewer.name || viewer.username || "Pilot",
+    members: [key],
+    invites: [],
+    createdAt: new Date().toISOString(),
+  };
+  persistChatStore();
+  res.json({ ok: true, room: store.roomMeta[id] });
+});
+
+// Пригласить/добавить участника (owner или модератор) — по username.
+app.post("/api/pilot/chat/rooms/:id/invite", express.json({ limit: "8kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) return res.status(401).json({ error: "Authentication required" });
+  const store = readChatStore();
+  const meta = store.roomMeta?.[req.params.id];
+  if (!meta) return res.status(404).json({ error: "not found" });
+  const key = chatActorKey(viewer);
+  if (String(meta.ownerId || "").toLowerCase() !== key && !isChatModerator(viewer)) {
+    return res.status(403).json({ error: "owner only" });
+  }
+  const target = String(req.body?.username || "").trim().toLowerCase();
+  if (!target) return res.status(400).json({ error: "username required" });
+  if (!(meta.invites || []).includes(target) && !(meta.members || []).includes(target)) {
+    meta.invites = [...(meta.invites || []), target];
+    persistChatStore();
+  }
+  res.json({ ok: true });
+});
+
+// Удалить комнату (owner/модератор; кроме системной).
+app.delete("/api/pilot/chat/rooms/:id", async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) return res.status(401).json({ error: "Authentication required" });
+  const store = readChatStore();
+  const meta = store.roomMeta?.[req.params.id];
+  if (!meta || meta.system) return res.status(400).json({ error: "cannot delete" });
+  const key = chatActorKey(viewer);
+  if (String(meta.ownerId || "").toLowerCase() !== key && !isChatModerator(viewer)) {
+    return res.status(403).json({ error: "owner only" });
+  }
+  delete store.roomMeta[req.params.id];
+  delete store.rooms[req.params.id];
+  persistChatStore();
+  res.json({ ok: true });
+});
+
+// ─── Чат: кастомные эмодзи (загрузка — только админ) ───
+app.get("/api/pilot/chat/emojis", async (_req, res) => {
+  const store = readChatStore();
+  res.json({ emojis: store.customEmojis || [] });
+});
+
+app.post("/api/admin/chat/emojis", requireAdmin, express.json({ limit: "2mb" }), (req, res) => {
+  const name = String(req.body?.name || "").trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
+  const url = String(req.body?.url || "").trim(); // data URL или http(s)
+  if (!name || !url) return res.status(400).json({ error: "name and url required" });
+  const store = readChatStore();
+  store.customEmojis = [
+    { name, url },
+    ...(store.customEmojis || []).filter((e) => e.name !== name),
+  ].slice(0, 200);
+  persistChatStore();
+  res.json({ ok: true, emojis: store.customEmojis });
+});
+
+app.delete("/api/admin/chat/emojis/:name", requireAdmin, (req, res) => {
+  const store = readChatStore();
+  store.customEmojis = (store.customEmojis || []).filter((e) => e.name !== String(req.params.name).toLowerCase());
+  persistChatStore();
+  res.json({ ok: true, emojis: store.customEmojis });
+});
+
+app.get("/api/admin/chat-reports", requireAdmin, (_req, res) => {
+  const store = readChatStore();
+  res.json({ reports: Array.isArray(store.reports) ? store.reports : [] });
+});
+
+// Резолв репорта (+ опционально удалить сообщение).
+app.post("/api/admin/chat-reports/:id/resolve", requireAdmin, express.json({ limit: "64kb" }), (req, res) => {
+  const store = readChatStore();
+  const list = Array.isArray(store.reports) ? store.reports : [];
+  const report = list.find((r) => String(r?.id || "") === String(req.params.id));
+  if (!report) {
+    res.status(404).json({ error: "Report not found" });
+    return;
+  }
+  report.resolved = true;
+  if (req.body?.deleteMessage && report.room && report.messageId) {
+    if (removeChatMessage(report.room, report.messageId)) {
+      broadcastChat(report.room, { type: "delete", id: report.messageId });
+    }
+  }
+  persistChatStore();
+  res.json({ ok: true, report });
+});
+
+// ─────────────────── Гео-метки скриншотов (Volanta-style) ───────────────────
+// Эфемерные точки на карте: пилот залил скриншот в полёте → точка с его позицией,
+// именем, превью и ссылкой на фулл. Живут в памяти, TTL 30 минут.
+const screenshotPins = new Map(); // id -> pin
+
+const screenshotPinTtlMs = () => {
+  const min = Number(readAppConfig().screenshotPinTtlMinutes) || 30;
+  return Math.max(1, min) * 60 * 1000;
+};
+
+const pruneScreenshotPins = () => {
+  const now = Date.now();
+  const ttl = screenshotPinTtlMs();
+  for (const [id, pin] of screenshotPins) {
+    if (now - pin.ts >= ttl) screenshotPins.delete(id);
+  }
+};
+
+// Создать метку. Вызывается после успешной загрузки in-flight скриншота.
+app.post("/api/pilot/screenshot-pins", express.json({ limit: "256kb" }), async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  const lat = Number(req.body?.lat);
+  const lon = Number(req.body?.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    res.status(400).json({ error: "lat/lon required" });
+    return;
+  }
+  pruneScreenshotPins();
+  const id = `pin-${randomUUID()}`;
+  const pin = {
+    id,
+    ts: Date.now(),
+    lat,
+    lon,
+    altitude: Number.isFinite(Number(req.body?.altitude)) ? Number(req.body.altitude) : null,
+    mediaId: normalizeAdminText(req.body?.mediaId || "") || null,
+    assetUrl: normalizeAdminText(req.body?.assetUrl || "") || null,
+    title: normalizeAdminText(req.body?.title || "") || null,
+    callsign: normalizeAdminText(req.body?.callsign || "") || null,
+    pilotId: viewer.pilotId || null,
+    pilotName: viewer.name || "Pilot",
+  };
+  screenshotPins.set(id, pin);
+  res.json({ ok: true, pin });
+});
+
+// Активные метки для карты.
+app.get("/api/pilot/screenshot-pins", async (req, res) => {
+  const viewer = await resolveSocialGalleryViewer(req);
+  if (!viewer) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  pruneScreenshotPins();
+  const now = Date.now();
+  const pins = Array.from(screenshotPins.values())
+    .sort((a, b) => b.ts - a.ts)
+    .map((p) => ({ ...p, ageMs: now - p.ts }));
+  res.json({ ok: true, pins });
+});
+
+// Лёгкий health-чек для статус-бара приложения: бэкенд жив (раз ответили),
+// vAMSYS API — по кэшированному статусу (getAccessToken внутри loadSystemStatus, кэш 30с).
+app.get("/api/health", async (_req, res) => {
+  let vamsys = false;
+  try {
+    const status = await loadSystemStatus();
+    vamsys = Array.isArray(status?.services)
+      && status.services.some((s) => s.id === "vamsys" && s.state === "online");
+  } catch {
+    vamsys = false;
+  }
+  res.json({ ok: true, vamsys, time: new Date().toISOString() });
+});
+
+// ───────────────────────── Chat (WebSocket) ─────────────────────────
+// Лёгкий чат поверх существующего HTTP-сервера. Комнаты: "general" и "flight:<CALLSIGN>".
+// Аутентификация — та же сессия пилота (cookie), что и у /api/pilot/*. История в data/chat-store.json.
+const CHAT_MAX_HISTORY = 200; // сообщений на комнату
+const CHAT_MAX_TEXT = 2000; // символов на сообщение
+let chatStoreCache = null;
+
+// rooms: { [roomId]: message[] } — история.
+// roomMeta: { [roomId]: { id, name, type:"public"|"private", ownerId, ownerName, members:[key], invites:[key], createdAt } }
+// "general" — системная открытая комната по умолчанию.
+const buildDefaultChatStore = () => ({
+  rooms: {},
+  roomMeta: {
+    general: { id: "general", name: "Общий", type: "public", ownerId: null, ownerName: "Система", members: [], invites: [], createdAt: null, system: true },
+  },
+  customEmojis: [], // [{ name, url }]
+});
+
+const readChatStore = () => {
+  if (chatStoreCache) return chatStoreCache;
+  const base = buildDefaultChatStore();
+  try {
+    ensureAuthStoreDir();
+    if (!fs.existsSync(CHAT_STORE_FILE)) {
+      fs.writeFileSync(CHAT_STORE_FILE, `${JSON.stringify(base, null, 2)}\n`, "utf8");
+      chatStoreCache = base;
+      return chatStoreCache;
+    }
+    const parsed = JSON.parse(fs.readFileSync(CHAT_STORE_FILE, "utf8"));
+    chatStoreCache = {
+      rooms: parsed && typeof parsed.rooms === "object" && parsed.rooms ? parsed.rooms : {},
+      roomMeta:
+        parsed && typeof parsed.roomMeta === "object" && parsed.roomMeta
+          ? { ...base.roomMeta, ...parsed.roomMeta }
+          : base.roomMeta,
+      customEmojis: Array.isArray(parsed?.customEmojis) ? parsed.customEmojis : [],
+    };
+  } catch (error) {
+    logger.warn("[chat] read_failed", String(error));
+    chatStoreCache = base;
+  }
+  return chatStoreCache;
+};
+
+// Ключ участника (username или pilotId).
+const chatActorKey = (viewer) => String(viewer?.username || viewer?.pilotId || "").trim().toLowerCase();
+
+// Доступ к комнате: public — всем; private — owner/member/invited (или модератор).
+// dm — только участникам (модератор НЕ имеет доступа к личной переписке).
+const canAccessRoom = (store, roomId, viewer, isMod) => {
+  const meta = store.roomMeta?.[roomId];
+  if (!meta) return false;
+  const key = chatActorKey(viewer);
+  if (meta.type === "dm") {
+    return (meta.members || []).map((m) => String(m).toLowerCase()).includes(key);
+  }
+  if (meta.type === "public" || isMod) return true;
+  return (
+    String(meta.ownerId || "").toLowerCase() === key ||
+    (meta.members || []).map((m) => String(m).toLowerCase()).includes(key) ||
+    (meta.invites || []).map((m) => String(m).toLowerCase()).includes(key)
+  );
+};
+
+// Детерминированный id личной переписки между двумя участниками (одинаковый у обоих).
+const dmRoomId = (a, b) => `dm-${[String(a).toLowerCase(), String(b).toLowerCase()].sort().join("__")}`;
+
+let chatPersistTimer = null;
+const persistChatStore = () => {
+  if (chatPersistTimer) return;
+  chatPersistTimer = setTimeout(() => {
+    chatPersistTimer = null;
+    try {
+      ensureAuthStoreDir();
+      const tmp = `${CHAT_STORE_FILE}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify(chatStoreCache || buildDefaultChatStore(), null, 2)}\n`, "utf8");
+      fs.renameSync(tmp, CHAT_STORE_FILE);
+    } catch (error) {
+      logger.warn("[chat] persist_failed", String(error));
+    }
+  }, 1500);
+};
+
+// Детект @упоминаний в тексте: возвращает массив нормализованных ключей (lowercase, без @).
+const extractChatMentions = (text) => {
+  const out = new Set();
+  const re = /(?:^|[\s(<])@([A-Za-z0-9_.-]{2,40})/g;
+  let m;
+  while ((m = re.exec(String(text || ""))) !== null) {
+    out.add(m[1].trim().toLowerCase());
+  }
+  return Array.from(out);
+};
+
+// roomId: "general", "room-<uuid>" или "dm-<a>__<b>". Валидируем формат; существование — отдельно.
+const normalizeChatRoom = (value) => {
+  const raw = String(value || "general").trim();
+  if (raw === "general") return "general";
+  if (/^room-[A-Za-z0-9-]{6,40}$/.test(raw)) return raw;
+  if (/^dm-[a-z0-9_.-]{1,40}__[a-z0-9_.-]{1,40}$/.test(raw)) return raw;
+  return null;
+};
+
+const getChatHistory = (room) => {
+  const store = readChatStore();
+  return Array.isArray(store.rooms[room]) ? store.rooms[room] : [];
+};
+
+const appendChatMessage = (room, message) => {
+  const store = readChatStore();
+  const list = Array.isArray(store.rooms[room]) ? store.rooms[room] : [];
+  list.push(message);
+  if (list.length > CHAT_MAX_HISTORY) list.splice(0, list.length - CHAT_MAX_HISTORY);
+  store.rooms[room] = list;
+  persistChatStore();
+};
+
+const removeChatMessage = (room, messageId) => {
+  const store = readChatStore();
+  const list = Array.isArray(store.rooms[room]) ? store.rooms[room] : [];
+  const next = list.filter((m) => String(m?.id || "") !== String(messageId));
+  if (next.length !== list.length) {
+    store.rooms[room] = next;
+    persistChatStore();
+    return true;
+  }
+  return false;
+};
+
+// Эмодзи (юникод или :name:) на сообщении. Валидируем, чтобы не хранить мусор.
+const normalizeChatReaction = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^:[a-z0-9_]{1,40}:$/.test(raw)) return raw; // кастомный
+  if (raw.length <= 12) return raw; // юникод-эмодзи (с модификаторами)
+  return null;
+};
+
+// Переключить реакцию пользователя на сообщении. Возвращает обновлённую карту реакций или null.
+const toggleChatReaction = (room, messageId, emoji, actorKey) => {
+  const reaction = normalizeChatReaction(emoji);
+  const key = String(actorKey || "").trim().toLowerCase();
+  if (!reaction || !key) return null;
+  const store = readChatStore();
+  const msg = (store.rooms[room] || []).find((m) => String(m?.id || "") === String(messageId));
+  if (!msg) return null;
+  const reactions = msg.reactions && typeof msg.reactions === "object" ? msg.reactions : {};
+  const list = Array.isArray(reactions[reaction]) ? reactions[reaction] : [];
+  const idx = list.indexOf(key);
+  if (idx >= 0) list.splice(idx, 1);
+  else list.push(key);
+  if (list.length > 0) reactions[reaction] = list;
+  else delete reactions[reaction];
+  msg.reactions = reactions;
+  persistChatStore();
+  return reactions;
+};
+
+// Репорты сообщений чата. Хранятся в chat-store (store.reports), кап 200.
+const addChatReport = (report) => {
+  const store = readChatStore();
+  const list = Array.isArray(store.reports) ? store.reports : [];
+  list.unshift(report);
+  if (list.length > 200) list.length = 200;
+  store.reports = list;
+  persistChatStore();
+};
+
+const sendChatReportAlert = async (report) => {
+  const room = report.room === "general" ? "Общий" : report.room;
+  const text =
+    `🚩 Репорт в чате\n` +
+    `Комната: ${room}\n` +
+    `Автор сообщения: ${report.targetName || "—"}${report.targetUsername ? ` (@${report.targetUsername})` : ""}\n` +
+    `Пожаловался: ${report.reporterName || "—"}\n` +
+    `Причина: ${report.reason || "—"}\n` +
+    `Текст: ${String(report.text || "").slice(0, 500)}`;
+  try {
+    await sendDiscordBotNotification({
+      eventKey: "chatReport",
+      title: "🚩 Репорт в чате",
+      description: text,
+      category: "moderation",
+      color: 0xe31e24,
+      force: true,
+    });
+  } catch (e) {
+    logger.warn("[chat] discord_report_alert_failed", String(e));
+  }
+  try {
+    await sendTelegramAdminNotification({ text, force: true });
+  } catch (e) {
+    logger.warn("[chat] telegram_report_alert_failed", String(e));
+  }
+};
+
+// Модератор чата: админ ИЛИ в списке chatModerators (по username/pilotId).
+const isChatModerator = (viewer) => {
+  if (!viewer) return false;
+  const mods = (readAppConfig().chatModerators || []).map((m) => String(m).trim().toLowerCase());
+  if (mods.length === 0) return false;
+  const keys = [String(viewer.username || "").trim().toLowerCase(), String(viewer.pilotId || "").trim().toLowerCase()].filter(Boolean);
+  return keys.some((k) => mods.includes(k));
+};
+
+// roomId -> Set<ws>
+const chatRooms = new Map();
+const joinChatRoom = (room, ws) => {
+  if (!chatRooms.has(room)) chatRooms.set(room, new Set());
+  chatRooms.get(room).add(ws);
+};
+const leaveChatRoom = (room, ws) => {
+  const set = chatRooms.get(room);
+  if (set) {
+    set.delete(ws);
+    if (set.size === 0) chatRooms.delete(room);
+  }
+};
+const broadcastChat = (room, payload) => {
+  const set = chatRooms.get(room);
+  if (!set) return;
+  const data = JSON.stringify(payload);
+  for (const client of set) {
+    if (client.readyState === 1) {
+      try {
+        client.send(data);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+};
+
+const attachChatWebSocketServer = (httpServer) => {
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", (request, socket, head) => {
+    let pathname = "";
+    try {
+      pathname = new URL(request.url, "http://localhost").pathname;
+    } catch {
+      pathname = "";
+    }
+    if (pathname !== "/api/chat/ws") {
+      return; // не наш апгрейд — оставляем другим обработчикам
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  });
+
+  wss.on("connection", async (ws, request) => {
+    // Десктоп-приложение шлёт app-токен в query (?session=), т.к. WebSocket не задаёт заголовки.
+    try {
+      const q = new URL(request.url, "http://localhost").searchParams;
+      const token = String(q.get("session") || "").trim();
+      if (token) {
+        const entry = resolveAppToken(token);
+        if (entry) {
+          const cookieName = entry.kind === "discord" ? DISCORD_SESSION_COOKIE : VAMSYS_SESSION_COOKIE;
+          const existing = request.headers.cookie ? `${request.headers.cookie}; ` : "";
+          request.headers.cookie = `${existing}${cookieName}=${entry.sessionId}`;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    let viewer = null;
+    try {
+      viewer = await resolveSocialGalleryViewer({ headers: request.headers });
+    } catch {
+      viewer = null;
+    }
+    if (!viewer || (!viewer.pilotId && !viewer.username)) {
+      try {
+        ws.send(JSON.stringify({ type: "error", error: "auth_required" }));
+      } catch {
+        /* ignore */
+      }
+      ws.close(4401, "auth required");
+      return;
+    }
+
+    let room = null;
+    try {
+      room = normalizeChatRoom(new URL(request.url, "http://localhost").searchParams.get("room"));
+    } catch {
+      room = null;
+    }
+    if (!room) {
+      try {
+        ws.send(JSON.stringify({ type: "error", error: "invalid_room" }));
+      } catch {
+        /* ignore */
+      }
+      ws.close(4400, "invalid room");
+      return;
+    }
+
+    const moderator = isChatModerator(viewer);
+
+    // Доступ к комнате: public — всем; private — owner/member/invited (или модератор).
+    if (!canAccessRoom(readChatStore(), room, viewer, moderator)) {
+      try {
+        ws.send(JSON.stringify({ type: "error", error: "forbidden_room" }));
+      } catch {
+        /* ignore */
+      }
+      ws.close(4403, "forbidden room");
+      return;
+    }
+
+    joinChatRoom(room, ws);
+    try {
+      ws.send(JSON.stringify({ type: "history", room, messages: getChatHistory(room), isModerator: moderator }));
+    } catch {
+      /* ignore */
+    }
+
+    ws.on("message", (raw) => {
+      let parsed = null;
+      try {
+        parsed = JSON.parse(String(raw));
+      } catch {
+        return;
+      }
+      if (!parsed) return;
+
+      // Удаление сообщения — только модератор/админ.
+      if (parsed.type === "delete") {
+        if (!moderator) return;
+        const messageId = String(parsed.id || "").trim();
+        if (messageId && removeChatMessage(room, messageId)) {
+          broadcastChat(room, { type: "delete", id: messageId });
+        }
+        return;
+      }
+
+      // Реакция на сообщение (эмодзи) — переключение для любого участника комнаты.
+      if (parsed.type === "react") {
+        const messageId = String(parsed.id || "").trim();
+        const reactions = toggleChatReaction(room, messageId, parsed.emoji, chatActorKey(viewer));
+        if (reactions) {
+          broadcastChat(room, { type: "reaction", id: messageId, reactions });
+        }
+        return;
+      }
+
+      // Репорт сообщения — любой авторизованный пользователь.
+      if (parsed.type === "report") {
+        const messageId = String(parsed.id || "").trim();
+        if (!messageId) return;
+        const target = getChatHistory(room).find((m) => String(m?.id || "") === messageId);
+        const report = {
+          id: randomUUID(),
+          room,
+          messageId,
+          reason: String(parsed.reason || "").trim().slice(0, 300) || "—",
+          text: target?.text || "",
+          targetName: target?.name || null,
+          targetUsername: target?.username || null,
+          targetPilotId: target?.pilotId || null,
+          reporterName: viewer.name || "Pilot",
+          reporterUsername: viewer.username || null,
+          ts: new Date().toISOString(),
+          resolved: false,
+        };
+        addChatReport(report);
+        void sendChatReportAlert(report);
+        try {
+          ws.send(JSON.stringify({ type: "reported", id: messageId }));
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+
+      if (parsed.type !== "message") return;
+      const text = String(parsed.text || "").trim().slice(0, CHAT_MAX_TEXT);
+      if (!text) return;
+      const message = {
+        id: randomUUID(),
+        room,
+        pilotId: viewer.pilotId || null,
+        username: viewer.username || null,
+        name: viewer.name || "Pilot",
+        rank: viewer.rank || null,
+        avatar: viewer.avatar || null,
+        text,
+        mentions: extractChatMentions(text),
+        ts: new Date().toISOString(),
+      };
+      appendChatMessage(room, message);
+      // В ЛС фиксируем отображаемое имя автора, чтобы собеседник видел имя, а не username.
+      if (room.startsWith("dm-")) {
+        const store = readChatStore();
+        const meta = store.roomMeta?.[room];
+        if (meta) {
+          const k = chatActorKey(viewer);
+          meta.participants = { ...(meta.participants || {}), [k]: viewer.name || viewer.username || k };
+          persistChatStore();
+        }
+      }
+      broadcastChat(room, { type: "message", message });
+    });
+
+    ws.on("close", () => leaveChatRoom(room, ws));
+    ws.on("error", () => leaveChatRoom(room, ws));
+  });
+
+  console.log("[chat] WebSocket ready on /api/chat/ws");
+};
+
+// Email-рассылки (маркетинг) — монтируем до static/catch-all.
+mountEmailCampaigns(app, {
+  requireAdmin,
+  express,
+  logger,
+  dataDir: path.dirname(AUTH_STORE_FILE),
+  loadPilotsRoster,
+});
+
 if (SERVE_STATIC) {
   app.use(express.static(DIST_DIR));
   app.get(/^(?!\/api\/).*/, (_req, res) => {
@@ -31002,6 +34341,7 @@ const server = app.listen(PORT, () => {
   startDashboardCatalogNightlyRefreshScheduler();
   startDiscordWebhookAutomationScheduler();
   startPilotChallengesScheduler();
+  startPilotLocationSyncScheduler();
   // Pre-warm admin bootstrap and overview so first navigation to admin panel is instant
   void loadAdminBootstrapCatalog().catch((err) => {
     console.warn("[admin-bootstrap] initial warmup failed:", String(err));
@@ -31009,6 +34349,15 @@ const server = app.listen(PORT, () => {
   void loadAdminOverview().catch((err) => {
     console.warn("[admin-overview] initial warmup failed:", String(err));
   });
+  // Pre-warm pilot dashboard shared caches (routes, bootstrap catalog) so the
+  // first ЛК load after restart doesn't pay the cold-fetch cost
+  void loadRoutesData().catch((err) => {
+    console.warn("[routes] initial warmup failed:", String(err));
+  });
+  void loadDashboardBootstrapCatalog().catch((err) => {
+    console.warn("[dashboard-bootstrap] initial warmup failed:", String(err));
+  });
+  attachChatWebSocketServer(server);
 });
 
 server.on("error", (error) => {

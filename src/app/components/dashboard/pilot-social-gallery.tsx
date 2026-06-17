@@ -182,6 +182,8 @@ export function PilotSocialGallery() {
   const [mediaTitle, setMediaTitle] = useState("");
   const [mediaDescription, setMediaDescription] = useState("");
   const [mediaTags, setMediaTags] = useState("");
+  const [mediaAircraft, setMediaAircraft] = useState("");
+  const [mediaRegistration, setMediaRegistration] = useState("");
   const [mediaAlbumId, setMediaAlbumId] = useState("");
   const [mediaVisibility, setMediaVisibility] = useState<"public" | "private">("public");
   const [selectedMediaCategories, setSelectedMediaCategories] = useState<string[]>([]);
@@ -347,6 +349,11 @@ export function PilotSocialGallery() {
           imageDataUrl: previewUrl,
           mimeType: selectedFile.type,
           fileName: selectedFile.name,
+          // Загрузка с сайта без полёта/геометки: тип ВС и регистрация указываются вручную (опционально).
+          gear: {
+            aircraft: mediaAircraft.trim(),
+            registration: mediaRegistration.trim(),
+          },
         }),
       });
       const payload = await response.json().catch(() => null);
@@ -357,6 +364,8 @@ export function PilotSocialGallery() {
       setMediaTitle("");
       setMediaDescription("");
       setMediaTags("");
+      setMediaAircraft("");
+      setMediaRegistration("");
       setMediaAlbumId("");
       setMediaVisibility("public");
       setSelectedMediaCategories([]);
@@ -622,6 +631,16 @@ export function PilotSocialGallery() {
             <Input value={mediaTitle} onChange={(event) => setMediaTitle(event.target.value)} placeholder={tr("Название кадра", "Shot title")} />
             <Textarea value={mediaDescription} onChange={(event) => setMediaDescription(event.target.value)} placeholder={tr("Подпись, маршрут, погода, момент полета", "Caption, route, weather, flight moment")} className="min-h-[104px]" />
             <Input value={mediaTags} onChange={(event) => setMediaTags(event.target.value)} placeholder={tr("Теги через запятую: sunset, touchdown, vnukovo", "Comma-separated tags: sunset, touchdown, vnukovo")} />
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Input value={mediaAircraft} onChange={(event) => setMediaAircraft(event.target.value)} placeholder={tr("Тип ВС (опц.): B738, A21N", "Aircraft (opt.): B738, A21N")} />
+              <Input value={mediaRegistration} onChange={(event) => setMediaRegistration(event.target.value)} placeholder={tr("Регистрация (опц.): VQ-BCD", "Registration (opt.): VQ-BCD")} />
+            </div>
+            <p className="text-xs text-gray-400">
+              {tr(
+                "Загрузка с сайта — без привязки к полёту и без геометки на карте. Тип ВС и регистрацию можно указать вручную или оставить пустыми.",
+                "Website uploads aren't tied to a flight and don't appear as a map geo-pin. Aircraft and registration are optional."
+              )}
+            </p>
             <div className="grid gap-3 sm:grid-cols-2">
               <select value={mediaAlbumId} onChange={(event) => setMediaAlbumId(event.target.value)} className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm text-gray-700">
                 <option value="">{tr("Без альбома", "No album")}</option>

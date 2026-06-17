@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 import {
   CalendarPlus,
   Check,
@@ -231,14 +231,33 @@ const createEmptyForm = (): BookingFormState => ({
 const getRouteOptionLabel = (route: RouteOption) =>
   `${route.flightNumber || route.callsign || `Route ${route.id}`} · ${route.fromCode || "—"} → ${route.toCode || "—"}`;
 
-const getAircraftOptionLabel = (aircraft: AircraftOption) =>
-  `${aircraft.model} · ${aircraft.registration || "No reg"} · ${aircraft.fleetName}`;
+const toIcaoType = (model: unknown) => {
+  const v = String(model || "").toUpperCase().trim();
+  if (!v) return "";
+  if (/737\s*MAX\s*8|B38M/.test(v)) return "B38M";
+  if (/737\s*-?\s*900\s*ER|B739/.test(v)) return "B739";
+  if (/737\s*-?\s*800|B738/.test(v)) return "B738";
+  if (/777\s*-?\s*300\s*ER|B77W/.test(v)) return "B77W";
+  if (/A321\s*NEO|A21N/.test(v)) return "A21N";
+  if (/A321/.test(v)) return "A321";
+  if (/A330\s*-?\s*200|A332/.test(v)) return "A332";
+  if (/A330\s*-?\s*300|A333/.test(v)) return "A333";
+  if (/ERJ\s*-?\s*190|E190/.test(v)) return "E190";
+  return "";
+};
+
+const getAircraftOptionLabel = (aircraft: AircraftOption) => {
+  const icao = toIcaoType(aircraft.model);
+  return `${aircraft.registration || "No reg"} · ${icao || aircraft.model}`;
+};
 
 const getAircraftTypeKey = (aircraft: Pick<AircraftOption, "model" | "fleetName">) =>
   `${String(aircraft.model || "").trim()}::${String(aircraft.fleetName || "").trim()}`;
 
-const getAircraftTypeLabel = (aircraft: Pick<AircraftOption, "model" | "fleetName">) =>
-  `${aircraft.model} · ${aircraft.fleetName}`;
+const getAircraftTypeLabel = (aircraft: Pick<AircraftOption, "model" | "fleetName">) => {
+  const icao = toIcaoType(aircraft.model);
+  return `${icao || aircraft.model} · ${aircraft.fleetName}`;
+};
 
 const ICAO_PREFIX_TO_COUNTRY: Record<string, string> = {
   UR: "RU",
@@ -444,6 +463,7 @@ const isListCacheValid = () => listCache !== null && Date.now() - listCache.time
 
 export function PilotBookings() {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const { addNotification } = useNotifications();
   const tr = (key: string, vars?: Record<string, string | number>) => {
     const template = t(key);
@@ -1404,7 +1424,7 @@ export function PilotBookings() {
             {isRefreshing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
             {t("bookings.refresh")}
           </Button>
-          <Button className="bg-[#E31E24] hover:bg-[#c21920] text-white" onClick={() => setIsCreateOpen(true)} disabled={Boolean(bookingGateMessage)}>
+          <Button className="bg-[#E31E24] hover:bg-[#c21920] text-white" onClick={() => navigate("/dashboard/dispatch")} disabled={Boolean(bookingGateMessage)}>
             <CalendarPlus className="mr-2 h-4 w-4" />
             {t("bookings.new")}
           </Button>
@@ -1520,7 +1540,7 @@ export function PilotBookings() {
               <div className="font-semibold text-[#1d1d1f]">{t("bookings.emptyTitle")}</div>
               <div className="text-sm text-gray-500">{t("bookings.emptyDesc")}</div>
             </div>
-            <Button className="bg-[#E31E24] hover:bg-[#c21920] text-white" onClick={() => setIsCreateOpen(true)}>
+            <Button className="bg-[#E31E24] hover:bg-[#c21920] text-white" onClick={() => navigate("/dashboard/dispatch")}>
               <CalendarPlus className="mr-2 h-4 w-4" />
               {t("bookings.create")}
             </Button>

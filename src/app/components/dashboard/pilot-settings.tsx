@@ -11,6 +11,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { PilotLoginHistory } from "./pilot-login-history";
 
 interface DiscordSessionUser {
   id?: string;
@@ -1213,11 +1214,18 @@ export function PilotSettings() {
             </div>
             <CardDescription>{t("settings.security.desc")}</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
             <Button variant="outline" className="w-full sm:w-auto">
               <Lock className="w-4 h-4 mr-2" />
               {t("settings.security.changePassword")}
             </Button>
+
+            <div className="border-t border-gray-100 pt-5">
+              <div className="mb-3 text-sm font-semibold text-gray-900">
+                {t("settings.security.loginHistory")}
+              </div>
+              <PilotLoginHistory />
+            </div>
           </CardContent>
         </Card>
       </div>

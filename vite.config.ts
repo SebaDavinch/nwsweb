@@ -11,8 +11,12 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     proxy: {
-      '/api': 'http://localhost:8787',
+      '/api': {
+        target: 'http://localhost:8787',
+        ws: true,
+      },
     },
   },
   assetsInclude: ['**/*.svg', '**/*.csv'],

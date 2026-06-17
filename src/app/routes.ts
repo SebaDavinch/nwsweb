@@ -1,5 +1,10 @@
-import { createBrowserRouter } from "react-router";
+import { createBrowserRouter, Navigate } from "react-router";
+import { createElement } from "react";
 import { Root } from "./components/root";
+import { AppShell } from "./components/desktop/app-shell";
+import { HubMode } from "./components/desktop/hub-mode";
+import { FlightMode } from "./components/desktop/flight-mode";
+import { OfpMode } from "./components/desktop/ofp-mode";
 import { StreamRoot } from "./components/stream/stream-root";
 import { StreamFlightMap } from "./components/stream/stream-flight-map";
 import { Home } from "./components/home";
@@ -13,6 +18,7 @@ import { Login } from "./components/login";
 import { Documents } from "./components/documents";
 import { PilotDashboard } from "./components/dashboard/pilot-dashboard";
 import { PilotBookingView } from "./components/dashboard/pilot-booking-view";
+import { PilotDispatch } from "./components/dashboard/pilot-dispatch";
 import { ActivitiesPage, NewsPage } from "./components/news-page";
 import { AdminDashboard } from "./components/admin/admin-dashboard";
 import { AdminAcars } from "./components/admin/admin-acars";
@@ -39,6 +45,7 @@ import { AdminTelegramBot } from "./components/admin/admin-telegram-bot";
 import { AdminAuditLogs } from "./components/admin/admin-audit-logs";
 import { AdminAuthLogs } from "./components/admin/admin-auth-logs";
 import { StaffTeam } from "./components/staff-team";
+import { DownloadPage } from "./components/download-page";
 import { GateAssigner } from "./components/gate-assigner";
 import { AdminBannerGeneratorPage, BannerGeneratorStandalonePage } from "./components/admin/admin-banner-generator";
 
@@ -60,11 +67,13 @@ export const router = createBrowserRouter([
       { path: "live", Component: LiveFlights },
       { path: "login", Component: Login },
       { path: "documents", Component: Documents },
+      { path: "download", Component: DownloadPage },
       { path: "tickets", Component: TicketsPage },
       { path: "banner-generator", Component: BannerGeneratorStandalonePage },
       { path: "dashboard", Component: PilotDashboard },
       { path: "dashboard/passport/:countryIso2", Component: PilotDashboard },
       { path: "dashboard/booking/:id", Component: PilotBookingView },
+      { path: "dashboard/dispatch", Component: PilotDispatch },
     ],
   },
   {
@@ -105,6 +114,17 @@ export const router = createBrowserRouter([
       { path: "settings", Component: AdminSettings },
       { path: "*", Component: AdminDashboard },
     ]
+  },
+  {
+    path: "/app",
+    Component: AppShell,
+    children: [
+      { index: true, element: createElement(Navigate, { to: "/app/hub", replace: true }) },
+      { path: "hub", Component: HubMode },
+      { path: "flight", Component: FlightMode },
+      { path: "ofp", Component: OfpMode },
+      { path: "dispatch", element: createElement(PilotDispatch, { variant: "app" }) },
+    ],
   },
   {
     path: "/stream",
