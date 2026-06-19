@@ -21,6 +21,7 @@ import { PilotBookingView } from "./components/dashboard/pilot-booking-view";
 import { PilotDispatch } from "./components/dashboard/pilot-dispatch";
 import { ActivitiesPage, NewsPage } from "./components/news-page";
 import { SlottedEventDetail } from "./components/slotted-event-detail";
+import { TestSlottedEvent } from "./components/test-slotted-event";
 import { AdminDashboard } from "./components/admin/admin-dashboard";
 import { AdminAcars } from "./components/admin/admin-acars";
 import { AdminNews } from "./components/admin/admin-news";
@@ -71,6 +72,7 @@ export const router = createBrowserRouter([
       { path: "documents", Component: Documents },
       { path: "download", Component: DownloadPage },
       { path: "tickets", Component: TicketsPage },
+      { path: "testivent", Component: TestSlottedEvent },
       { path: "banner", Component: BannerGeneratorStandalonePage },
       { path: "banner-generator", Component: BannerGeneratorStandalonePage },
       { path: "dashboard", Component: PilotDashboard },
