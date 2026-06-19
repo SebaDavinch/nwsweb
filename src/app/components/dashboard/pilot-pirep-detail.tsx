@@ -301,16 +301,16 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
 
           {/* Flight number */}
           <div>
-            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Рейс</div>
-            <div className="font-mono font-bold text-white" style={{ fontFamily: "var(--font-display)" }}>
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50 mb-1">Рейс</div>
+            <div className="font-mono text-base font-bold text-white leading-none" style={{ fontFamily: "var(--font-display)" }}>
               {detail.callsign || detail.flightNumber}
             </div>
           </div>
 
           {/* Route */}
           <div>
-            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Маршрут</div>
-            <div className="flex items-center gap-1.5 font-mono font-bold text-white">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50 mb-1">Маршрут</div>
+            <div className="flex items-center gap-1.5 font-mono text-base font-bold text-white leading-none">
               <span>{detail.departure}</span>
               <svg width="20" height="6" viewBox="0 0 20 6" fill="none">
                 <line x1="0" y1="3" x2="16" y2="3" stroke="currentColor" strokeWidth="1.5" opacity=".5"/>
@@ -319,7 +319,7 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
               <span>{detail.arrival}</span>
             </div>
             {(detail.departureName || detail.arrivalName) && (
-              <div className="text-[10px] text-white/35 mt-0.5">
+              <div className="text-[10px] text-white/40 mt-1">
                 {detail.departureName} → {detail.arrivalName}
               </div>
             )}
@@ -327,23 +327,23 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
 
           {/* Pilot */}
           <div>
-            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Пилот</div>
-            <div className="text-sm text-white/80">{detail.pilot || "—"}</div>
-            {detail.rank && <div className="text-[10px] text-white/35">{detail.rank}</div>}
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50 mb-1">Пилот</div>
+            <div className="text-sm font-bold text-white leading-none">{detail.pilot || "—"}</div>
+            {detail.rank && <div className="text-[10px] text-white/40 mt-1">{detail.rank}</div>}
           </div>
 
           {/* Aircraft */}
           <div>
-            <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">ВС</div>
-            <div className="font-mono text-sm text-white/80">{detail.aircraftRegistration || detail.aircraft || "—"}</div>
-            {detail.aircraftModel && <div className="text-[10px] text-white/35">{detail.aircraftModel}</div>}
+            <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50 mb-1">Самолёт</div>
+            <div className="font-mono text-sm font-bold text-white leading-none">{detail.aircraftRegistration || detail.aircraft || "—"}</div>
+            {detail.aircraftModel && <div className="text-[10px] text-white/40 mt-1">{detail.aircraftModel}</div>}
           </div>
 
           {/* Score */}
           {detail.score != null && (
             <div className="ml-auto text-right">
-              <div className="text-[9px] uppercase tracking-[0.2em] text-white/35 mb-0.5">Счёт</div>
-              <div className="text-3xl font-bold tabular-nums" style={{ color: vacColor, fontFamily: "var(--font-display)" }}>
+              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/50 mb-1">Счёт</div>
+              <div className="text-3xl font-bold tabular-nums leading-none" style={{ color: vacColor, fontFamily: "var(--font-display)" }}>
                 {detail.score}
               </div>
             </div>
@@ -388,9 +388,9 @@ export function PilotPirepDetail({ pirepId, onBack }: PilotPirepDetailProps) {
           {/* Flight info */}
           <Section title="Информация о рейсе" defaultOpen={true}>
             <div className="px-5 py-4 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 xl:grid-cols-4">
-              <Stat label="Каллсайн" value={detail.callsign || detail.flightNumber} />
+              <Stat label="Номер рейса" value={detail.callsign || detail.flightNumber} />
               <Stat label="Сеть" value={detail.network || "Offline"} />
-              <Stat label="ВС" value={detail.aircraftRegistration || "—"} sub={detail.aircraftModel || detail.aircraft} />
+              <Stat label="Самолёт" value={detail.aircraftRegistration || "—"} sub={detail.aircraftModel || detail.aircraft} />
               <Stat label="Вылет" value={detail.departure} sub={detail.departureName || undefined} />
               <Stat label="Прилёт" value={detail.arrival} sub={detail.arrivalName || undefined} />
               <Stat label="Дата вылета" value={fmtDt(detail.departureTime || detail.createdAt)} />

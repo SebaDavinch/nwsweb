@@ -334,7 +334,7 @@ export function Home() {
       </section>
 
       {/* ─── WHY NORDWIND VIRTUAL ─── */}
-      <section className="py-28 bg-white">
+      <section className="py-28 bg-white dark:bg-[#111214]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -347,7 +347,7 @@ export function Home() {
               {tr("Наши преимущества", "Our advantages")}
             </div>
             <h2
-              className="text-4xl md:text-5xl font-bold text-[#1a1a1a] leading-tight uppercase tracking-wide"
+              className="text-4xl md:text-5xl font-bold text-[#1a1a1a] dark:text-white leading-tight uppercase tracking-wide"
               style={{ fontFamily: "var(--font-display)" }}
             >
               {t("home.why.title")}{" "}
@@ -387,7 +387,7 @@ export function Home() {
                 custom={i}
                 variants={fadeUp}
                 whileHover={{ y: -6, boxShadow: "0 20px 40px -12px rgba(0,0,0,0.12)" }}
-                className="group relative flex flex-col gap-4 rounded-3xl border border-gray-100 bg-white p-8 shadow-sm transition-all duration-300 overflow-hidden"
+                className="group relative flex flex-col gap-4 rounded-3xl border border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800/60 p-8 shadow-sm transition-all duration-300 overflow-hidden"
               >
                 {/* Subtle gradient top-accent */}
                 <div
@@ -401,8 +401,8 @@ export function Home() {
                   {feature.icon}
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-[#1a1a1a] mb-2">{feature.title}</h3>
-                  <p className="text-sm text-gray-500 leading-relaxed">{feature.desc}</p>
+                  <h3 className="text-lg font-bold text-[#1a1a1a] dark:text-white mb-2">{feature.title}</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 leading-relaxed">{feature.desc}</p>
                 </div>
               </motion.div>
             ))}
@@ -411,7 +411,7 @@ export function Home() {
       </section>
 
       {/* ─── LIVE FLIGHTS ─── */}
-      <div className="bg-[#f8f8f8]">
+      <div className="bg-[#f8f8f8] dark:bg-gray-950">
         <LiveFlightsWidget />
       </div>
 
@@ -494,7 +494,7 @@ export function Home() {
       </section>
 
       {/* ─── COMMUNITY ─── */}
-      <section className="bg-[#f4f4f6] py-24">
+      <section className="bg-[#f4f4f6] dark:bg-[#111214] py-24">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={{ opacity: 0, y: 30 }}
@@ -506,10 +506,10 @@ export function Home() {
             <div className="inline-block text-xs font-bold uppercase tracking-[0.25em] text-[#E31E24] mb-3">
               {tr("Сообщество", "Community")}
             </div>
-            <h2 className="text-4xl md:text-5xl font-bold text-[#1a1a1a] max-w-xl leading-tight">
+            <h2 className="text-4xl md:text-5xl font-bold text-[#1a1a1a] dark:text-white max-w-xl leading-tight">
               {tr("Nordwind сообщество", "Nordwind Community")}
             </h2>
-            <p className="mt-4 text-gray-500 max-w-2xl leading-relaxed">
+            <p className="mt-4 text-gray-500 dark:text-gray-400 max-w-2xl leading-relaxed">
               {tr(
                 "Следите за новостями и общайтесь с пилотами в наших сообществах.",
                 "Follow the news and connect with other pilots in our communities."
@@ -528,7 +528,7 @@ export function Home() {
             {vkCommunityUrl ? (
               <motion.div
                 variants={fadeUp}
-                className="rounded-3xl border border-[#0077FF]/20 bg-white p-7 shadow-sm"
+                className="rounded-3xl border border-[#0077FF]/20 bg-white dark:bg-gray-800/60 dark:border-[#0077FF]/30 p-7 shadow-sm"
                 whileHover={{ y: -4, boxShadow: "0 20px 40px -12px rgba(0,119,255,0.12)" }}
                 transition={{ duration: 0.25 }}
               >
@@ -538,7 +538,7 @@ export function Home() {
                   </div>
                   <div>
                     <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#0077FF]">VK</div>
-                    <div className="text-xl font-bold text-[#1a1a1a]">{vkCommunityName}</div>
+                    <div className="text-xl font-bold text-[#1a1a1a] dark:text-white">{vkCommunityName}</div>
                   </div>
                 </div>
                 <p className="mb-6 text-sm text-gray-500 leading-relaxed">

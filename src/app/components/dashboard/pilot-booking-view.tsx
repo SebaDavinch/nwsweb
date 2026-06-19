@@ -93,11 +93,31 @@ interface BookingListResponse {
   bookings?: BookingListItem[];
 }
 
+interface SimbriefOFP {
+  units: string;
+  route: string | null;
+  originIcao: string | null;
+  destIcao: string | null;
+  altnIcao: string | null;
+  aircraft: string | null;
+  registration: string | null;
+  cruiseAlt: string | null;
+  costIndex: string | null;
+  ete: string | null;
+  timeGenerated: string | null;
+  remarks: string | null;
+  fuel: { ramp: number | null; burn: number | null; altn: number | null; reserve: number | null; extra: number | null; taxi: number | null };
+  weights: { zfw: number | null; tow: number | null; ldw: number | null; paxCount: number | null };
+}
+
 interface SimbriefPayload {
   ok?: boolean;
   available?: boolean;
   url?: string | null;
+  pdfUrl?: string | null;
   html?: string | null;
+  ofp?: SimbriefOFP | null;
+  canGenerate?: boolean;
   message?: string;
   code?: string;
   error?: string;
@@ -255,8 +275,9 @@ export function PilotBookingView() {
   const [isRefreshingMetar, setIsRefreshingMetar] = useState(false);
   const [cascadeCancellationCount, setCascadeCancellationCount] = useState(1);
   const [isCancelling, setIsCancelling] = useState(false);
-  const [isOpeningSimbrief, setIsOpeningSimbrief] = useState(false);
-  const [isRefreshingSimbrief, setIsRefreshingSimbrief] = useState(false);
+  const [simbriefData, setSimbriefData] = useState<SimbriefPayload | null>(null);
+  const [isLoadingSimbrief, setIsLoadingSimbrief] = useState(false);
+  const [isLinkingSimbrief, setIsLinkingSimbrief] = useState(false);
   const [liveFlight, setLiveFlight] = useState<LiveFlight | null>(null);
 
   useEffect(() => {
@@ -266,6 +287,18 @@ export function PilotBookingView() {
     }
     setNetworkValue(booking.network);
   }, [booking?.network]);
+
+  useEffect(() => {
+    if (bookingId <= 0) return;
+    let active = true;
+    setIsLoadingSimbrief(true);
+    fetch(`/api/pilot/bookings/${bookingId}/simbrief`, { credentials: "include" })
+      .then((r) => r.json().catch(() => null))
+      .then((payload: SimbriefPayload | null) => { if (active) setSimbriefData(payload); })
+      .catch(() => null)
+      .finally(() => { if (active) setIsLoadingSimbrief(false); });
+    return () => { active = false; };
+  }, [bookingId]);
 
   useEffect(() => {
     let active = true;
@@ -606,61 +639,26 @@ export function PilotBookingView() {
     }
   };
 
-  const openSimbrief = async () => {
-    if (!booking) {
-      return;
-    }
-
-    setIsOpeningSimbrief(true);
-    try {
-      const response = await fetch(`/api/pilot/bookings/${booking.id}/simbrief`, {
-        credentials: "include",
-      });
-      const payload = (await response.json().catch(() => null)) as SimbriefPayload | null;
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to load SimBrief OFP");
-      }
-
-      if (payload?.url) {
-        window.open(payload.url, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      toast.message(payload?.message || "SimBrief OFP is not available for this booking yet.");
-    } catch (error) {
-      toast.error(String(error || "Failed to open SimBrief OFP"));
-    } finally {
-      setIsOpeningSimbrief(false);
-    }
-  };
-
-  const refreshSimbrief = async () => {
-    if (!booking) {
-      return;
-    }
-
-    setIsRefreshingSimbrief(true);
+  const linkSimbrief = async () => {
+    if (!booking) return;
+    setIsLinkingSimbrief(true);
     try {
       const response = await fetch(`/api/pilot/bookings/${booking.id}/simbrief`, {
         method: "PUT",
         credentials: "include",
       });
       const payload = (await response.json().catch(() => null)) as SimbriefPayload | null;
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to refresh SimBrief OFP");
+      if (!response.ok) throw new Error(payload?.error || "Failed to link SimBrief OFP");
+      setSimbriefData(payload);
+      if (payload?.available) {
+        toast.success("SimBrief OFP привязан");
+      } else {
+        toast.message(payload?.message || "SimBrief OFP не найден — создайте план в SimBrief и попробуйте снова.");
       }
-
-      if (payload?.url) {
-        toast.success("SimBrief OFP updated");
-        window.open(payload.url, "_blank", "noopener,noreferrer");
-        return;
-      }
-
-      toast.message(payload?.message || "SimBrief is not connected for this booking.");
     } catch (error) {
-      toast.error(String(error || "Failed to refresh SimBrief OFP"));
+      toast.error(String(error || "Failed to link SimBrief OFP"));
     } finally {
-      setIsRefreshingSimbrief(false);
+      setIsLinkingSimbrief(false);
     }
   };
 
@@ -1124,18 +1122,160 @@ export function PilotBookingView() {
 
                 {/* SimBrief */}
                 <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
-                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">SimBrief</div>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-[11px] uppercase tracking-widest text-gray-400">SimBrief OFP</div>
+                    {isLoadingSimbrief && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
+                    {!isLoadingSimbrief && simbriefData?.available && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                        OFP привязан
+                      </span>
+                    )}
+                    {!isLoadingSimbrief && simbriefData && !simbriefData.available && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-400 border border-gray-200">
+                        Не привязан
+                      </span>
+                    )}
+                  </div>
                   <div className="space-y-2">
-                    <Button variant="outline" className="w-full justify-start" onClick={openSimbrief} disabled={isOpeningSimbrief || isRefreshingSimbrief}>
-                      {isOpeningSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ExternalLink className="mr-2 h-4 w-4" />}
-                      Открыть OFP
-                    </Button>
-                    <Button variant="outline" className="w-full justify-start" onClick={refreshSimbrief} disabled={isRefreshingSimbrief || isOpeningSimbrief}>
-                      {isRefreshingSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
-                      Обновить OFP
-                    </Button>
+                    {simbriefData?.available ? (
+                      <>
+                        {simbriefData.url && (
+                          <Button
+                            variant="outline"
+                            className="w-full justify-start"
+                            onClick={() => window.open(simbriefData.url!, "_blank", "noopener,noreferrer")}
+                          >
+                            <ExternalLink className="mr-2 h-4 w-4" />
+                            Открыть OFP
+                          </Button>
+                        )}
+                        {simbriefData.pdfUrl && (
+                          <Button
+                            variant="outline"
+                            className="w-full justify-start text-gray-600"
+                            onClick={() => window.open(simbriefData.pdfUrl!, "_blank", "noopener,noreferrer")}
+                          >
+                            <ExternalLink className="mr-2 h-4 w-4" />
+                            Скачать PDF
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="w-full justify-start text-gray-400 text-xs"
+                          onClick={() => void linkSimbrief()}
+                          disabled={isLinkingSimbrief}
+                        >
+                          {isLinkingSimbrief ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <RefreshCcw className="mr-2 h-3.5 w-3.5" />}
+                          Обновить из SimBrief
+                        </Button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-gray-400 mb-2">
+                          Создайте план в SimBrief для этого рейса, затем нажмите «Связать» — vAMSYS привяжет последний OFP к бронированию.
+                        </p>
+                        <Button
+                          className="w-full justify-start bg-[#E31E24] text-white hover:bg-[#c21920]"
+                          onClick={() => void linkSimbrief()}
+                          disabled={isLinkingSimbrief || isLoadingSimbrief}
+                        >
+                          {isLinkingSimbrief ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCcw className="mr-2 h-4 w-4" />}
+                          Связать из SimBrief
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
+
+                {/* OFP Data */}
+                {simbriefData?.ofp && (() => {
+                  const ofp = simbriefData.ofp!;
+                  const u = ofp.units;
+                  const fmt = (v: number | null) => v != null ? v.toLocaleString("ru-RU") : "—";
+                  return (
+                    <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4 space-y-4">
+                      <div className="text-[11px] uppercase tracking-widest text-gray-400">OFP · Данные плана</div>
+
+                      {/* Header chips */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {ofp.aircraft && <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs font-semibold text-slate-700">{ofp.aircraft}</span>}
+                        {ofp.registration && <span className="rounded-md bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">{ofp.registration}</span>}
+                        {ofp.cruiseAlt && <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">FL{Math.round(Number(ofp.cruiseAlt) / 100)}</span>}
+                        {ofp.costIndex && <span className="rounded-md bg-gray-50 px-2 py-0.5 text-xs text-gray-500">CI {ofp.costIndex}</span>}
+                        {ofp.altnIcao && <span className="rounded-md bg-amber-50 px-2 py-0.5 text-xs text-amber-700">ALTN {ofp.altnIcao}</span>}
+                        {ofp.ete && <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">ETE {ofp.ete}</span>}
+                      </div>
+
+                      {/* Fuel */}
+                      <div>
+                        <div className="mb-1.5 text-[10px] uppercase tracking-widest text-gray-400">Топливо ({u})</div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {([
+                            ["Ramp", ofp.fuel.ramp],
+                            ["Burn", ofp.fuel.burn],
+                            ["Reserve", ofp.fuel.reserve],
+                            ["Alternate", ofp.fuel.altn],
+                            ["Extra", ofp.fuel.extra],
+                            ["Taxi", ofp.fuel.taxi],
+                          ] as [string, number | null][]).filter(([, v]) => v != null).map(([label, value]) => (
+                            <div key={label} className="rounded-lg bg-gray-50 px-3 py-2">
+                              <div className="text-[9px] uppercase tracking-wider text-gray-400">{label}</div>
+                              <div className="font-mono text-sm font-bold text-gray-800">{fmt(value)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Weights */}
+                      {(ofp.weights.zfw || ofp.weights.tow || ofp.weights.ldw) && (
+                        <div>
+                          <div className="mb-1.5 text-[10px] uppercase tracking-widest text-gray-400">Веса ({u})</div>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {([
+                              ["ZFW", ofp.weights.zfw],
+                              ["TOW", ofp.weights.tow],
+                              ["LDW", ofp.weights.ldw],
+                            ] as [string, number | null][]).map(([label, value]) => (
+                              <div key={label} className="rounded-lg bg-gray-50 px-3 py-2">
+                                <div className="text-[9px] uppercase tracking-wider text-gray-400">{label}</div>
+                                <div className="font-mono text-sm font-bold text-gray-800">{fmt(value)}</div>
+                              </div>
+                            ))}
+                          </div>
+                          {ofp.weights.paxCount != null && (
+                            <div className="mt-1.5 text-xs text-gray-400">Пассажиров: <span className="font-semibold text-gray-600">{ofp.weights.paxCount}</span></div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Route string */}
+                      {ofp.route && (
+                        <div>
+                          <div className="mb-1 text-[10px] uppercase tracking-widest text-gray-400">Маршрут</div>
+                          <div className="rounded-lg bg-gray-50 px-3 py-2 font-mono text-[11px] text-gray-700 break-all leading-relaxed">
+                            {ofp.route}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Remarks */}
+                      {ofp.remarks && (
+                        <div className="rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-800 leading-relaxed">
+                          {ofp.remarks}
+                        </div>
+                      )}
+
+                      {/* Footer */}
+                      {ofp.timeGenerated && (
+                        <div className="text-[10px] text-gray-400">
+                          Сгенерировано: {new Date(Number(ofp.timeGenerated) * 1000).toLocaleString("ru-RU", { timeZone: "UTC", timeZoneName: "short" })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Liveries */}
                 <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">

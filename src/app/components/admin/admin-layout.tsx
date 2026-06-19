@@ -27,6 +27,7 @@ import { AdminBannerGeneratorPage } from "./admin-banner-generator";
 import { AdminGallery } from "./admin-gallery";
 import { AdminCallsignChecker } from "./admin-callsign-checker";
 import { AdminAchievements } from "./admin-achievements";
+import { AdminSlottedEvents } from "./admin-slotted-events";
 import {
   Award,
   Bell,
@@ -68,13 +69,13 @@ import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
 
 const ADMIN_PAGES = new Set([
   "fleet", "news", "activities", "notams", "pilots", "pilot-profile", "documents",
-  "events", "staff", "badges", "achievements", "bookings", "routes", "pireps", "pirep-detail",
+  "events", "slotted-events", "staff", "badges", "achievements", "bookings", "routes", "pireps", "pirep-detail",
   "airports", "hubs", "tickets", "discord-bot", "telegram-bot", "vk-bot",
   "banner-generator", "acars", "settings", "audit-logs", "auth-logs", "gallery",
   "callsign-checker",
 ]);
 
-function AdminPageContent({ page, pageId }: { page: string; pageId: number }) {
+function AdminPageContent({ page, pageId, view }: { page: string; pageId: number; view: string }) {
   if (page === "pilot-profile") return <AdminPilotProfile />;
   if (page === "pirep-detail") return <AdminPirepDetail pirepId={pageId} />;
   if (page === "fleet") return <AdminFleet />;
@@ -84,9 +85,10 @@ function AdminPageContent({ page, pageId }: { page: string; pageId: number }) {
   if (page === "pilots") return <AdminPilots />;
   if (page === "documents") return <AdminDocuments />;
   if (page === "events") return <AdminEvents />;
+  if (page === "slotted-events") return <AdminSlottedEvents />;
   if (page === "staff") return <AdminStaff />;
   if (page === "badges") return <AdminBadges />;
-  if (page === "achievements") return <AdminAchievements />;
+  if (page === "achievements") return view === "rewards" ? <AdminBadges /> : <AdminAchievements />;
   if (page === "bookings") return <AdminBookingsManagement />;
   if (page === "routes") return <AdminRoutesManagement />;
   if (page === "pireps") return <AdminPireps />;
@@ -143,6 +145,7 @@ export function AdminLayout() {
   });
   const [submenuOpen, setSubmenuOpen] = useState<Record<string, boolean>>({
     events: false,
+    achievements: false,
   });
 
   const tr = useCallback((ru: string, en: string) => (language === "ru" ? ru : en), [language]);
@@ -205,6 +208,7 @@ export function AdminLayout() {
               { view: "community", label: tr("Цели и челленджи сообщества", "Community Goals & Challenges") },
             ],
           },
+          { page: "slotted-events", icon: CalendarDays, label: tr("Слотовые ивенты", "Slotted Events") },
           { page: "documents", icon: FileText, label: t("admin.nav.documents") },
         ],
       },
@@ -214,8 +218,15 @@ export function AdminLayout() {
         items: [
           { page: "news", icon: Bell, label: t("admin.nav.news") },
           { page: "tickets", icon: MessageSquare, label: tr("Тикеты", "Tickets") },
-          { page: "badges", icon: Award, label: tr("Бейджи", "Badges") },
-          { page: "achievements", icon: Trophy, label: tr("Достижения", "Achievements") },
+          {
+            page: "achievements",
+            icon: Trophy,
+            label: tr("Достижения", "Achievements"),
+            children: [
+              { view: "list", label: tr("Все достижения", "All Achievements") },
+              { view: "rewards", label: tr("Награды", "Rewards") },
+            ],
+          },
           { page: "activities", icon: Bell, label: tr("Активности", "Activities") },
           { page: "banner-generator", icon: ImagePlus, label: tr("Генератор баннеров", "Banner Generator"), standalone: "/banner-generator" },
           { page: "gallery", icon: Images, label: tr("Галерея", "Gallery") },
@@ -271,6 +282,9 @@ export function AdminLayout() {
   useEffect(() => {
     if (activePage === "events") {
       setSubmenuOpen((current) => ({ ...current, events: true }));
+    }
+    if (activePage === "achievements") {
+      setSubmenuOpen((current) => ({ ...current, achievements: true }));
     }
   }, [activePage]);
 
@@ -364,12 +378,12 @@ export function AdminLayout() {
                       const currentView = new URLSearchParams(location.search).get("view") || "events";
 
                       if (hasChildren) {
-                        const isItemOpen = Boolean(submenuOpen.events);
+                        const isItemOpen = Boolean(submenuOpen[item.page]);
                         return (
                           <div key={item.page} className="space-y-1">
                             <button
                               type="button"
-                              onClick={() => setSubmenuOpen((current) => ({ ...current, events: !isItemOpen }))}
+                              onClick={() => setSubmenuOpen((current) => ({ ...current, [item.page]: !isItemOpen }))}
                               style={itemActive ? { backgroundColor: primaryColor } : undefined}
                               className={`flex w-full items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors ${
                                 itemActive ? "text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white"
@@ -383,12 +397,12 @@ export function AdminLayout() {
                             {isItemOpen ? (
                               <div className="ml-2 space-y-1 border-l border-gray-800/80 pl-3">
                                 {item.children?.map((child) => {
-                                  const isChildActive = activePage === "events" && currentView === child.view;
+                                  const isChildActive = activePage === item.page && currentView === child.view;
                                   return (
                                     <button
                                       key={child.view}
                                       type="button"
-                                      onClick={() => { setActivePage("events"); setActiveId(0); navigate(`/admin?page=events&view=${child.view}`); }}
+                                      onClick={() => { setActivePage(item.page); setActiveId(0); navigate(`/admin?page=${item.page}&view=${child.view}`); }}
                                       style={isChildActive ? { backgroundColor: primaryColor } : undefined}
                                       className={`flex w-full items-center gap-3 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                                         isChildActive ? "text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white"
@@ -478,7 +492,11 @@ export function AdminLayout() {
 
         <div className="flex-1 min-w-0 overflow-auto p-8">
           <AdminNavContext.Provider value={{ navigateTo }}>
-            <AdminPageContent page={activePage} pageId={activeId} />
+            <AdminPageContent
+              page={activePage}
+              pageId={activeId}
+              view={new URLSearchParams(location.search).get("view") || ""}
+            />
           </AdminNavContext.Provider>
         </div>
       </main>

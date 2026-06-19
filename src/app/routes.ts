@@ -20,6 +20,7 @@ import { PilotDashboard } from "./components/dashboard/pilot-dashboard";
 import { PilotBookingView } from "./components/dashboard/pilot-booking-view";
 import { PilotDispatch } from "./components/dashboard/pilot-dispatch";
 import { ActivitiesPage, NewsPage } from "./components/news-page";
+import { SlottedEventDetail } from "./components/slotted-event-detail";
 import { AdminDashboard } from "./components/admin/admin-dashboard";
 import { AdminAcars } from "./components/admin/admin-acars";
 import { AdminNews } from "./components/admin/admin-news";
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
       { index: true, Component: Home },
       { path: "about", Component: About },
       { path: "activities", Component: ActivitiesPage },
+      { path: "activities/slotted/:id", Component: SlottedEventDetail },
       { path: "news", Component: NewsPage },
       { path: "fleet", Component: Fleet },
       { path: "fleet/:fleetId/aircraft/:aircraftId", Component: FleetAircraftPage },
@@ -69,6 +71,7 @@ export const router = createBrowserRouter([
       { path: "documents", Component: Documents },
       { path: "download", Component: DownloadPage },
       { path: "tickets", Component: TicketsPage },
+      { path: "banner", Component: BannerGeneratorStandalonePage },
       { path: "banner-generator", Component: BannerGeneratorStandalonePage },
       { path: "dashboard", Component: PilotDashboard },
       { path: "dashboard/passport/:countryIso2", Component: PilotDashboard },

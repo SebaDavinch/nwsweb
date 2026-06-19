@@ -1,4 +1,4 @@
-import { useAuth } from "../../context/auth-context";
+﻿import { useAuth } from "../../context/auth-context";
 import { useLanguage } from "../../context/language-context";
 import { Navigate, Link, useLocation, useNavigate, useParams } from "react-router";
 import { useEffect, useState } from "react";
@@ -32,6 +32,10 @@ import {
   PlaneLanding,
   CalendarDays,
   Activity,
+  CheckCircle2,
+  XCircle,
+  AlertCircle,
+  HelpCircle,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -164,7 +168,13 @@ export function PilotDashboard() {
       id: number;
       flightNumber: string;
       departure?: string;
+      departureIcao?: string;
+      departureCity?: string;
+      departureCountryIso2?: string | null;
       arrival?: string;
+      arrivalIcao?: string;
+      destinationCity?: string;
+      arrivalCountryIso2?: string | null;
       aircraft?: string;
       status?: string;
       completedAt?: string;
@@ -476,7 +486,7 @@ export function PilotDashboard() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 overflow-hidden font-sans">
+    <div className="flex h-screen bg-gray-100 dark:bg-gray-950 overflow-hidden font-sans">
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -604,10 +614,10 @@ export function PilotDashboard() {
       </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 overflow-hidden flex flex-col bg-[#f5f5f7]">
+      <main className="flex-1 overflow-hidden flex flex-col bg-[#f5f5f7] dark:bg-[#0d1117]">
         {/* Mobile Header */}
-        <header className="bg-white border-b border-gray-200 p-4 flex items-center justify-between lg:hidden">
-          <div className="font-bold text-lg text-gray-900">
+        <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-4 flex items-center justify-between lg:hidden">
+          <div className="font-bold text-lg text-gray-900 dark:text-white">
             {navItems.find(i => i.id === activeTab)?.label}
           </div>
           <div className="flex items-center gap-2">
@@ -619,17 +629,14 @@ export function PilotDashboard() {
         </header>
 
         {/* Content Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-8">
+        <div className="flex-1 overflow-y-auto p-4 md:p-8 dark:[background:radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(227,30,36,0.07),transparent),radial-gradient(ellipse_60%_40%_at_80%_80%,rgba(59,130,246,0.05),transparent)]">
           <div className="max-w-7xl mx-auto h-full">
-            <div className="mb-4 hidden items-center justify-end lg:flex">
-              <NotificationCenter />
-            </div>
             
             {activeTab === "home" && (
               <div className="space-y-5 animate-in fade-in duration-500">
 
                 {/* ── HERO CARD ── */}
-                <div className="relative overflow-hidden rounded-2xl bg-[#1a1a1a] p-6 shadow-xl">
+                <div className="relative overflow-hidden rounded-2xl bg-[#1a1a1a] dark:bg-white/[0.04] dark:backdrop-blur-2xl dark:border dark:border-white/[0.09] p-6 shadow-xl dark:shadow-[0_8px_40px_rgba(0,0,0,0.6),inset_0_1px_0_rgba(255,255,255,0.09)]">
                   <div className="absolute inset-0 bg-gradient-to-br from-[#E31E24]/20 via-transparent to-transparent pointer-events-none" />
                   <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex items-center gap-4">
@@ -657,9 +664,9 @@ export function PilotDashboard() {
                         { label: t("dashboard.stats.memberSince"), value: memberSinceDisplay, Icon: CalendarDays },
                       ].map((stat) => (
                         <div key={stat.label} className="text-center sm:text-right">
-                          <div className="flex items-center justify-center sm:justify-end gap-1.5 text-[10px] text-gray-400 uppercase tracking-widest mb-0.5">
-                            <stat.Icon className="w-3.5 h-3.5 text-[#E31E24]/80" />
-                            <span>{stat.label}</span>
+                          <div className="flex items-center justify-center sm:justify-end gap-1.5 text-[10px] text-gray-400 uppercase tracking-widest mb-0.5 min-h-[2rem]">
+                            <stat.Icon className="w-3.5 h-3.5 text-[#E31E24]/80 shrink-0 mt-0.5" />
+                            <span className="leading-tight">{stat.label}</span>
                           </div>
                           <div className="text-xl font-bold text-white">{stat.value}</div>
                         </div>
@@ -716,12 +723,12 @@ export function PilotDashboard() {
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                       {dashboardAlerts.map((item) => (
-                        <div key={item.id} className={`rounded-xl border p-4 bg-white shadow-sm border-l-4 ${item.type === "critical" ? "border-l-red-500" : item.type === "warning" ? "border-l-amber-400" : "border-l-sky-400"}`}>
+                        <div key={item.id} className={`rounded-xl border p-4 bg-white dark:bg-gray-800 shadow-sm border-l-4 ${item.type === "critical" ? "border-l-red-500" : item.type === "warning" ? "border-l-amber-400" : "border-l-sky-400"}`}>
                           <Badge variant="outline" className={`mb-2 text-[10px] ${item.type === "critical" ? "border-red-200 bg-red-50 text-red-700" : item.type === "warning" ? "border-amber-200 bg-amber-50 text-amber-700" : "border-sky-200 bg-sky-50 text-sky-700"}`}>
                             {t(`notams.type.${item.type}`)}
                           </Badge>
-                          <div className="font-semibold text-[#1d1d1f] text-sm">{item.title}</div>
-                          <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-gray-600">{item.content}</p>
+                          <div className="font-semibold text-[#1d1d1f] dark:text-gray-100 text-sm">{item.title}</div>
+                          <p className="mt-1.5 whitespace-pre-wrap text-xs leading-5 text-gray-600 dark:text-gray-400">{item.content}</p>
                         </div>
                       ))}
                     </div>
@@ -732,7 +739,7 @@ export function PilotDashboard() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
                   {/* Left Column: Upcoming + Recent + Quick Actions */}
                   <div className="lg:col-span-2 space-y-5">
-                    <Card className="border-none shadow-md overflow-hidden">
+                    <Card className="border border-gray-100 shadow-md overflow-hidden dark:bg-white/[0.04] dark:backdrop-blur-xl dark:border-white/[0.09] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.07)]">
                       <CardHeader className="pb-3">
                         <div className="flex items-center justify-between">
                           <CardTitle className="flex items-center gap-2 text-base">
@@ -750,7 +757,7 @@ export function PilotDashboard() {
                             {upcomingBookings.map((booking) => (
                               <div
                                 key={booking.id}
-                                className="relative overflow-hidden rounded-xl border border-gray-100 bg-gray-50/60 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
+                                className="relative overflow-hidden rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50/60 dark:bg-gray-800/60 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
                               >
                                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#E31E24] rounded-l-xl" />
                                 <div className="flex items-center gap-3 pl-3">
@@ -811,7 +818,7 @@ export function PilotDashboard() {
                     </Card>
 
                     {/* Recent flights */}
-                    <Card className="border-none shadow-sm">
+                    <Card className="border border-gray-100 shadow-sm dark:bg-white/[0.04] dark:backdrop-blur-xl dark:border-white/[0.09] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.07)]">
                       <CardHeader className="pb-2">
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-base flex items-center gap-2">
@@ -830,23 +837,91 @@ export function PilotDashboard() {
                               key={flight.id}
                               type="button"
                               onClick={() => openPirepDetail(flight.id)}
-                              className="w-full rounded-lg border border-transparent bg-gray-50 hover:bg-white hover:border-gray-200 hover:shadow-sm px-3.5 py-2.5 text-left transition-all"
+                              className="w-full rounded-xl border border-transparent bg-gray-50/80 dark:bg-white/[0.03] hover:bg-white dark:hover:bg-white/[0.06] hover:border-gray-200 dark:hover:border-white/[0.1] hover:shadow-sm dark:hover:shadow-[0_2px_12px_rgba(0,0,0,0.3)] px-4 py-3 text-left transition-all"
                             >
                               <div className="flex items-center justify-between gap-3">
-                                <div>
-                                  <div className="font-semibold text-[#1d1d1f]">{flight.flightNumber || "\u2014"}</div>
-                                  <div className="mt-1 text-sm text-gray-500">{flight.departure || "\u2014"} → {flight.arrival || "\u2014"}</div>
-                                </div>
-                                <div className="text-right">
-                                  <div className="text-xs font-medium uppercase tracking-wide text-gray-400">{flight.status || "\u2014"}</div>
-                                  <div className="mt-1 text-xs text-gray-500">
-                                    {flight.completedAt
-                                      ? new Date(flight.completedAt).toLocaleDateString(undefined, {
-                                          month: "short",
-                                          day: "numeric",
-                                        })
-                                      : "\u2014"}
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-[#1d1d1f] dark:text-gray-100 text-sm">{flight.flightNumber || "\u2014"}</div>
+                                  <div className="mt-1.5 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+                                    {flight.departureCountryIso2 ? (
+                                      <img
+                                        src={`https://flagcdn.com/${flight.departureCountryIso2.toLowerCase()}.svg`}
+                                        alt=""
+                                        className="h-3 w-4.5 rounded-[2px] object-cover shrink-0"
+                                        loading="lazy"
+                                      />
+                                    ) : null}
+                                    <span className="truncate max-w-[140px]">{flight.departureCity || flight.departure || "\u2014"}</span>
+                                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">({flight.departureIcao || flight.departure || "\u2014"})</span>
+                                    <span className="text-gray-300 dark:text-gray-600 shrink-0">→</span>
+                                    {flight.arrivalCountryIso2 ? (
+                                      <img
+                                        src={`https://flagcdn.com/${flight.arrivalCountryIso2.toLowerCase()}.svg`}
+                                        alt=""
+                                        className="h-3 w-4.5 rounded-[2px] object-cover shrink-0"
+                                        loading="lazy"
+                                      />
+                                    ) : null}
+                                    <span className="truncate max-w-[140px]">{flight.destinationCity || flight.arrival || "\u2014"}</span>
+                                    <span className="font-mono text-[10px] text-gray-400 dark:text-gray-500 shrink-0">({flight.arrivalIcao || flight.arrival || "\u2014"})</span>
                                   </div>
+                                </div>
+                                <div className="flex flex-col items-end gap-1.5 shrink-0">
+                                  {(() => {
+                                    const s = (flight.status || "").toLowerCase();
+                                    if (s === "accepted") return (
+                                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/12 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 border border-emerald-500/20 dark:border-emerald-500/25">
+                                        <CheckCircle2 className="w-3 h-3" />ACCEPTED
+                                      </span>
+                                    );
+                                    if (s === "rejected") return (
+                                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-red-500/12 text-red-600 dark:bg-red-500/20 dark:text-red-400 border border-red-500/20 dark:border-red-500/25">
+                                        <XCircle className="w-3 h-3" />REJECTED
+                                      </span>
+                                    );
+                                    if (s === "pending" || s === "incomplete") return (
+                                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-amber-500/12 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400 border border-amber-500/20 dark:border-amber-500/25">
+                                        <Clock className="w-3 h-3" />{(flight.status || "").toUpperCase()}
+                                      </span>
+                                    );
+                                    if (s === "need_reply" || s === "needsreply") return (
+                                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-orange-500/12 text-orange-600 dark:bg-orange-500/20 dark:text-orange-400 border border-orange-500/20 dark:border-orange-500/25">
+                                        <AlertCircle className="w-3 h-3" />REPLY
+                                      </span>
+                                    );
+                                    return (
+                                      <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold bg-gray-500/10 text-gray-500 dark:text-gray-400 border border-gray-500/15">
+                                        <HelpCircle className="w-3 h-3" />{(flight.status || "\u2014").toUpperCase()}
+                                      </span>
+                                    );
+                                  })()}
+                                  {flight.completedAt ? (() => {
+                                    const d = new Date(flight.completedAt);
+                                    const now = new Date();
+                                    const diffMs = now.getTime() - d.getTime();
+                                    const diffDays = Math.floor(diffMs / 86400000);
+                                    const isRu = language === "ru";
+                                    const sameYear = d.getFullYear() === now.getFullYear();
+                                    let label: string;
+                                    if (diffDays === 0) {
+                                      label = isRu ? "Сегодня" : "Today";
+                                    } else if (diffDays === 1) {
+                                      label = isRu ? "Вчера" : "Yesterday";
+                                    } else if (diffDays < 7) {
+                                      label = isRu ? `${diffDays} дн. назад` : `${diffDays}d ago`;
+                                    } else {
+                                      const day = d.getDate();
+                                      const mon = d.toLocaleDateString(isRu ? "ru-RU" : "en-US", { month: "short" });
+                                      label = sameYear ? `${day} ${mon}` : `${day} ${mon} ${String(d.getFullYear()).slice(2)}`;
+                                    }
+                                    const isRelative = diffDays < 7;
+                                    return (
+                                      <div className={`flex items-center gap-1 ${isRelative ? "text-[10px] font-medium text-gray-500 dark:text-gray-400" : "text-[11px] text-gray-400 dark:text-gray-500"}`}>
+                                        <CalendarDays className="w-3 h-3 shrink-0" />
+                                        <span>{label}</span>
+                                      </div>
+                                    );
+                                  })() : <span className="text-[11px] text-gray-400 dark:text-gray-500">\u2014</span>}
                                 </div>
                               </div>
                             </button>
@@ -868,13 +943,13 @@ export function PilotDashboard() {
                         <button
                           key={id}
                           onClick={() => openDashboardTab(id)}
-                          className="group p-4 bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-[#E31E24]/30 transition-all text-left flex flex-col gap-3"
+                          className="group p-4 bg-white dark:bg-white/[0.04] dark:backdrop-blur-xl rounded-xl border border-gray-100 dark:border-white/[0.09] shadow-sm dark:shadow-[0_4px_20px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.07)] hover:shadow-md hover:border-[#E31E24]/30 dark:hover:border-[#E31E24]/40 dark:hover:bg-white/[0.07] transition-all text-left flex flex-col gap-3"
                         >
                           <div className="w-9 h-9 rounded-lg bg-[#E31E24]/10 flex items-center justify-center text-[#E31E24] group-hover:bg-[#E31E24]/20 transition-colors">
                             <Icon className="w-4 h-4" />
                           </div>
                           <div>
-                            <div className="font-semibold text-sm text-[#1d1d1f] leading-tight">{label}</div>
+                            <div className="font-semibold text-sm text-[#1d1d1f] dark:text-gray-100 leading-tight">{label}</div>
                             <div className="text-[11px] text-gray-400 mt-0.5 leading-tight line-clamp-2">{desc}</div>
                           </div>
                         </button>
@@ -896,7 +971,7 @@ export function PilotDashboard() {
                              key={flight.id}
                              type="button"
                              onClick={() => openPirepDetail(flight.id)}
-                             className="w-full rounded-lg border border-amber-100 bg-white px-3 py-2.5 text-left transition-colors hover:border-amber-300 hover:bg-amber-50 flex items-center justify-between gap-2"
+                             className="w-full rounded-lg border border-amber-100 dark:border-amber-900/50 bg-white dark:bg-gray-800 px-3 py-2.5 text-left transition-colors hover:border-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 flex items-center justify-between gap-2"
                            >
                              <div>
                                <div className="font-semibold text-sm text-[#1d1d1f]">{flight.flightNumber || "—"}</div>
@@ -909,7 +984,7 @@ export function PilotDashboard() {
                      ) : null}
 
                      {/* Activity / Roster — dark themed */}
-                     <div className="rounded-2xl overflow-hidden bg-[#111318] shadow-xl">
+                     <div className="rounded-2xl overflow-hidden bg-[#111318] dark:bg-white/[0.04] dark:backdrop-blur-xl dark:border dark:border-white/[0.09] shadow-xl dark:shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.09)]">
                        <div className="px-4 py-3 flex items-center justify-between border-b border-white/5">
                          <div className="flex items-center gap-2">
                            <ClipboardCheck className="h-4 w-4 text-cyan-400" />
@@ -1005,7 +1080,7 @@ export function PilotDashboard() {
                      </div>
 
                      {/* System Status */}
-                     <Card className="border-none shadow-sm">
+                     <Card className="border border-gray-100 shadow-sm dark:bg-white/[0.04] dark:backdrop-blur-xl dark:border-white/[0.09] dark:shadow-[0_8px_32px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.07)]">
                        <CardHeader className="pb-2">
                          <CardTitle className="text-sm text-gray-500 uppercase tracking-wider font-semibold">{t("dashboard.system.status")}</CardTitle>
                        </CardHeader>
@@ -1036,7 +1111,7 @@ export function PilotDashboard() {
 
             {activeTab === "feed" && (
               <div className="animate-in fade-in duration-500">
-                <div className="mx-auto max-w-2xl rounded-2xl bg-white p-4 shadow-sm md:p-6">
+                <div className="mx-auto max-w-2xl rounded-2xl bg-white dark:bg-gray-900 p-4 shadow-sm md:p-6">
                   <ActivityFeed limit={40} />
                 </div>
               </div>

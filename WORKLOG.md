@@ -5,6 +5,79 @@
 
 ---
 
+## 2026-06-19 (сессия 4)
+
+### Критический баг: "Invariant failed" на дашборде после деплоя
+
+**Причина:** В `src/app/components/admin/banner-generator/App.tsx` на уровне модуля (вне функций) были вызовы `feature()` (topojson-client) и `geoNaturalEarth1().fitExtent()` без try/catch — точно такой же паттерн, что ранее был исправлен в `stream-flight-map.tsx` (коммит `860ae93`). При ошибке инициализации модуля React Router бросает `Invariant failed`, и весь сайт падает.
+
+**Исправление (`App.tsx`):** Функция `getTourMapGeo()` — оборачивает `feature()` и `fitExtent()` в try/catch; при исключении возвращает заглушку с пустыми путями. Деструктурированный результат присваивается модульным константам.
+
+**tsc --noEmit → 0 ошибок.**
+
+---
+
+### Типографика в `PilotPirepDetail` (Images #14, #15, #16)
+
+**Тёмный хедер-бар (`pilot-pirep-detail.tsx`):**
+- Подписи полей: `text-[9px] text-white/35` → `text-[10px] font-semibold text-white/50` — читабельнее, единый стиль.
+- Значения "Пилот" и "ВС": `text-white/80` (не bold) → `font-bold text-white leading-none` — теперь единый стиль со значениями "Рейс" и "Маршрут".
+- Подпись "ВС" → "Самолёт" для читабельности (Cyrillic "ВС" визуально неотличимо от "BC" в лёгких шрифтах).
+- Второстепенные строки (город, ранг, модель ВС): `text-white/35` → `text-white/40`, добавлен `mt-1`.
+
+**Блок "Информация о рейсе" (Stat component):**
+- `label="Каллсайн"` → `label="Номер рейса"` (значение — позывной/номер рейса).
+- `label="ВС"` → `label="Самолёт"` (соответствует пользовательской терминологии).
+
+---
+
+## 2026-06-18 (сессия 3)
+
+### Слотовые ивенты — интеграция в общий список активностей (главная + кабинет пилота)
+
+**Сервер (`server/index.js`):**
+- `GET /api/public/activities` теперь дополнительно тянет `/activities/slotted-events` из vAMSYS, нормализует через `flattenSlottedEvent`, фильтрует `hidden` и пустые, добавляет в общий массив `activities` с `activityType: "SlottedEvent"` и `linkUrl: "/activities/slotted/{id}"`.
+- Слотовые ивенты попадают в сортировку по дате наравне с остальными.
+
+**Клиент (`news-page.tsx`):**
+- Добавлен импорт `Link` из `react-router`.
+- Новый хелпер `isSlottedEvent(item)` + `renderItemLink(item, label, className)`: для SlottedEvent рендерит `<Link to={linkUrl}>` (внутренняя навигация), для остальных — `<a target="_blank">`.
+- В галерейных и списочных карточках: ссылка «Подробнее» рендерится через `renderItemLink`, кнопка регистрации скрыта для слотовых ивентов (навигация идёт на страницу деталей `/activities/slotted/:id`).
+- `tsc --noEmit` → 0 ошибок.
+
+---
+
+## 2026-06-18 (сессия 2)
+
+### Слайдер создания бейджа в форме NOTAM + тёмная тема на публичном сайте
+
+**Бейдж при создании NOTAM:**
+- В диалоге создания/редактирования NOTAM добавлена секция «Создать бейдж» с тумблером-слайдером.
+- При включении плавно разворачивается форма: название (пре-заполняется из заголовка), описание, цветовые свотчи + custom color, drag-n-drop загрузка изображения бейджа (PNG/JPG/WebP до 4 МБ, предпросмотр и очистка).
+- Новый бэкенд-эндпоинт `POST /api/admin/badge-image-upload` (admin-only): принимает base64 data URL, сохраняет в `data/badge-images/`, отдаёт публичный URL `/badge-images/<filename>`.
+- Статическая раздача `data/badge-images/` через `/badge-images` (Express static, до DIST_DIR).
+- При сохранении: сначала загружается NOTAM, затем — если тумблер включён — создаётся бейдж через `POST /api/admin/operations/badges` (прокси в vAMSYS), `manually_awardable: true`. Ошибка бейджа показывается как warning, не откатывает NOTAM.
+- `admin-notams.tsx`: `node --check` / `tsc --noEmit` → OK.
+
+**Тёмная/светлая тема на публичном сайте:**
+- Новый хук `src/app/hooks/use-site-theme.ts` (аналог `use-app-theme.ts` для десктопа): ключ `nws.site.theme`, дефолт «light», вешает/снимает класс `.dark` на `document.documentElement`.
+- Красивый круговой View Transitions reveal из точки клика — та же логика, что в десктоп-приложении.
+- `root.tsx`: подключает `useSiteTheme()` для синхронизации; корневой `<div>` переведён на `bg-background text-foreground` (dark-aware через CSS-переменные).
+- `header.tsx`: кнопка Moon/Sun в правых контролах (перед LanguageSwitcher), запускает `toggleAnimated` с origin из координат клика.
+- `tsc --noEmit` → 0 ошибок.
+
+---
+
+## 2026-06-18
+
+### Достижения↔бейджи: выдача наградного бейджа при разблокировке (закрыто)
+- Поле `rewardBadgeId` у целей каталога раньше только хранилось («задел»). Теперь в `GET /api/pilot/achievements` при свежей разблокировке цели с заданным `rewardBadgeId` пилоту **выдаётся наградной бейдж** через `upsertPilotBadgeAward` (source `achievement`, единожды — проверка по существующим наградам и дедуп в пределах запроса). Локальный `title/icon/color` берётся из `LOCAL_BADGES_CATALOG` + `buildBadgeIconDataUrl`; для operations-бейджей enrichment (title/iconUrl) произойдёт на ближайшем `syncPilotBadges` (матч по id). Метаданные награды хранят `achievementTierId` + ru/en название достижения.
+- Эндпоинт теперь отдаёт `awardedBadges: string[]`; в `newlyUnlocked` у выданных целей флаг `rewardBadgeAwarded: true`.
+- Клиент (`use-achievements.ts`): Steam-style toast/колокольчик при `rewardBadgeAwarded` добавляет «· бейдж выдан» / «· badge awarded».
+- Комментарии в каталоге обновлены (было «пока не выдаётся»). Проверки: `node --check server/index.js` → OK.
+
+---
+
 ## 2026-06-17
 
 ### Фикс темы хаба + радио вынесено в футер-виджет «сейчас играет»

@@ -13,12 +13,14 @@ import {
   Map,
   Menu,
   MessageSquare,
+  Moon,
   Newspaper,
   Plane,
   Radio,
   Search,
   Settings,
   Shield,
+  Sun,
   Users,
   X,
   Info,
@@ -30,6 +32,7 @@ import { LanguageSwitcher } from "./language-switcher";
 import { NotificationCenter } from "./dashboard/notification-center";
 import logo from "@/assets/99be6a8339eae76151119a13613864930c8bf6e7.png";
 import { useSiteDesign } from "../hooks/use-site-design";
+import { useSiteTheme } from "../hooks/use-site-theme";
 import { Button } from "./ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
 import {
@@ -253,7 +256,7 @@ function HeaderProfileMenu({ primaryColor }: { primaryColor: string }) {
           <ChevronDown className="h-3.5 w-3.5 text-white/50 shrink-0" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[340px] rounded-2xl border border-gray-200 bg-white p-2 shadow-2xl">
+      <DropdownMenuContent align="end" className="w-[340px] rounded-2xl border border-gray-200 bg-white dark:bg-gray-900/95 dark:backdrop-blur-xl dark:border-white/[0.09] p-2 shadow-2xl dark:shadow-[0_16px_48px_rgba(0,0,0,0.7),inset_0_1px_0_rgba(255,255,255,0.07)]">
         <DropdownMenuLabel className="px-3 py-3">
           <div className="flex items-center gap-3">
             <Avatar className="h-11 w-11">
@@ -263,58 +266,58 @@ function HeaderProfileMenu({ primaryColor }: { primaryColor: string }) {
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0">
-              <div className="truncate text-sm font-bold text-gray-900">{displayName}</div>
-              <div className="text-xs text-gray-500 mt-0.5">Nordwind Virtual Pilot</div>
+              <div className="truncate text-sm font-bold text-gray-900 dark:text-white">{displayName}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Nordwind Virtual Pilot</div>
             </div>
           </div>
         </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="dark:bg-white/[0.08]" />
         {currentBooking && currentBooking.id > 0 ? (
-          <DropdownMenuItem asChild className="rounded-xl px-3 py-2.5 mb-1">
+          <DropdownMenuItem asChild className="rounded-xl px-3 py-2.5 mb-1 dark:focus:bg-white/[0.06]">
             <Link to={`/dashboard/booking/${currentBooking.id}`} className="flex items-center gap-2.5">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#E31E24]/10">
                 <Plane className="h-3.5 w-3.5 text-[#E31E24]" />
               </div>
               <div className="min-w-0">
                 <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">{t("nav.currentBooking")}</div>
-                <div className="text-xs font-medium text-gray-800 truncate">{bookingLabel}</div>
+                <div className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{bookingLabel}</div>
               </div>
             </Link>
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuGroup>
-          <DropdownMenuItem asChild>
+          <DropdownMenuItem asChild className="dark:text-gray-200 dark:focus:bg-white/[0.06] dark:focus:text-white">
             <Link to="/dashboard" className="flex items-center gap-2.5 rounded-xl px-3 py-2">
-              <LayoutDashboard className="h-4 w-4 text-gray-400" />
+              <LayoutDashboard className="h-4 w-4 text-gray-400 dark:text-gray-500" />
               <span>{t("nav.profileDashboard")}</span>
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
+          <DropdownMenuItem asChild className="dark:text-gray-200 dark:focus:bg-white/[0.06] dark:focus:text-white">
             <Link to="/dashboard?tab=recent" className="flex items-center gap-2.5 rounded-xl px-3 py-2">
-              <History className="h-4 w-4 text-gray-400" />
+              <History className="h-4 w-4 text-gray-400 dark:text-gray-500" />
               <span>{t("nav.recentFlights")}</span>
             </Link>
           </DropdownMenuItem>
-          <DropdownMenuItem asChild>
+          <DropdownMenuItem asChild className="dark:text-gray-200 dark:focus:bg-white/[0.06] dark:focus:text-white">
             <Link to="/dashboard?tab=settings" className="flex items-center gap-2.5 rounded-xl px-3 py-2">
-              <Settings className="h-4 w-4 text-gray-400" />
+              <Settings className="h-4 w-4 text-gray-400 dark:text-gray-500" />
               <span>{t("dashboard.settings")}</span>
             </Link>
           </DropdownMenuItem>
           {isAdmin ? (
-            <DropdownMenuItem asChild>
+            <DropdownMenuItem asChild className="dark:text-gray-200 dark:focus:bg-white/[0.06] dark:focus:text-white">
               <Link to="/admin" className="flex items-center gap-2.5 rounded-xl px-3 py-2">
-                <Shield className="h-4 w-4 text-gray-400" />
+                <Shield className="h-4 w-4 text-gray-400 dark:text-gray-500" />
                 <span>{t("nav.adminConsole")}</span>
               </Link>
             </DropdownMenuItem>
           ) : null}
         </DropdownMenuGroup>
-        <DropdownMenuSeparator />
+        <DropdownMenuSeparator className="dark:bg-white/[0.08]" />
         <DropdownMenuItem
           onSelect={() => { logout(); navigate("/"); }}
           variant="destructive"
-          className="rounded-xl px-3 py-2"
+          className="rounded-xl px-3 py-2 dark:focus:bg-red-500/10"
         >
           <LogOut className="h-4 w-4" />
           {t("dashboard.logout")}
@@ -339,6 +342,7 @@ export function Header() {
   const accentColor = design.accentColor || "#2A2A2A";
   const headerLogo = design.headerLogoDataUrl || logo;
   const { open: searchOpen, setOpen: setSearchOpen } = useSiteSearch();
+  const { isDark, toggleAnimated: toggleTheme } = useSiteTheme();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -396,7 +400,7 @@ export function Header() {
           boxShadow: scrolled ? "0 1px 0 rgba(255,255,255,0.04), 0 8px 32px rgba(0,0,0,0.35)" : "none",
         }}
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-12">
           <div className="flex items-center justify-between h-[68px]">
             {/* Logo */}
             <Link to="/" className="flex items-center shrink-0">
@@ -404,7 +408,7 @@ export function Header() {
             </Link>
 
             {/* Desktop nav */}
-            <nav className="hidden lg:flex items-center gap-0.5">
+            <nav className="hidden lg:flex items-center gap-1">
               {directLinks.filter((link) => !link.authOnly || isAuthenticated).map((link) => {
                 const Icon = link.icon;
                 const active = isActive(link.path);
@@ -440,7 +444,7 @@ export function Header() {
             </nav>
 
             {/* Right controls */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               {/* Search */}
               <button
                 type="button"
@@ -465,6 +469,16 @@ export function Header() {
                   {t("nav.login")}
                 </Link>
               ) : null}
+
+              {/* Theme toggle */}
+              <button
+                type="button"
+                onClick={(e) => toggleTheme({ x: e.clientX, y: e.clientY })}
+                className="flex items-center justify-center h-8 w-8 rounded-xl border border-white/12 bg-white/6 text-white/70 transition-all hover:border-white/22 hover:bg-white/10 hover:text-white"
+                title={isDark ? (isRu ? "Светлая тема" : "Light theme") : (isRu ? "Тёмная тема" : "Dark theme")}
+              >
+                {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
 
               <LanguageSwitcher />
 

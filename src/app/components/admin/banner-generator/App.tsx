@@ -62,6 +62,7 @@ type EventType =
   | 'curated-roster'
   | 'community-challenge'
   | 'community-goal'
+  | 'slotted-event'
 
 type RouteEventType = 'tour' | 'roster' | 'curated-roster'
 
@@ -81,6 +82,7 @@ type BonusField =
   | 'curatedRosterBonusPoints'
   | 'challengeBonusPoints'
   | 'communityGoalBonusPoints'
+  | 'slottedEventBonusPoints'
 
 type RegistrationField =
   | 'focusRegistrationRequired'
@@ -90,6 +92,7 @@ type RegistrationField =
   | 'curatedRosterRegistrationRequired'
   | 'challengeRegistrationRequired'
   | 'communityGoalRegistrationRequired'
+  | 'slottedEventRegistrationRequired'
 
 type AircraftEnabledField = 'rosterAircraftEnabled' | 'curatedRosterAircraftEnabled'
 
@@ -207,6 +210,15 @@ type BannerFormState = {
   communityGoalTargetAmount: string
   communityGoalBonusPoints: string
   communityGoalRegistrationRequired: boolean
+  slottedEventTitle: string
+  slottedEventDate: string
+  slottedEventDepartureIcao: string
+  slottedEventArrivalIcao: string
+  slottedEventStartTime: string
+  slottedEventEndTime: string
+  slottedEventSlotInterval: string
+  slottedEventBonusPoints: string
+  slottedEventRegistrationRequired: boolean
 }
 
 type BadgeFormState = {
@@ -251,6 +263,7 @@ type InterfaceCopy = {
   curatedRosterEventName: string
   communityChallengeEventName: string
   communityGoalEventName: string
+  slottedEventEventName: string
   interfaceLanguageLabel: string
   bannerSettingsTitle: string
   cityLabel: string
@@ -747,6 +760,15 @@ function createDefaultFormState(locale: Locale): BannerFormState {
     communityGoalTargetAmount: '1200',
     communityGoalBonusPoints: '350',
     communityGoalRegistrationRequired: false,
+    slottedEventTitle: 'Spring Fly-In 2026',
+    slottedEventDate: '',
+    slottedEventDepartureIcao: 'UUEE',
+    slottedEventArrivalIcao: '',
+    slottedEventStartTime: '19:00Z',
+    slottedEventEndTime: '22:00Z',
+    slottedEventSlotInterval: '5',
+    slottedEventBonusPoints: '350',
+    slottedEventRegistrationRequired: true,
   }
 }
 
@@ -1326,6 +1348,7 @@ const interfaceCopy: Record<Locale, InterfaceCopy> = {
     curatedRosterEventName: 'Curated Roster',
     communityChallengeEventName: 'Community Challenge',
     communityGoalEventName: 'Community Goal',
+    slottedEventEventName: 'Слотовый ивент',
     interfaceLanguageLabel: 'Язык интерфейса',
     bannerSettingsTitle: 'Параметры баннера',
     cityLabel: 'Город',
@@ -1535,6 +1558,7 @@ const interfaceCopy: Record<Locale, InterfaceCopy> = {
     curatedRosterEventName: 'Curated Roster',
     communityChallengeEventName: 'Community Challenge',
     communityGoalEventName: 'Community Goal',
+    slottedEventEventName: 'Slotted Event',
     interfaceLanguageLabel: 'Interface language',
     bannerSettingsTitle: 'Banner Settings',
     cityLabel: 'City',
@@ -1776,6 +1800,7 @@ const eventOrder: EventType[] = [
   'curated-roster',
   'community-challenge',
   'community-goal',
+  'slotted-event',
 ]
 
 const eventDefinitions: Record<EventType, EventDefinition> = {
@@ -1818,6 +1843,11 @@ const eventDefinitions: Record<EventType, EventDefinition> = {
     key: 'community-goal',
     shortName: 'CG',
     exportSlug: 'community-goal',
+  },
+  'slotted-event': {
+    key: 'slotted-event',
+    shortName: 'SLOT',
+    exportSlug: 'slotted-event',
   },
 }
 
@@ -2326,20 +2356,35 @@ const tourMapSteppeRegions: TourMapSteppeRegion[] = ((tourMapSteppeJson as unkno
   )
 })
 
-const tourMapLandFeature = feature(
-  worldLandAtlas as any,
-  (worldLandAtlas as any).objects.land,
-)
-const tourMapProjection = geoNaturalEarth1().fitExtent(
-  [
-    [42, 34],
-    [tourMapViewBox.width - 42, tourMapViewBox.height - 34],
-  ],
-  tourMapLandFeature,
-)
-const tourMapPath = geoPath(tourMapProjection)
-const tourMapLandPath = tourMapPath(tourMapLandFeature) ?? ''
-const tourMapGraticulePath = tourMapPath(geoGraticule10()) ?? ''
+function getTourMapGeo() {
+  try {
+    const landFeature = feature(
+      worldLandAtlas as any,
+      (worldLandAtlas as any).objects.land,
+    )
+    const projection = geoNaturalEarth1().fitExtent(
+      [
+        [42, 34],
+        [tourMapViewBox.width - 42, tourMapViewBox.height - 34],
+      ],
+      landFeature,
+    )
+    const path = geoPath(projection)
+    return {
+      landFeature,
+      projection,
+      path,
+      landPath: path(landFeature) ?? '',
+      graticulePath: path(geoGraticule10()) ?? '',
+    }
+  } catch {
+    const projection = geoNaturalEarth1()
+    const path = geoPath(projection)
+    return { landFeature: null, projection, path, landPath: '', graticulePath: '' }
+  }
+}
+
+const { landFeature: tourMapLandFeature, projection: tourMapProjection, path: tourMapPath, landPath: tourMapLandPath, graticulePath: tourMapGraticulePath } = getTourMapGeo()
 const vatsimBoundaryLabelCoordinateOverrides: Partial<Record<string, GeoJsonPosition>> = {
   UBBA: [47.75, 40.5],
   UDDD: [44.397887, 40.148941],
@@ -3515,6 +3560,8 @@ function getEventBonusPointsField(eventType: EventType): BonusField {
       return 'challengeBonusPoints'
     case 'community-goal':
       return 'communityGoalBonusPoints'
+    case 'slotted-event':
+      return 'slottedEventBonusPoints'
     default:
       return 'focusBonusPoints'
   }
@@ -3534,6 +3581,8 @@ function getEventRegistrationField(eventType: EventType): RegistrationField {
       return 'challengeRegistrationRequired'
     case 'community-goal':
       return 'communityGoalRegistrationRequired'
+    case 'slotted-event':
+      return 'slottedEventRegistrationRequired'
     default:
       return 'focusRegistrationRequired'
   }
@@ -3643,6 +3692,10 @@ function getEventName(eventType: EventType, strings: InterfaceCopy) {
 
   if (eventType === 'community-goal') {
     return strings.communityGoalEventName
+  }
+
+  if (eventType === 'slotted-event') {
+    return strings.slottedEventEventName
   }
 
   return strings.focusAirportEventName
@@ -8766,6 +8819,108 @@ function App() {
 
               <p className="field-help">{strings.communityGoalHelp}</p>
             </>
+          ) : eventType === 'slotted-event' ? (
+            <>
+              <label className="field">
+                <span>{locale === 'ru' ? 'Название ивента' : 'Event Title'}</span>
+                <input
+                  type="text"
+                  value={form.slottedEventTitle}
+                  onChange={(event) => updateField('slottedEventTitle', event.target.value)}
+                  placeholder="Spring Fly-In 2026"
+                />
+              </label>
+
+              <label className="field">
+                <span>{'Дата / Date'}</span>
+                <input
+                  type="text"
+                  value={form.slottedEventDate}
+                  onChange={(event) => updateField('slottedEventDate', event.target.value)}
+                  placeholder="12 April 2026"
+                />
+              </label>
+
+              <div className="field-grid">
+                <label className="field">
+                  <span>{locale === 'ru' ? 'Аэропорт вылета (ICAO)' : 'Departure ICAO'}</span>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={form.slottedEventDepartureIcao}
+                    onChange={(event) => updateField('slottedEventDepartureIcao', event.target.value.toUpperCase())}
+                    placeholder="UUEE"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>{locale === 'ru' ? 'Аэропорт прилёта (ICAO, необяз.)' : 'Arrival ICAO (optional)'}</span>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={form.slottedEventArrivalIcao}
+                    onChange={(event) => updateField('slottedEventArrivalIcao', event.target.value.toUpperCase())}
+                    placeholder="ULLI"
+                  />
+                </label>
+              </div>
+
+              <div className="field-grid">
+                <label className="field">
+                  <span>{'Начало слотов / Slots from'}</span>
+                  <input
+                    type="text"
+                    value={form.slottedEventStartTime}
+                    onChange={(event) => updateField('slottedEventStartTime', event.target.value)}
+                    placeholder="19:00Z"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>{'Конец слотов / Slots until'}</span>
+                  <input
+                    type="text"
+                    value={form.slottedEventEndTime}
+                    onChange={(event) => updateField('slottedEventEndTime', event.target.value)}
+                    placeholder="22:00Z"
+                  />
+                </label>
+
+                <label className="field">
+                  <span>{'Интервал (мин) / Interval (min)'}</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.slottedEventSlotInterval}
+                    onChange={(event) => updateField('slottedEventSlotInterval', event.target.value)}
+                    placeholder="5"
+                  />
+                </label>
+              </div>
+
+              <div className="event-meta-grid">
+                <label className="field">
+                  <span>{strings.bonusPointsLabel}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={form.slottedEventBonusPoints}
+                    onChange={(event) => updateField('slottedEventBonusPoints', event.target.value)}
+                    placeholder="350"
+                  />
+                </label>
+
+                <label className="toggle-field">
+                  <input
+                    type="checkbox"
+                    checked={form.slottedEventRegistrationRequired}
+                    onChange={(event) => updateField('slottedEventRegistrationRequired', event.target.checked)}
+                  />
+                  <span className="toggle-title">{strings.registrationRequiredLabel}</span>
+                  <span className="toggle-help">{strings.registrationRequiredHelp}</span>
+                </label>
+              </div>
+            </>
           ) : isRouteEventActive && routeEventConfig ? (
             <>
               <SettingsAccordionSection title={routeEventConfig.titleLabel} defaultOpen>
@@ -9518,6 +9673,24 @@ function App() {
                         <p className="banner-challenge-intro">{bannerStrings.communityPreviewIntro}</p>
                       ) : eventType === 'community-goal' ? (
                         <p className="banner-challenge-intro">{communityGoalDescription}</p>
+                      ) : eventType === 'slotted-event' ? (
+                        <div className="banner-slotted-event">
+                          <div className="banner-slotted-route">
+                            <div className="banner-slotted-dep">{form.slottedEventDepartureIcao || 'UUEE'}</div>
+                            {form.slottedEventArrivalIcao && (
+                              <>
+                                <div className="banner-slotted-arrow">→</div>
+                                <div className="banner-slotted-arr">{form.slottedEventArrivalIcao}</div>
+                              </>
+                            )}
+                          </div>
+                          <div className="banner-slotted-title">{form.slottedEventTitle}</div>
+                          <div className="banner-slotted-date">{form.slottedEventDate}</div>
+                          <div className="banner-slotted-times">
+                            <span className="banner-slotted-window">{form.slottedEventStartTime} – {form.slottedEventEndTime}</span>
+                            <span className="banner-slotted-interval">every {form.slottedEventSlotInterval} min</span>
+                          </div>
+                        </div>
                       ) : (
                         <div className="banner-airport-chip">
                           <span className="banner-airport-flag" aria-hidden="true">
@@ -9532,7 +9705,7 @@ function App() {
                         </div>
                       )}
 
-                      {eventType === 'focus-airport' || isComplexEventActive || isVatsimRegionEventActive ? (
+                      {eventType === 'focus-airport' || eventType === 'slotted-event' || isComplexEventActive || isVatsimRegionEventActive ? (
                         <div className="banner-pill-row">
                           {!isComplexEventActive && registrationRequired ? <div className="banner-registration-pill">{bannerStrings.registrationRequiredBadge}</div> : null}
                         </div>
@@ -9738,7 +9911,7 @@ function App() {
                           </div>
                         )}
 
-                        {eventType !== 'focus-airport' && !isComplexEventActive && !isVatsimRegionEventActive ? (
+                        {eventType !== 'focus-airport' && eventType !== 'slotted-event' && !isComplexEventActive && !isVatsimRegionEventActive ? (
                           <div className="banner-meta-stack">
                             {registrationRequired ? (
                               <div className="banner-meta-card is-registration">

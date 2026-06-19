@@ -109,7 +109,7 @@ export function Documents() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
       <section
         className="relative py-20 text-white"
         style={{

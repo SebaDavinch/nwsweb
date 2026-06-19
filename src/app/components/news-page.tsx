@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router";
 import {
   CalendarDays,
   CheckCircle2,
@@ -187,6 +188,26 @@ const getActivityExcerpt = (item: NewsItem) => {
 
 const isRosterActivity = (item: NewsItem) =>
   item.category === "Event" && String(item.activityType || "").trim().toLowerCase() === "roster";
+
+const isSlottedEvent = (item: NewsItem) =>
+  String(item.activityType || "").trim() === "SlottedEvent";
+
+const renderItemLink = (item: NewsItem, label: string, className: string) => {
+  if (!item.linkUrl) return null;
+  if (isSlottedEvent(item)) {
+    return (
+      <Link to={item.linkUrl} className={className}>
+        {label}
+      </Link>
+    );
+  }
+  return (
+    <a href={item.linkUrl} target="_blank" rel="noreferrer" className={className}>
+      <ExternalLink className="h-4 w-4" />
+      {label}
+    </a>
+  );
+};
 
 const renderActivityImage = (item: NewsItem, className: string) => {
   if (!item.imageUrl && !isRosterActivity(item)) {
@@ -617,7 +638,7 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
         };
 
   return (
-    <div className="min-h-screen bg-[linear-gradient(180deg,#f6f7fb_0%,#eef2f7_100%)] flex flex-col">
+    <div className="min-h-screen bg-[linear-gradient(180deg,#f6f7fb_0%,#eef2f7_100%)] dark:bg-gray-950 dark:bg-none flex flex-col">
       <section className="relative overflow-hidden bg-[#1f2430] py-14 text-white">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(227,30,36,0.18),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(14,165,233,0.16),transparent_30%)]" />
         <div className="relative max-w-7xl mx-auto px-4">
@@ -826,16 +847,10 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
                   </div>
                   {featuredItem.target ? <div className="mt-3 text-sm text-slate-300">{featuredItem.target}</div> : null}
                   {mode === "activities" ? <div className="mt-4">{renderActivityRegistrationAction(featuredItem)}</div> : null}
-                  {featuredItem.linkUrl ? (
-                    <a
-                      href={featuredItem.linkUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-100"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      {t("news.readMore")}
-                    </a>
+                  {featuredItem.linkUrl ? renderItemLink(
+                    featuredItem,
+                    t("news.readMore"),
+                    "mt-5 inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-900 transition-colors hover:bg-slate-100"
                   ) : null}
                 </div>
               </CardContent>
@@ -904,18 +919,12 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
                               </Badge>
                             ) : null}
                           </div>
-                          {item.linkUrl ? (
-                            <a
-                              href={item.linkUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-2 text-sm font-semibold text-[#E31E24] transition-colors hover:text-[#c41a20]"
-                            >
-                              <ExternalLink className="h-4 w-4" />
-                              {t("news.readMore")}
-                            </a>
+                          {item.linkUrl ? renderItemLink(
+                            item,
+                            t("news.readMore"),
+                            "inline-flex items-center gap-2 text-sm font-semibold text-[#E31E24] transition-colors hover:text-[#c41a20]"
                           ) : null}
-                          {mode === "activities" ? renderActivityRegistrationAction(item) : null}
+                          {mode === "activities" && !isSlottedEvent(item) ? renderActivityRegistrationAction(item) : null}
                         </div>
                       </CardContent>
                     </Card>
@@ -996,18 +1005,12 @@ function PublicFeedPage({ mode }: PublicFeedPageProps) {
                             </div>
                             <div className="mt-2 text-xs text-gray-400">{t("news.postedBy")} {item.author}</div>
                             {item.target ? <div className="mt-2 text-xs text-gray-500">{item.target}</div> : null}
-                            {item.linkUrl ? (
-                              <a
-                                href={item.linkUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#E31E24] transition-colors hover:text-[#c41a20]"
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                                {t("news.readMore")}
-                              </a>
-                            ) : null}
-                            {mode === "activities" ? <div className="mt-4">{renderActivityRegistrationAction(item)}</div> : null}
+                            {item.linkUrl ? <div className="mt-4">{renderItemLink(
+                              item,
+                              t("news.readMore"),
+                              "inline-flex items-center gap-2 text-sm font-semibold text-[#E31E24] transition-colors hover:text-[#c41a20]"
+                            )}</div> : null}
+                            {mode === "activities" && !isSlottedEvent(item) ? <div className="mt-4">{renderActivityRegistrationAction(item)}</div> : null}
                           </div>
                         </div>
                       </CardContent>

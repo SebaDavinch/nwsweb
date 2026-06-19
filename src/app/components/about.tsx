@@ -46,9 +46,9 @@ export function About() {
       </section>
 
       {/* About Content */}
-      <section className="py-16">
+      <section className="py-16 dark:bg-gray-950">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="prose max-w-none">
+          <div className="prose max-w-none dark:prose-invert">
             <h2 className="text-3xl mb-6">
               {t("about.welcome.title")}{" "}
               <span className="text-[#E31E24]">Nordwind Virtual</span>
@@ -64,7 +64,7 @@ export function About() {
             </p>
             
             {/* Airlines Section */}
-            <div className="bg-gray-50 rounded-lg p-6 mb-8">
+            <div className="bg-gray-50 dark:bg-gray-800/60 rounded-lg p-6 mb-8">
               <h3 className="text-2xl mb-4 text-[#E31E24]">
                 {t("about.airlines.title")}
               </h3>
@@ -72,15 +72,15 @@ export function About() {
                 {t("about.airlines.desc")}
               </p>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="bg-white rounded p-4 text-center">
+                <div className="bg-white dark:bg-gray-700 rounded p-4 text-center">
                   <div className="text-xl mb-1">Nordwind Airlines</div>
                   <div className="text-[#E31E24] text-sm">NWS</div>
                 </div>
-                <div className="bg-white rounded p-4 text-center">
+                <div className="bg-white dark:bg-gray-700 rounded p-4 text-center">
                   <div className="text-xl mb-1">IKAR</div>
                   <div className="text-[#E31E24] text-sm">KAR</div>
                 </div>
-                <div className="bg-white rounded p-4 text-center">
+                <div className="bg-white dark:bg-gray-700 rounded p-4 text-center">
                   <div className="text-xl mb-1">Southwind</div>
                   <div className="text-[#E31E24] text-sm">STW</div>
                 </div>
@@ -91,7 +91,7 @@ export function About() {
       </section>
 
       {/* Values Section */}
-      <section className="py-16 bg-gray-50">
+      <section className="py-16 bg-gray-50 dark:bg-gray-900">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <h2 className="text-3xl text-center mb-12">{t("about.values.title")}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -114,13 +114,13 @@ export function About() {
       </section>
 
       {/* Platform Section */}
-      <section className="py-16">
+      <section className="py-16 dark:bg-gray-950">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl mb-6">{t("about.platform.title")}</h2>
-          <p className="text-lg text-gray-700 mb-8">
+          <p className="text-lg text-gray-700 dark:text-gray-300 mb-8">
             {t("about.platform.desc")}
           </p>
-          <div className="bg-gray-50 rounded-lg p-8">
+          <div className="bg-gray-50 dark:bg-gray-800/60 rounded-lg p-8">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
               <div>
                 <h3 className="text-xl mb-2 text-[#E31E24]">

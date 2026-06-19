@@ -181,7 +181,7 @@ export function FleetAircraftPage() {
   }
 
   return (
-    <div className="bg-gray-50 py-10">
+    <div className="bg-gray-50 dark:bg-gray-950 py-10">
       <div className="mx-auto max-w-5xl space-y-6 px-4 sm:px-6 lg:px-8">
         <Button asChild variant="outline" className="bg-white">
           <Link to="/fleet">

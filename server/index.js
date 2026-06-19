@@ -8468,12 +8468,12 @@ const formatAdminActivityTarget = (activity = {}, type = "", airportsLookup = nu
 
 const loadAdminActivitiesCatalog = async () => {
   const endpoints = [
-    { type: "Event", path: "/activities/events?page[size]=100&sort=order,-start&filter[include_past]=true" },
-    { type: "FocusAirport", path: "/activities/focus-airports?page[size]=100&sort=order,-start&filter[include_past]=true" },
-    { type: "Tour", path: "/activities/tours?page[size]=100&sort=order,-start&filter[include_past]=true" },
-    { type: "Roster", path: "/activities/rosters?page[size]=100&sort=order,-start&filter[include_past]=true" },
-    { type: "CommunityGoal", path: "/activities/community-goals?page[size]=100&sort=order,-start&filter[include_past]=true" },
-    { type: "CommunityChallenge", path: "/activities/community-challenges?page[size]=100&sort=order,-start&filter[include_past]=true" },
+    { type: "Event", path: "/activities/events?page[size]=100&sort=-created_at" },
+    { type: "FocusAirport", path: "/activities/focus-airports?page[size]=100&sort=-created_at" },
+    { type: "Tour", path: "/activities/tours?page[size]=100&sort=-created_at" },
+    { type: "Roster", path: "/activities/rosters?page[size]=100&sort=-created_at" },
+    { type: "CommunityGoal", path: "/activities/community-goals?page[size]=100&sort=-created_at" },
+    { type: "CommunityChallenge", path: "/activities/community-challenges?page[size]=100&sort=-created_at" },
   ];
 
   const [collections, airportsLookup] = await Promise.all([
@@ -14476,7 +14476,8 @@ const computePilotBookingCascadeIds = ({ bookings = [], targetBookingId = 0 } = 
 
 const normalizePilotSimbriefPayload = (payload) => {
   const node = getPilotApiItem(payload) || (payload && typeof payload === "object" ? payload : {});
-  // PDF-ссылка OFP: явные поля + вложенная структура SimBrief (files.pdf / fms_downloads / links).
+
+  // PDF URL — multiple possible locations in SimBrief response structure
   const pdfCandidates = [
     node?.pdf_url,
     node?.pdfUrl,
@@ -14488,28 +14489,88 @@ const normalizePilotSimbriefPayload = (payload) => {
   ]
     .map((v) => String(v || "").trim())
     .filter(Boolean);
-  // Если directory + pdf.name есть — собираем полный URL.
+
   const dir = String(node?.files?.directory || node?.directory || "").trim();
   const pdfName = String(node?.files?.pdf?.name || "").trim();
   if (dir && pdfName) pdfCandidates.push(`${dir.replace(/\/$/, "")}/${pdfName}`);
 
   const url = String(
-    node?.url ||
-      node?.ofp_url ||
-      node?.briefing_url ||
-      node?.dispatch_url ||
-      node?.pdf_url ||
-      node?.link ||
-      ""
+    node?.url || node?.ofp_url || node?.briefing_url ||
+    node?.dispatch_url || node?.pdf_url || node?.link || ""
   ).trim();
   const pdfUrl = pdfCandidates.find((v) => /\.pdf(\?|$)/i.test(v)) || pdfCandidates[0] || (/\.pdf(\?|$)/i.test(url) ? url : "");
   const html = String(node?.html || node?.ofp_html || node?.briefing_html || "").trim();
 
+  // Extract structured SimBrief OFP fields
+  const gen = node?.general || {};
+  const fuel = node?.fuel || {};
+  const weights = node?.weights || {};
+  const orig = node?.origin || node?.fetch || {};
+  const dest = node?.destination || {};
+  const altn = node?.alternate || {};
+
+  const strNum = (v) => { const n = Number(String(v || "").trim() || "0"); return Number.isFinite(n) && n > 0 ? n : null; };
+  const strStr = (v) => String(v || "").trim() || null;
+
+  // Units: 0 = lbs, 1 = kg (SimBrief convention)
+  const units = strStr(gen?.units || node?.params?.units) === "1" ? "kg" : "lbs";
+
+  // Flight plan route string
+  const route = strStr(
+    node?.navlog?.fix?.map?.((f) => strStr(f?.ident)).filter(Boolean).join(" ") ||
+    gen?.route || node?.route || node?.flight_plan
+  );
+
+  // Fuel figures (raw SimBrief values are strings in lbs or kg depending on units)
+  const fuelRamp    = strNum(fuel?.plan_ramp    || fuel?.planRamp);
+  const fuelBurn    = strNum(fuel?.enroute_burn || fuel?.enrouteBurn);
+  const fuelAltn    = strNum(fuel?.alternate_burn || fuel?.alternateBurn);
+  const fuelReserve = strNum(fuel?.reserve);
+  const fuelExtra   = strNum(fuel?.extra);
+  const fuelTaxi    = strNum(fuel?.taxi);
+
+  // Weights
+  const zfw = strNum(weights?.est_zfw || weights?.estZfw || gen?.est_zfw);
+  const tow = strNum(weights?.est_tow || weights?.estTow || gen?.est_tow);
+  const ldw = strNum(weights?.est_ldw || weights?.estLdw || gen?.est_ldw);
+  const paxCount = strNum(weights?.pax_count || weights?.paxCount || gen?.pax_count);
+
+  // Flight info
+  const aircraft   = strStr(gen?.aircraft_icao || gen?.aircraftIcao || node?.aircraft);
+  const regIcao    = strStr(gen?.reg_icao || gen?.regIcao || node?.registration);
+  const cruiseAlt  = strStr(gen?.initial_altitude || gen?.initialAltitude || node?.altitude);
+  const costIndex  = strStr(gen?.cost_index || gen?.costIndex);
+  const ete        = strStr(gen?.planned_enroute_time || gen?.plannedEnrouteTime);
+  const originIcao = strStr(orig?.orig_icao || orig?.icao_code || orig?.icao || node?.origin_icao);
+  const destIcao   = strStr(dest?.icao_code || dest?.icao || node?.dest_icao);
+  const altnIcao   = strStr(altn?.icao_code || altn?.icao || orig?.altn_icao || node?.altn_icao);
+  const timeGenerated = strStr(gen?.time_generated || gen?.timeGenerated || node?.time_generated);
+  const remarks    = strStr(gen?.dx_rmk || gen?.sys_rmk || node?.remarks);
+
+  const hasOFPData = Boolean(aircraft || fuelRamp || zfw || ete || originIcao);
+
   return {
-    available: Boolean(url || html || pdfUrl || (node && typeof node === "object" && Object.keys(node).length > 0)),
-    url: url || null,
+    available: Boolean(url || html || pdfUrl || hasOFPData),
+    url:    url    || null,
     pdfUrl: pdfUrl || null,
-    html: html || null,
+    html:   html   || null,
+    // Structured OFP fields
+    ofp: hasOFPData ? {
+      units,
+      route,
+      originIcao,
+      destIcao,
+      altnIcao,
+      aircraft,
+      registration: regIcao,
+      cruiseAlt,
+      costIndex,
+      ete,
+      timeGenerated,
+      remarks,
+      fuel: { ramp: fuelRamp, burn: fuelBurn, altn: fuelAltn, reserve: fuelReserve, extra: fuelExtra, taxi: fuelTaxi },
+      weights: { zfw, tow, ldw, paxCount },
+    } : null,
     raw: node && typeof node === "object" ? node : null,
   };
 };
@@ -29182,6 +29243,172 @@ app.delete("/api/admin/alerts/:id", async (req, res) => {
   }
 });
 
+// ---- Slotted Events helpers ----
+
+const flattenSlottedEvent = (raw) => {
+  const node = raw?.data && typeof raw.data === "object" ? raw.data : raw;
+  const attrs = node?.attributes || node || {};
+  const id = Number(node?.id || attrs?.id || 0) || 0;
+
+  const slots = (() => {
+    const included = Array.isArray(raw?.included) ? raw.included : [];
+    const slotRel = node?.relationships?.slots?.data;
+    const slotIds = new Set(
+      Array.isArray(slotRel) ? slotRel.map((s) => String(s?.id || "")) : []
+    );
+    const fromIncluded = included
+      .filter((inc) => inc?.type === "slotted-event-slot" && (slotIds.size === 0 || slotIds.has(String(inc?.id || ""))))
+      .map((inc) => {
+        const a = inc?.attributes || inc || {};
+        return {
+          id: Number(inc?.id || a?.id || 0) || 0,
+          time: String(a?.departure_time || a?.time || a?.start || ""),
+          available: Boolean(a?.available ?? true),
+          booked: Boolean(a?.booked ?? false),
+          registeredPilotId: Number(a?.registered_pilot_id || 0) || null,
+        };
+      })
+      .sort((a, b) => a.time.localeCompare(b.time));
+
+    const directSlots = Array.isArray(attrs?.slots) ? attrs.slots : [];
+    if (fromIncluded.length) return fromIncluded;
+    return directSlots.map((s) => ({
+      id: Number(s?.id || 0) || 0,
+      time: String(s?.departure_time || s?.time || s?.start || ""),
+      available: Boolean(s?.available ?? true),
+      booked: Boolean(s?.booked ?? false),
+      registeredPilotId: Number(s?.registered_pilot_id || 0) || null,
+    })).sort((a, b) => a.time.localeCompare(b.time));
+  })();
+
+  return {
+    id,
+    name: String(attrs?.name || "").trim(),
+    description: String(attrs?.description || "").trim() || null,
+    image: String(attrs?.image || attrs?.image_url || "").trim() || null,
+    start: String(attrs?.start || attrs?.starts_at || "").trim() || null,
+    end: String(attrs?.end || attrs?.ends_at || "").trim() || null,
+    showFrom: String(attrs?.show_from || attrs?.advertise_from || "").trim() || null,
+    slotInterval: Number(attrs?.slot_interval || attrs?.slotInterval || 0) || null,
+    points: Number(attrs?.points || 0) || 0,
+    registrationCount: Number(attrs?.registration_count || attrs?.registrationCount || 0) || 0,
+    departureAirport: String(attrs?.departure_airport || attrs?.departureAirport || attrs?.departure_icao || "").trim() || null,
+    arrivalAirport: String(attrs?.arrival_airport || attrs?.arrivalAirport || attrs?.arrival_icao || "").trim() || null,
+    hidden: Boolean(attrs?.hidden ?? false),
+    slots,
+    totalSlots: slots.length,
+    availableSlots: slots.filter((s) => s.available && !s.booked).length,
+  };
+};
+
+// ---- Admin: Slotted Events CRUD ----
+
+app.get("/api/admin/slotted-events", requireAdmin, async (_req, res) => {
+  try {
+    const raw = await fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at");
+    const events = (Array.isArray(raw) ? raw : []).map((item) => flattenSlottedEvent({ data: item }));
+    res.json({ slottedEvents: events });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load slotted events") });
+  }
+});
+
+app.get("/api/admin/slotted-events/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id || 0) || 0;
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+  try {
+    const raw = await apiRequest(`/activities/slotted-events/${id}?include=slots`);
+    res.json({ slottedEvent: flattenSlottedEvent(raw) });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load slotted event") });
+  }
+});
+
+app.post("/api/admin/slotted-events", requireAdmin, express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const payload = {
+      name: String(body.name || "").trim(),
+      description: String(body.description || "").trim() || null,
+      image: String(body.image || "").trim() || null,
+      start: String(body.start || "").trim() || null,
+      end: String(body.end || "").trim() || null,
+      show_from: String(body.showFrom || body.show_from || "").trim() || null,
+      slot_interval: Number(body.slotInterval || body.slot_interval || 5) || 5,
+      points: Number(body.points || 0) || 0,
+      departure_airport: String(body.departureAirport || body.departure_airport || "").trim() || null,
+      arrival_airport: String(body.arrivalAirport || body.arrival_airport || "").trim() || null,
+      hidden: Boolean(body.hidden ?? false),
+    };
+    const raw = await apiRequest("/activities/slotted-events", { method: "POST", body: payload });
+    res.status(201).json({ slottedEvent: flattenSlottedEvent(raw) });
+  } catch (error) {
+    res.status(422).json({ error: String(error?.message || "Failed to create slotted event") });
+  }
+});
+
+app.put("/api/admin/slotted-events/:id", requireAdmin, express.json(), async (req, res) => {
+  const id = Number(req.params.id || 0) || 0;
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+  try {
+    const body = req.body || {};
+    const payload = {};
+    if (body.name !== undefined) payload.name = String(body.name || "").trim();
+    if (body.description !== undefined) payload.description = String(body.description || "").trim() || null;
+    if (body.image !== undefined) payload.image = String(body.image || "").trim() || null;
+    if (body.start !== undefined) payload.start = String(body.start || "").trim() || null;
+    if (body.end !== undefined) payload.end = String(body.end || "").trim() || null;
+    if (body.showFrom !== undefined || body.show_from !== undefined)
+      payload.show_from = String(body.showFrom || body.show_from || "").trim() || null;
+    if (body.slotInterval !== undefined || body.slot_interval !== undefined)
+      payload.slot_interval = Number(body.slotInterval || body.slot_interval || 5) || 5;
+    if (body.points !== undefined) payload.points = Number(body.points || 0) || 0;
+    if (body.departureAirport !== undefined || body.departure_airport !== undefined)
+      payload.departure_airport = String(body.departureAirport || body.departure_airport || "").trim() || null;
+    if (body.arrivalAirport !== undefined || body.arrival_airport !== undefined)
+      payload.arrival_airport = String(body.arrivalAirport || body.arrival_airport || "").trim() || null;
+    if (body.hidden !== undefined) payload.hidden = Boolean(body.hidden);
+    const raw = await apiRequest(`/activities/slotted-events/${id}`, { method: "PUT", body: payload });
+    res.json({ slottedEvent: flattenSlottedEvent(raw) });
+  } catch (error) {
+    res.status(422).json({ error: String(error?.message || "Failed to update slotted event") });
+  }
+});
+
+app.delete("/api/admin/slotted-events/:id", requireAdmin, async (req, res) => {
+  const id = Number(req.params.id || 0) || 0;
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+  try {
+    await apiRequest(`/activities/slotted-events/${id}`, { method: "DELETE" });
+    res.json({ ok: true });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to delete slotted event") });
+  }
+});
+
+// ---- Public: Slotted Events ----
+
+app.get("/api/public/slotted-events", async (_req, res) => {
+  try {
+    const raw = await fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at");
+    const events = (Array.isArray(raw) ? raw : []).map((item) => flattenSlottedEvent({ data: item }));
+    res.json({ slottedEvents: events });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load slotted events") });
+  }
+});
+
+app.get("/api/public/slotted-events/:id", async (req, res) => {
+  const id = Number(req.params.id || 0) || 0;
+  if (!id) { res.status(400).json({ error: "Invalid ID" }); return; }
+  try {
+    const raw = await apiRequest(`/activities/slotted-events/${id}?include=slots`);
+    res.json({ slottedEvent: flattenSlottedEvent(raw) });
+  } catch (error) {
+    res.status(502).json({ error: String(error?.message || "Failed to load slotted event") });
+  }
+});
+
 // ---- Admin: Operations Badges CRUD ----
 
 app.get("/api/admin/operations/badges", async (_req, res) => {
@@ -29264,6 +29491,28 @@ app.delete("/api/admin/operations/badges/:badgeId/pilots/:pilotId", async (req, 
     res.status(204).end();
   } catch (error) {
     res.status(502).json({ error: String(error?.message || "Failed to revoke badge") });
+  }
+});
+
+// ---- Admin: Badge image upload ----
+app.post("/api/admin/badge-image-upload", requireAdmin, express.json({ limit: "8mb" }), async (req, res) => {
+  const { dataUrl } = req.body || {};
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith("data:image/")) {
+    res.status(400).json({ error: "Invalid image data URL" }); return;
+  }
+  const match = dataUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+  if (!match) { res.status(400).json({ error: "Malformed data URL" }); return; }
+  const mime = match[1];
+  const base64Data = match[2];
+  const ext = { "image/png": "png", "image/gif": "gif", "image/webp": "webp" }[mime] || "jpg";
+  const filename = `${Date.now()}-${randomBytes(6).toString("hex")}.${ext}`;
+  const badgeImgDir = path.join(path.dirname(AUTH_STORE_FILE), "badge-images");
+  try {
+    await fs.promises.mkdir(badgeImgDir, { recursive: true });
+    await fs.promises.writeFile(path.join(badgeImgDir, filename), Buffer.from(base64Data, "base64"));
+    res.json({ url: `/badge-images/${filename}` });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || "Failed to save image") });
   }
 });
 
@@ -30153,7 +30402,42 @@ app.get("/api/public/activities", async (_req, res) => {
       return !liveIds.has(linkedId);
     });
 
-    const activities = [...liveActivities, ...manualFallbackActivities].sort((left, right) => {
+    const slottedEventsRaw = await fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at").catch(() => []);
+    const slottedEvents = (Array.isArray(slottedEventsRaw) ? slottedEventsRaw : [])
+      .map((item) => flattenSlottedEvent({ data: item }))
+      .filter((ev) => !ev.hidden && ev.name && ev.id > 0)
+      .map((ev) => ({
+        id: `slotted-${ev.id}`,
+        source: "vamsys",
+        originalId: ev.id,
+        category: "Event",
+        title: ev.name,
+        content: ev.description || ev.name,
+        summary: ev.description || null,
+        author: "vAMSYS",
+        date: ev.start || ev.showFrom || new Date().toISOString(),
+        status: "Published",
+        views: ev.registrationCount,
+        tag: ev.departureAirport
+          ? `${ev.departureAirport}${ev.arrivalAirport ? ` → ${ev.arrivalAirport}` : ""}`
+          : null,
+        linkUrl: `/activities/slotted/${ev.id}`,
+        featured: false,
+        activityType: "SlottedEvent",
+        activitySubtype: ev.slotInterval ? `${ev.slotInterval} min/slot` : null,
+        target: null,
+        imageUrl: ev.image || null,
+        registrationOpen: true,
+        registrations: ev.registrationCount,
+        completions: 0,
+        points: ev.points,
+        start: ev.start,
+        end: ev.end,
+        showFrom: ev.showFrom,
+        tags: [],
+      }));
+
+    const activities = [...liveActivities, ...manualFallbackActivities, ...slottedEvents].sort((left, right) => {
       const orderDiff = Number(Boolean(right?.featured)) - Number(Boolean(left?.featured));
       if (orderDiff !== 0) {
         return orderDiff;
@@ -33045,7 +33329,7 @@ app.get("/api/app/config", (_req, res) => {
 // Двуязычный каталог достижений (ru/en) — сид по умолчанию.
 // Боевой каталог хранится в data/achievements-catalog.json (редактируемая «база»);
 // при отсутствии файла он засевается отсюда. У каждой цели есть необязательное
-// поле rewardBadgeId для будущей привязки наградного бейджа (пока не выдаётся).
+// поле rewardBadgeId — наградной бейдж выдаётся при разблокировке цели (см. /api/pilot/achievements).
 // Клиент рендерит по языку; для обратной совместимости эндпоинт также отдаёт
 // title/label = русские.
 const DEFAULT_ACHIEVEMENTS_CATALOG = [
@@ -33118,7 +33402,7 @@ const DEFAULT_ACHIEVEMENT_CATEGORIES = [
 
 // Редактируемый каталог достижений («база»): читается из файла, при отсутствии —
 // засевается из дефолтов. Модель: { categories:[...], achievements:[...] }.
-// У каждой цели есть необязательное поле rewardBadgeId (пока не выдаётся),
+// У каждой цели есть необязательное поле rewardBadgeId (наградной бейдж при разблокировке),
 // у каждого достижения — необязательный categoryId.
 let achievementsCatalogCache = null;
 
@@ -33322,6 +33606,7 @@ app.get("/api/pilot/achievements", async (req, res) => {
           tierEn: tier.labelEn,
           icon: ach.icon,
           id: tier.id,
+          rewardBadgeId: tier.rewardBadgeId || null,
         });
       }
       return {
@@ -33359,8 +33644,36 @@ app.get("/api/pilot/achievements", async (req, res) => {
     };
   });
 
+  // Выдача наградных бейджей за свежеразблокированные цели (rewardBadgeId в каталоге).
+  // Бейдж выдаётся один раз; локальный title/icon берётся из LOCAL_BADGES_CATALOG,
+  // для operations-бейджей enrichment произойдёт на ближайшем syncPilotBadges (по id).
+  const awardedBadges = [];
+  if (newlyUnlocked.length) {
+    const existingAwards = getPilotBadgeAwards(pilot);
+    const seenRewards = new Set();
+    for (const entry of newlyUnlocked) {
+      const badgeId = String(entry.rewardBadgeId || "").trim();
+      if (!badgeId || seenRewards.has(badgeId)) continue;
+      seenRewards.add(badgeId);
+      if (existingAwards.some((b) => b.id === badgeId)) continue;
+      const local = LOCAL_BADGES_CATALOG.find((b) => b.id === badgeId) || null;
+      upsertPilotBadgeAward(pilot, {
+        id: badgeId,
+        title: local?.title || "",
+        description: local?.description || "",
+        icon: local?.icon || "",
+        color: local?.color || "",
+        iconUrl: local ? buildBadgeIconDataUrl({ icon: local.icon, color: local.color }) : null,
+        source: "achievement",
+        metadata: { achievementTierId: entry.id, achievementRu: entry.achievementRu, achievementEn: entry.achievementEn },
+      });
+      awardedBadges.push(badgeId);
+      entry.rewardBadgeAwarded = true;
+    }
+  }
+
   if (newlyUnlocked.length) persistAchievements();
-  res.json({ ok: true, achievements: result, categories: catalog.categories, metrics, newlyUnlocked });
+  res.json({ ok: true, achievements: result, categories: catalog.categories, metrics, newlyUnlocked, awardedBadges });
 });
 
 // Админ: каталог достижений (определения из data/achievements-catalog.json) +
@@ -34329,6 +34642,7 @@ mountEmailCampaigns(app, {
 });
 
 if (SERVE_STATIC) {
+  app.use("/badge-images", express.static(path.join(path.dirname(AUTH_STORE_FILE), "badge-images")));
   app.use(express.static(DIST_DIR));
   app.get(/^(?!\/api\/).*/, (_req, res) => {
     res.sendFile(path.join(DIST_DIR, "index.html"));

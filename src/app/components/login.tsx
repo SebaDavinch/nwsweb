@@ -89,7 +89,7 @@ export function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(227,30,36,0.08),transparent_28%),linear-gradient(135deg,#f8fafc_0%,#eef2f7_45%,#f7f7f7_100%)] flex items-center justify-center px-4 py-12">
+    <div className="min-h-screen bg-[radial-gradient(circle_at_top,rgba(227,30,36,0.08),transparent_28%),linear-gradient(135deg,#f8fafc_0%,#eef2f7_45%,#f7f7f7_100%)] dark:bg-gray-950 dark:bg-none flex items-center justify-center px-4 py-12">
       <div className="max-w-md w-full">
         {/* Logo & Title */}
         <div className="text-center mb-8">
@@ -101,7 +101,7 @@ export function Login() {
         </div>
 
         {/* Login Card */}
-        <div className="rounded-2xl border border-white/80 bg-white/95 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.12)] backdrop-blur">
+        <div className="rounded-2xl border border-white/80 dark:border-gray-700 bg-white/95 dark:bg-gray-900 p-8 shadow-[0_20px_60px_rgba(15,23,42,0.12)] backdrop-blur">
           <h2 className="text-2xl text-[#2A2A2A] mb-6 text-center">
             {t("login.title")}
           </h2>

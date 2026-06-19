@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Award,
   Edit2,
   ExternalLink,
+  ImagePlus,
   Loader2,
   Plus,
   RefreshCcw,
   Search,
   ShieldAlert,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "../ui/badge";
@@ -57,7 +60,19 @@ interface NotamForm {
   tag: string;
   url: string;
   sendToDiscord: boolean;
+  // Badge
+  createBadge: boolean;
+  badgeName: string;
+  badgeDescription: string;
+  badgeColor: string;
+  badgeImagePreview: string | null;
+  badgeImageFile: File | null;
 }
+
+const BADGE_COLORS = [
+  "#E31E24", "#2563EB", "#16A34A", "#D97706", "#7C3AED",
+  "#0891B2", "#DB2777", "#65A30D", "#EA580C", "#1d1d1f",
+];
 
 const EMPTY_FORM: NotamForm = {
   title: "",
@@ -68,6 +83,12 @@ const EMPTY_FORM: NotamForm = {
   tag: "",
   url: "",
   sendToDiscord: false,
+  createBadge: false,
+  badgeName: "",
+  badgeDescription: "",
+  badgeColor: "#E31E24",
+  badgeImagePreview: null,
+  badgeImageFile: null,
 };
 
 const TYPE_CLASSES: Record<NotamType, string> = {
@@ -108,6 +129,84 @@ const formatDate = (value?: string | null) => {
   if (Number.isNaN(d.getTime())) return value;
   return d.toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 };
+
+// ── Drag-n-drop image zone ────────────────────────────────────────────────────
+
+function BadgeImageZone({
+  preview,
+  onFileChange,
+  onClear,
+}: {
+  preview: string | null;
+  onFileChange: (file: File, dataUrl: string) => void;
+  onClear: () => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const processFile = (file: File) => {
+    if (!file.type.startsWith("image/")) { toast.error("Только изображения"); return; }
+    if (file.size > 4 * 1024 * 1024) { toast.error("Файл не должен превышать 4 МБ"); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result;
+      if (typeof dataUrl === "string") onFileChange(file, dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) processFile(file);
+  }, []);
+
+  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); setDragging(true); };
+  const onDragLeave = () => setDragging(false);
+
+  if (preview) {
+    return (
+      <div className="relative inline-block">
+        <img src={preview} alt="Badge preview" className="h-24 w-24 rounded-xl object-cover border border-gray-200 shadow-sm" />
+        <button
+          type="button"
+          onClick={onClear}
+          className="absolute -top-2 -right-2 h-5 w-5 rounded-full bg-gray-800 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => inputRef.current?.click()}
+      onDrop={onDrop}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-6 transition-all ${
+        dragging ? "border-[#E31E24] bg-red-50" : "border-gray-200 bg-gray-50 hover:border-gray-300 hover:bg-gray-100"
+      }`}
+    >
+      <ImagePlus className="h-7 w-7 text-gray-400" />
+      <div className="text-center">
+        <div className="text-sm font-medium text-gray-700">Перетащите изображение</div>
+        <div className="text-xs text-gray-400">или нажмите для выбора · PNG, JPG, WebP до 4 МБ</div>
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+      />
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function AdminNotams() {
   const { language } = useLanguage();
@@ -161,14 +260,41 @@ export function AdminNotams() {
       tag: notam.tag || "",
       url: notam.url || "",
       sendToDiscord: false,
+      createBadge: false,
+      badgeName: notam.title,
+      badgeDescription: "",
+      badgeColor: "#E31E24",
+      badgeImagePreview: null,
+      badgeImageFile: null,
     });
     setDialogOpen(true);
   };
 
+  const uploadBadgeImage = async (dataUrl: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/admin/badge-image-upload", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      const payload = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(payload?.error || "Upload failed");
+      return typeof payload?.url === "string" ? payload.url : null;
+    } catch (e) {
+      toast.error(tr("Ошибка загрузки изображения: ", "Image upload failed: ") + String(e instanceof Error ? e.message : e));
+      return null;
+    }
+  };
+
   const handleSave = async () => {
     if (!form.title.trim()) { toast.error(tr("Заголовок обязателен", "Title is required")); return; }
+    if (form.createBadge && !form.badgeName.trim()) {
+      toast.error(tr("Название бейджа обязательно", "Badge name is required")); return;
+    }
     setIsSaving(true);
     try {
+      // 1. Save NOTAM
       const body = {
         title: form.title.trim(),
         content: form.content.trim(),
@@ -188,7 +314,37 @@ export function AdminNotams() {
       });
       const payload = await res.json().catch(() => null);
       if (!res.ok) throw new Error(payload?.error || "Failed to save NOTAM");
-      toast.success(editingNotam ? tr("NOTAM обновлён", "NOTAM updated") : tr("NOTAM создан", "NOTAM created"));
+
+      // 2. Create badge if requested
+      if (form.createBadge) {
+        let imageUrl: string | null = null;
+        if (form.badgeImagePreview) {
+          imageUrl = await uploadBadgeImage(form.badgeImagePreview);
+        }
+        const badgeBody: Record<string, unknown> = {
+          name: form.badgeName.trim(),
+          description: form.badgeDescription.trim() || undefined,
+          color: form.badgeColor,
+          manually_awardable: true,
+        };
+        if (imageUrl) badgeBody.image = imageUrl;
+
+        const badgeRes = await fetch("/api/admin/operations/badges", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(badgeBody),
+        });
+        const badgePayload = await badgeRes.json().catch(() => null);
+        if (!badgeRes.ok) {
+          toast.warning(tr("NOTAM создан, но бейдж не удалось создать: ", "NOTAM saved, but badge failed: ") + String(badgePayload?.error || "Unknown error"));
+        } else {
+          toast.success(tr("NOTAM и бейдж успешно созданы", "NOTAM and badge created"));
+        }
+      } else {
+        toast.success(editingNotam ? tr("NOTAM обновлён", "NOTAM updated") : tr("NOTAM создан", "NOTAM created"));
+      }
+
       setDialogOpen(false);
       void loadNotams({ silent: true });
     } catch (e) {
@@ -353,7 +509,12 @@ export function AdminNotams() {
           <div className="space-y-4 pt-2">
             <div>
               <Label>{tr("Заголовок", "Title")} *</Label>
-              <Input className="mt-1" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="NOTAM title" />
+              <Input
+                className="mt-1"
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value, badgeName: f.createBadge && !f.badgeName ? e.target.value : f.badgeName }))}
+                placeholder="NOTAM title"
+              />
             </div>
             <div>
               <Label>{tr("Содержимое", "Content")}</Label>
@@ -398,6 +559,8 @@ export function AdminNotams() {
                 <Input className="mt-1" value={form.url} onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))} placeholder="https://..." />
               </div>
             </div>
+
+            {/* Checkboxes */}
             <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
               <label className="flex cursor-pointer items-center gap-3">
                 <input
@@ -424,6 +587,127 @@ export function AdminNotams() {
                 </div>
               </label>
             </div>
+
+            {/* Badge section */}
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
+              {/* Toggle header */}
+              <label className="flex cursor-pointer items-center justify-between bg-gray-50 px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <Award className="h-4 w-4 text-[#E31E24]" />
+                  <div>
+                    <div className="text-sm font-semibold text-gray-900">{tr("Создать бейдж", "Create Badge")}</div>
+                    <div className="text-xs text-gray-500">{tr("Создать бейдж в vAMSYS вместе с этим NOTAMом", "Create a badge in vAMSYS alongside this NOTAM")}</div>
+                  </div>
+                </div>
+                {/* Slider toggle */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={form.createBadge}
+                  onClick={() => setForm((f) => ({
+                    ...f,
+                    createBadge: !f.createBadge,
+                    badgeName: !f.createBadge && !f.badgeName ? f.title : f.badgeName,
+                  }))}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none ${
+                    form.createBadge ? "bg-[#E31E24]" : "bg-gray-200"
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                      form.createBadge ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </label>
+
+              {/* Collapsible badge fields */}
+              <div
+                className="overflow-hidden transition-all duration-300 ease-in-out"
+                style={{ maxHeight: form.createBadge ? "700px" : "0px" }}
+              >
+                <div className="space-y-4 border-t border-gray-200 bg-white p-4">
+                  {/* Name */}
+                  <div>
+                    <Label>{tr("Название бейджа", "Badge Name")} *</Label>
+                    <Input
+                      className="mt-1"
+                      value={form.badgeName}
+                      onChange={(e) => setForm((f) => ({ ...f, badgeName: e.target.value }))}
+                      placeholder={tr("Название бейджа...", "Badge name...")}
+                    />
+                  </div>
+
+                  {/* Description */}
+                  <div>
+                    <Label>{tr("Описание", "Description")}</Label>
+                    <textarea
+                      className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring min-h-[72px]"
+                      value={form.badgeDescription}
+                      onChange={(e) => setForm((f) => ({ ...f, badgeDescription: e.target.value }))}
+                      placeholder={tr("Краткое описание бейджа...", "Short badge description...")}
+                    />
+                  </div>
+
+                  {/* Color */}
+                  <div>
+                    <Label>{tr("Цвет бейджа", "Badge Color")}</Label>
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {BADGE_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => setForm((f) => ({ ...f, badgeColor: c }))}
+                          className={`h-7 w-7 rounded-full transition-all ${form.badgeColor === c ? "ring-2 ring-offset-2 ring-gray-400 scale-110" : "hover:scale-105"}`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                      <div className="flex items-center gap-2 ml-1">
+                        <input
+                          type="color"
+                          value={form.badgeColor}
+                          onChange={(e) => setForm((f) => ({ ...f, badgeColor: e.target.value }))}
+                          className="h-7 w-7 cursor-pointer rounded-full border-0 p-0.5 bg-transparent"
+                          title={tr("Свой цвет", "Custom color")}
+                        />
+                        <span className="text-xs text-gray-400 font-mono">{form.badgeColor}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Image */}
+                  <div>
+                    <Label>{tr("Изображение бейджа", "Badge Image")}</Label>
+                    <div className="mt-2">
+                      <BadgeImageZone
+                        preview={form.badgeImagePreview}
+                        onFileChange={(_file, dataUrl) => setForm((f) => ({ ...f, badgeImagePreview: dataUrl, badgeImageFile: _file }))}
+                        onClear={() => setForm((f) => ({ ...f, badgeImagePreview: null, badgeImageFile: null }))}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Preview */}
+                  <div className="flex items-center gap-3 rounded-lg bg-gray-50 p-3">
+                    <div
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white text-sm font-bold shadow-sm"
+                      style={{ backgroundColor: form.badgeColor }}
+                    >
+                      {form.badgeImagePreview ? (
+                        <img src={form.badgeImagePreview} className="h-10 w-10 rounded-full object-cover" alt="" />
+                      ) : (
+                        <Award className="h-5 w-5" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-gray-900">{form.badgeName || tr("Название бейджа", "Badge name")}</div>
+                      <div className="text-xs text-gray-500">{form.badgeDescription || tr("Описание бейджа", "Badge description")}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>{tr("Отмена", "Cancel")}</Button>
               <Button onClick={handleSave} disabled={isSaving}>

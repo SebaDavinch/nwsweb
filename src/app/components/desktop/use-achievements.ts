@@ -67,6 +67,8 @@ interface NewlyUnlocked {
   tierEn?: string;
   icon: string;
   id: string;
+  rewardBadgeId?: string | null;
+  rewardBadgeAwarded?: boolean;
 }
 
 /**
@@ -93,7 +95,8 @@ export function useAchievements(pollMs = 60000) {
         const achievement = (ru ? n.achievementRu : n.achievementEn) || n.achievement;
         const tier = (ru ? n.tierRu : n.tierEn) || n.tier;
         const title = ru ? "🏆 Достижение получено!" : "🏆 Achievement unlocked!";
-        const body = `${achievement}: ${tier}`;
+        const reward = n.rewardBadgeAwarded ? (ru ? " · бейдж выдан" : " · badge awarded") : "";
+        const body = `${achievement}: ${tier}${reward}`;
         void notify(title, body);
         addNotification({
           category: "achievement",
