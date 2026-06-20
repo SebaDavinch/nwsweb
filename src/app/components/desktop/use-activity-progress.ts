@@ -15,9 +15,25 @@ export interface ActivityProgressItem {
   } | null;
 }
 
-/** Прогресс по мероприятиям, на которые записан пилот (для трекинга на обзорной). */
-export function useActivityProgress(limit = 4): { items: ActivityProgressItem[]; loading: boolean } {
+export interface SlotWidgetItem {
+  eventId: number;
+  eventName: string;
+  slotTime: string;
+  callsign: string | null;
+  departureAirport: string | null;
+  arrivalAirport: string | null;
+  routeId: number | null;
+  registrationId: number;
+}
+
+/** Прогресс по мероприятиям + записанные слоты. */
+export function useActivityProgress(limit = 4): {
+  items: ActivityProgressItem[];
+  slots: SlotWidgetItem[];
+  loading: boolean;
+} {
   const [items, setItems] = useState<ActivityProgressItem[]>([]);
+  const [slots, setSlots] = useState<SlotWidgetItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,7 +41,9 @@ export function useActivityProgress(limit = 4): { items: ActivityProgressItem[];
     fetch(`/api/pilot/activities/progress-widget?limit=${limit}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((p) => {
-        if (active && Array.isArray(p?.items)) setItems(p.items);
+        if (!active) return;
+        if (Array.isArray(p?.items)) setItems(p.items);
+        if (Array.isArray(p?.slots)) setSlots(p.slots);
       })
       .catch(() => null)
       .finally(() => {
@@ -36,5 +54,5 @@ export function useActivityProgress(limit = 4): { items: ActivityProgressItem[];
     };
   }, [limit]);
 
-  return { items, loading };
+  return { items, slots, loading };
 }

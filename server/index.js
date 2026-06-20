@@ -15368,8 +15368,25 @@ app.get("/api/pilot/activities/progress-widget", async (req, res) => {
       })
     );
 
+    const pilotId = Number(session?.user?.id || 0) || 0;
+    const allReminders = readSlotRemindersStore();
+    const slots = allReminders
+      .filter((r) => r.pilotId === pilotId && r.slotTime && new Date(r.slotTime).getTime() > Date.now() - 2 * 60 * 60 * 1000)
+      .sort((a, b) => new Date(a.slotTime).getTime() - new Date(b.slotTime).getTime())
+      .map((r) => ({
+        eventId: r.eventId,
+        eventName: r.eventName,
+        slotTime: r.slotTime,
+        callsign: r.callsign || null,
+        departureAirport: r.departureAirport || null,
+        arrivalAirport: r.arrivalAirport || null,
+        routeId: r.routeId || null,
+        registrationId: r.registrationId,
+      }));
+
     res.json({
       items,
+      slots,
       total: items.length,
     });
   } catch (error) {

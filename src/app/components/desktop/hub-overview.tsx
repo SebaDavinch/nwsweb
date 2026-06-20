@@ -11,6 +11,7 @@ import {
   ArrowRight,
   History,
   CalendarCheck,
+  Timer,
 } from "lucide-react";
 import { useLanguage } from "../../context/language-context";
 import { useAuth } from "../../context/auth-context";
@@ -105,7 +106,7 @@ export function HubOverview({
   const { pilot } = useAuth();
   const { isDark } = useAppTheme();
   const { booking, upcoming } = useActiveBooking();
-  const { items: activityProgress } = useActivityProgress(4);
+  const { items: activityProgress, slots: slotProgress } = useActivityProgress(4);
   const [balance, setBalance] = useState<number | null>(null);
   const [flights, setFlights] = useState<RecentFlight[]>([]);
   const [heroShots, setHeroShots] = useState<string[]>([]);
@@ -383,8 +384,8 @@ export function HubOverview({
         />
       </div>
 
-      {/* Мои мероприятия — прогресс (если записан) */}
-      {activityProgress.length > 0 ? (
+      {/* Мои мероприятия — прогресс + слоты */}
+      {(activityProgress.length > 0 || slotProgress.length > 0) ? (
         <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-900">
           <div className="mb-3 flex items-center justify-between">
             <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-100">
@@ -399,6 +400,34 @@ export function HubOverview({
             ) : null}
           </div>
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            {slotProgress.map((s) => {
+              const slotDt = new Date(s.slotTime);
+              const slotFmt = slotDt.toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+              const minsUntil = Math.round((slotDt.getTime() - Date.now()) / 60000);
+              const soon = minsUntil >= 0 && minsUntil <= 60;
+              return (
+                <a
+                  key={`slot-${s.eventId}`}
+                  href="/activities"
+                  className="rounded-xl border border-violet-200/60 bg-violet-50/60 p-3 text-left transition-colors hover:bg-violet-100/60 dark:border-violet-500/20 dark:bg-violet-500/10 dark:hover:bg-violet-500/20"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-semibold text-zinc-800 dark:text-zinc-100">{s.eventName}</span>
+                    <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${soon ? "bg-red-500 text-white" : "bg-violet-100 text-violet-600 dark:bg-violet-500/20 dark:text-violet-300"}`}>
+                      {tr("Слот", "Slot")}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
+                    <Timer className="h-3 w-3 shrink-0 text-violet-500" />
+                    <span>{slotFmt}</span>
+                    {s.callsign ? <span className="ml-1 font-mono font-bold text-violet-600 dark:text-violet-300">{s.callsign}</span> : null}
+                  </div>
+                  {s.departureAirport && s.arrivalAirport ? (
+                    <div className="mt-1 font-mono text-[11px] text-zinc-400 dark:text-zinc-500">{s.departureAirport} → {s.arrivalAirport}</div>
+                  ) : null}
+                </a>
+              );
+            })}
             {activityProgress.map((a) => {
               const pct = a.progress?.progressPercent ?? 0;
               const done = a.progress?.status === "completed" || pct >= 100;

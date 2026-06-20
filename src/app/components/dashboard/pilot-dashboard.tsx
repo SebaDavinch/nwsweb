@@ -246,6 +246,16 @@ export function PilotDashboard() {
         legTotal?: number;
       } | null;
     }>;
+    slots: Array<{
+      eventId: number;
+      eventName: string;
+      slotTime: string;
+      callsign: string | null;
+      departureAirport: string | null;
+      arrivalAirport: string | null;
+      routeId: number | null;
+      registrationId: number;
+    }>;
   } | null>(null);
   const [isActivityProgressLoading, setIsActivityProgressLoading] = useState(false);
   const [isPilotApiConnectedForActivities, setIsPilotApiConnectedForActivities] = useState(true);
@@ -319,9 +329,9 @@ export function PilotDashboard() {
         if (!response.ok) {
           if (String(payload?.code || "") === "pilot_api_not_connected") {
             setIsPilotApiConnectedForActivities(false);
-            setActivityProgressWidget({ items: [] });
+            setActivityProgressWidget({ items: [], slots: [] });
           } else {
-            setActivityProgressWidget({ items: [] });
+            setActivityProgressWidget({ items: [], slots: [] });
           }
           return;
         }
@@ -329,6 +339,7 @@ export function PilotDashboard() {
         setIsPilotApiConnectedForActivities(true);
         setActivityProgressWidget({
           items: Array.isArray(payload?.items) ? payload.items : [],
+          slots: Array.isArray(payload?.slots) ? payload.slots : [],
         });
       } catch {
         if (active) {
@@ -991,6 +1002,9 @@ export function PilotDashboard() {
                            <span className="text-sm font-semibold text-white">{t("dashboard.activities.widget.title")}</span>
                          </div>
                          <div className="flex items-center gap-2">
+                           {Array.isArray(activityProgressWidget?.slots) && activityProgressWidget.slots.length > 0 ? (
+                             <span className="text-[11px] font-bold text-violet-400">{activityProgressWidget.slots.length} {tr("слот(ов)", "slot(s)")}</span>
+                           ) : null}
                            {Array.isArray(activityProgressWidget?.items) && activityProgressWidget.items.length > 0 ? (
                              <span className="text-[11px] text-cyan-400 font-medium">{activityProgressWidget.items.length} {tr("активных", "active")}</span>
                            ) : null}
@@ -1020,61 +1034,92 @@ export function PilotDashboard() {
                                  {t("settings.pilotApi.connect")}
                                </Button>
                              </div>
-                           ) : Array.isArray(activityProgressWidget?.items) && activityProgressWidget.items.length > 0 ? (
-                             <>
-                               {activityProgressWidget.items.map((item) => {
-                                 const progressPercent = Math.max(0, Math.min(100, Number(item?.progress?.progressPercent || 0) || 0));
-                                 const status = String(item?.progress?.status || "not_started").trim();
-                                 const legCompleted = Number(item?.progress?.legCompleted || 0) || 0;
-                                 const legTotal = Number(item?.progress?.legTotal || 0) || 0;
-                                 const isDone = status === "completed";
-                                 const isNext = status === "in_progress" && !isDone;
-                                 const legLabel = isDone ? tr("ВЫПОЛНЕНО", "DONE") : isNext ? tr("В ПРОЦЕССЕ", "NEXT") : tr("НЕ НАЧАТО", "PENDING");
-                                 const legAccent = isDone ? "text-emerald-400" : isNext ? "text-cyan-400" : "text-gray-500";
-                                 const circleClass = isDone
-                                   ? "bg-emerald-500/20 border-emerald-500 text-emerald-400"
-                                   : isNext
-                                   ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-400"
-                                   : "bg-white/5 border-white/10 text-gray-500";
-
-                                 return (
-                                   <div key={item.registrationId} className="rounded-xl bg-white/5 border border-white/5 p-3 space-y-2">
-                                     <div className="flex items-center justify-between gap-2">
-                                       <div className="flex items-center gap-2.5 min-w-0">
-                                         <div className={`w-7 h-7 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 ${circleClass}`}>
-                                           {isDone ? "✓" : isNext ? "▶" : "○"}
+                           ) : (() => {
+                             const hasSlots = Array.isArray(activityProgressWidget?.slots) && activityProgressWidget.slots.length > 0;
+                             const hasItems = Array.isArray(activityProgressWidget?.items) && activityProgressWidget.items.length > 0;
+                             if (!hasSlots && !hasItems) {
+                               return (
+                                 <div className="py-4 space-y-2 text-center">
+                                   <div className="text-sm text-gray-400">{t("dashboard.activities.widget.empty")}</div>
+                                   <button onClick={() => navigate("/activities")} className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors">
+                                     {t("dashboard.activities.widget.viewAll")} →
+                                   </button>
+                                 </div>
+                               );
+                             }
+                             return (
+                               <>
+                                 {hasSlots && activityProgressWidget!.slots.map((slot) => {
+                                   const slotDt = new Date(slot.slotTime);
+                                   const locale = language === "ru" ? "ru-RU" : "en-US";
+                                   const slotFmt = slotDt.toLocaleString(locale, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+                                   const minsUntil = Math.round((slotDt.getTime() - Date.now()) / 60000);
+                                   const soon = minsUntil >= 0 && minsUntil <= 60;
+                                   return (
+                                     <a key={`slot-${slot.eventId}`} href="/activities" className="block rounded-xl bg-violet-500/10 border border-violet-500/20 p-3 space-y-1.5 transition-colors hover:bg-violet-500/20">
+                                       <div className="flex items-center justify-between gap-2">
+                                         <span className="text-sm font-semibold text-white truncate">{slot.eventName}</span>
+                                         <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${soon ? "bg-red-500 text-white" : "bg-violet-500/30 text-violet-300"}`}>
+                                           {tr("СЛОТ", "SLOT")}
+                                         </span>
+                                       </div>
+                                       <div className="flex items-center gap-2 text-xs text-gray-400">
+                                         <span>🕐</span>
+                                         <span>{slotFmt}</span>
+                                         {slot.callsign ? <span className="ml-1 font-mono font-bold text-violet-300">{slot.callsign}</span> : null}
+                                       </div>
+                                       {slot.departureAirport && slot.arrivalAirport ? (
+                                         <div className="font-mono text-[11px] text-gray-500">{slot.departureAirport} → {slot.arrivalAirport}</div>
+                                       ) : null}
+                                     </a>
+                                   );
+                                 })}
+                                 {hasItems && activityProgressWidget!.items.map((item) => {
+                                   const progressPercent = Math.max(0, Math.min(100, Number(item?.progress?.progressPercent || 0) || 0));
+                                   const status = String(item?.progress?.status || "not_started").trim();
+                                   const legCompleted = Number(item?.progress?.legCompleted || 0) || 0;
+                                   const legTotal = Number(item?.progress?.legTotal || 0) || 0;
+                                   const isDone = status === "completed";
+                                   const isNext = status === "in_progress" && !isDone;
+                                   const legLabel = isDone ? tr("ВЫПОЛНЕНО", "DONE") : isNext ? tr("В ПРОЦЕССЕ", "NEXT") : tr("НЕ НАЧАТО", "PENDING");
+                                   const legAccent = isDone ? "text-emerald-400" : isNext ? "text-cyan-400" : "text-gray-500";
+                                   const circleClass = isDone
+                                     ? "bg-emerald-500/20 border-emerald-500 text-emerald-400"
+                                     : isNext
+                                     ? "bg-cyan-500/10 border-cyan-500/50 text-cyan-400"
+                                     : "bg-white/5 border-white/10 text-gray-500";
+                                   return (
+                                     <div key={item.registrationId} className="rounded-xl bg-white/5 border border-white/5 p-3 space-y-2">
+                                       <div className="flex items-center justify-between gap-2">
+                                         <div className="flex items-center gap-2.5 min-w-0">
+                                           <div className={`w-7 h-7 rounded-full border flex items-center justify-center text-xs font-bold shrink-0 ${circleClass}`}>
+                                             {isDone ? "✓" : isNext ? "▶" : "○"}
+                                           </div>
+                                           <span className="text-sm font-medium text-white truncate">{item.activityTitle}</span>
                                          </div>
-                                         <span className="text-sm font-medium text-white truncate">{item.activityTitle}</span>
+                                         <span className={`text-[10px] font-bold uppercase tracking-widest shrink-0 ${legAccent}`}>{legLabel}</span>
                                        </div>
-                                       <span className={`text-[10px] font-bold uppercase tracking-widest shrink-0 ${legAccent}`}>{legLabel}</span>
+                                       <div>
+                                         <div className="flex items-center justify-between text-[11px] text-gray-400 mb-1">
+                                           <span>{legTotal > 0 ? `${legCompleted}/${legTotal} ${tr("плечей", "legs")}` : (item.activityType || "")}</span>
+                                           <span className="font-semibold text-white">{progressPercent}%</span>
+                                         </div>
+                                         <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                           <div
+                                             className={`h-full rounded-full transition-[width] duration-700 ${isDone ? "bg-gradient-to-r from-emerald-500 to-cyan-400" : isNext ? "bg-gradient-to-r from-cyan-500 to-blue-400" : "bg-white/20"}`}
+                                             style={{ width: `${progressPercent}%` }}
+                                           />
+                                         </div>
+                                       </div>
                                      </div>
-                                     <div>
-                                       <div className="flex items-center justify-between text-[11px] text-gray-400 mb-1">
-                                         <span>{legTotal > 0 ? `${legCompleted}/${legTotal} ${tr("плечей", "legs")}` : (item.activityType || "")}</span>
-                                         <span className="font-semibold text-white">{progressPercent}%</span>
-                                       </div>
-                                       <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-                                         <div
-                                           className={`h-full rounded-full transition-[width] duration-700 ${isDone ? "bg-gradient-to-r from-emerald-500 to-cyan-400" : isNext ? "bg-gradient-to-r from-cyan-500 to-blue-400" : "bg-white/20"}`}
-                                           style={{ width: `${progressPercent}%` }}
-                                         />
-                                       </div>
-                                     </div>
-                                   </div>
-                                 );
-                               })}
-                               <button onClick={() => navigate("/activities")} className="w-full text-center text-xs text-cyan-400 hover:text-cyan-300 py-1.5 transition-colors">
-                                 {t("dashboard.activities.widget.viewAll")} →
-                               </button>
-                             </>
-                           ) : (
-                             <div className="py-4 space-y-2 text-center">
-                               <div className="text-sm text-gray-400">{t("dashboard.activities.widget.empty")}</div>
-                               <button onClick={() => navigate("/activities")} className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors">
-                                 {t("dashboard.activities.widget.viewAll")} →
-                               </button>
-                             </div>
-                           )}
+                                   );
+                                 })}
+                                 <button onClick={() => navigate("/activities")} className="w-full text-center text-xs text-cyan-400 hover:text-cyan-300 py-1.5 transition-colors">
+                                   {t("dashboard.activities.widget.viewAll")} →
+                                 </button>
+                               </>
+                             );
+                           })()}
                          </div>
                        ) : null}
                      </div>
