@@ -344,7 +344,7 @@ export function PilotDashboard() {
         });
       } catch {
         if (active) {
-          setActivityProgressWidget({ items: [] });
+          setActivityProgressWidget({ items: [], slots: [] });
         }
       } finally {
         if (active) {
