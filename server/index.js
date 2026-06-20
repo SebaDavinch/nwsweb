@@ -55,6 +55,7 @@ const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET || "";
 const DISCORD_OAUTH_REDIRECT_URI = process.env.DISCORD_OAUTH_REDIRECT_URI || "";
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN || "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.TG_BOT_TOKEN || "";
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
 // Twitch OAuth (for pilot channel verification)
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || "";
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || "";
@@ -18588,6 +18589,387 @@ const sendTelegramTicketAdminNotification = async ({ eventKey = "ticketUpdated",
   });
 };
 
+// ─── AI Assistant (Claude) ───────────────────────────────────────────────────
+
+const VA_AI_SYSTEM_PROMPT = `Ты — официальный AI-помощник виртуальной авиакомпании Nordwind Virtual (VNWS). Работаешь на двух языках: русском и английском. Отвечай на том же языке, на котором написан вопрос пользователя.
+
+О нас:
+- Nordwind Virtual (VNWS) — виртуальная авиакомпания, работающая на платформе vAMSYS.io.
+- Мы симулируем рейсы реальной группы Pegas: Nordwind Airlines (NWS), Ikar/Pegas Fly (KAR), Southwind (STW).
+- Наши хабы: Москва (UUWW/SVO), Казань (UWKD), Краснодар (URKK), Анталья (LTAI) и другие.
+- Поддерживаем полёты в сети VATSIM (приоритет) и IVAO.
+
+Как стать пилотом:
+1. Нажать «Вступить» в меню сайта
+2. Зарегистрироваться на платформе vAMSYS (app.vamsys.io)
+3. Получить позывной и доступ к личному кабинету Phoenix
+4. Установить ACARS-клиент Pegasus для трекинга полётов
+- Регистрация бесплатна, занимает 2–3 минуты.
+
+Система полётов:
+- Бронирование рейса: Личный кабинет → Диспетчерская (Dispatch) → выбрать маршрут → Забронировать
+- Планирование: поддерживается SimBrief (интеграция встроена)
+- Трекинг: Pegasus ACARS автоматически фиксирует полёт и подаёт PIREP
+- После приземления PIREP проверяется и принимается администрацией
+
+Флот:
+- Boeing 737-800/900 (Nordwind NWS)
+- Airbus A320/A321 (Ikar KAR)
+- Airbus A321 (Southwind STW)
+- Полный актуальный список — на странице «Флот» сайта
+
+Маршрутная сеть:
+- Десятки направлений: Россия, СНГ, Турция, курортные направления
+- Маршруты — на странице «Маршруты», поиск — Ctrl+K
+
+Ранги и прогрессия:
+- Ранги присваиваются на платформе vAMSYS по налёту
+- Система достижений доступна в личном кабинете
+
+События и активности:
+- Онлайн-дни VATSIM, слотированные события, туры, испытания
+- Анонсы: раздел «Активности» на сайте, Discord-сервер, VK
+
+NOTAM и информация:
+- Актуальные NOTAMы — в разделе «NOTAM» сайта
+- Живая карта активных рейсов — «Live Map»
+
+Документы и правила:
+- Все документы, правила и лётные процедуры — раздел «Документы»
+
+Связь и поддержка:
+- Тикет-система: страница «Связаться» (предпочтительно для официальных вопросов)
+- Discord: сервер сообщества (ссылка в подвале сайта)
+- VK: публичное сообщество
+- Telegram: наш бот (@nordwindva_bot или аналог)
+
+Telegram-бот:
+- /start — приветствие
+- /link — привязать аккаунт vAMSYS
+- /profile — профиль пилота
+- /booking — текущее бронирование
+- /news — последние новости
+- /metar ICAO — погода
+- /ticket — создать тикет поддержки
+
+Правила поведения:
+- Если не знаешь ответа — честно скажи и предложи создать тикет
+- Если пользователь хочет поговорить с живым оператором/человеком — верни в ответе маркер [ESCALATE] и предложи создать тикет
+- Не придумывай несуществующие факты о флоте, маршрутах или правилах
+- При запросе технической помощи (ошибка в ACARS, проблема с PIREP) — предложи тикет`;
+
+const callClaudeAI = async (messages, lang = "ru") => {
+  if (!ANTHROPIC_API_KEY) {
+    throw new Error("ANTHROPIC_API_KEY not configured");
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      system: VA_AI_SYSTEM_PROMPT,
+      messages: messages.map((m) => ({
+        role: m.role === "user" ? "user" : "assistant",
+        content: String(m.content || "").slice(0, 4000),
+      })),
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(String(err?.error?.message || `Anthropic API error ${response.status}`));
+  }
+
+  const data = await response.json();
+  const text = data?.content?.[0]?.text || "";
+  const escalate = /\[ESCALATE\]/.test(text);
+  const reply = text.replace(/\[ESCALATE\]/g, "").trim();
+  return { reply, escalate };
+};
+
+const createAiEscalationTicket = ({ subject, content, owner, lang } = {}) => {
+  const config = getTicketConfigStore();
+  if (!config.enabled) return null;
+
+  const categories = Array.isArray(config.categories) ? config.categories : [];
+  const category = categories.find((c) =>
+    /support|поддержк|general|общ/i.test(String(c?.name || c?.id || ""))
+  ) || categories[0] || null;
+  if (!category) return null;
+
+  const now = new Date().toISOString();
+  const ticket = {
+    id: randomUUID(),
+    number: getNextTicketNumber(),
+    subject: normalizeAdminText(subject || "Запрос оператора через AI-помощника").slice(0, 200) || "Запрос оператора",
+    categoryId: category.id,
+    categoryName: category.name,
+    status: "open",
+    priority: "normal",
+    tags: [],
+    assigneeId: null,
+    assigneeName: null,
+    owner: {
+      pilotId: owner?.pilotId || null,
+      telegramId: owner?.telegramId || null,
+      telegramChatId: owner?.telegramChatId || null,
+      username: normalizeAdminText(owner?.username || "") || "ai-assistant",
+      name: normalizeAdminText(owner?.name || "") || "AI Помощник",
+      provider: owner?.provider || "ai-assistant",
+    },
+    messages: [
+      {
+        id: randomUUID(),
+        authorRole: "pilot",
+        authorName: normalizeAdminText(owner?.name || "") || "Пользователь",
+        authorUsername: normalizeAdminText(owner?.username || "") || "ai-assistant",
+        content: normalizeAdminMultilineText(content || "").slice(0, 4000) || "Пользователь запросил оператора через AI-помощника",
+        createdAt: now,
+      },
+    ],
+    unreadByOwner: 0,
+    unreadByStaff: 1,
+    createdAt: now,
+    updatedAt: now,
+    closedAt: null,
+    language: lang || null,
+    source: owner?.provider || "ai-assistant",
+    telegramChatId: owner?.telegramChatId || null,
+  };
+
+  withAdminContentUpdate((draft) => {
+    const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+    items.push(ticket);
+    draft.tickets = items;
+    return draft;
+  });
+
+  return ticket;
+};
+
+const notifyAiEscalation = async ({ ticket, conversationSummary = "" } = {}) => {
+  const subject = normalizeAdminText(ticket?.subject || "Запрос оператора");
+  const number = ticket?.number || "?";
+  const name = normalizeAdminText(ticket?.owner?.name || ticket?.owner?.username || "Пользователь");
+  const source = normalizeAdminText(ticket?.source || "ai-assistant");
+
+  const tgText = [
+    `🤖 *Запрос оператора #${number}*`,
+    `Источник: ${source}`,
+    `Пользователь: ${name}`,
+    `Тема: ${subject}`,
+    conversationSummary ? `Контекст: ${conversationSummary.slice(0, 300)}` : null,
+    `Тикет #${number} открыт — ответьте в панели администратора`,
+  ].filter(Boolean).join("\n");
+
+  await sendTelegramAdminNotification({ text: tgText }).catch(() => {});
+
+  const discordPayload = {
+    embeds: [{
+      title: `🤖 Запрос оператора #${number}`,
+      description: `Пользователь запросил живого оператора через AI-помощника.`,
+      color: 0xe31e24,
+      fields: [
+        { name: "Пользователь", value: name, inline: true },
+        { name: "Источник", value: source, inline: true },
+        { name: "Тема", value: subject, inline: false },
+        conversationSummary ? { name: "Контекст", value: conversationSummary.slice(0, 500), inline: false } : null,
+      ].filter(Boolean),
+      timestamp: new Date().toISOString(),
+    }],
+  };
+
+  const settings = getDiscordBotSettingsStore();
+  const channelId = settings?.alertsChannelId || settings?.channelId || "";
+  const webhookUrl = settings?.webhookUrl || "";
+  if (channelId || webhookUrl) {
+    await sendDiscordPayload({ channelId, webhookUrl, payload: discordPayload }).catch(() => {});
+  }
+};
+
+// Telegram long-polling loop — runs inside this server process
+let telegramPollingOffset = 0;
+let telegramPollingActive = false;
+let telegramPollingAbort = null;
+
+const handleTelegramMessage = async (update) => {
+  const message = update?.message;
+  if (!message) return;
+
+  const chatId = String(message?.chat?.id || "");
+  const text = String(message?.text || "").trim();
+  const username = normalizeAdminText(message?.from?.username || "");
+  const firstName = normalizeAdminText(message?.from?.first_name || "");
+  const telegramId = String(message?.from?.id || "");
+
+  if (!chatId || !text) return;
+
+  const settings = getTelegramBotSettingsStore();
+  if (settings?.enabled === false) return;
+
+  // ── Built-in command shortcuts ─────────────────────────────
+  if (text === "/start" || text === "/help") {
+    const reply = [
+      "Привет! Я AI-помощник Nordwind Virtual 🤖",
+      "",
+      "Команды:",
+      "/link — привязать аккаунт vAMSYS",
+      "/profile — профиль пилота",
+      "/booking — текущее бронирование",
+      "/news — последние новости",
+      "/ticket — создать тикет",
+      "/metar ICAO — погода",
+      "",
+      "Или просто задай вопрос — я отвечу на русском или английском.",
+    ].join("\n");
+    await sendTelegramPayload({ chatId, text: reply }).catch(() => {});
+    return;
+  }
+
+  if (text.startsWith("/")) return; // Другие команды — пусть внешний бот обработает
+
+  // ── AI response ───────────────────────────────────────────
+  if (!ANTHROPIC_API_KEY) return; // AI не настроен, молчим
+
+  try {
+    const { reply, escalate } = await callClaudeAI([{ role: "user", content: text }]);
+
+    if (escalate) {
+      const ticket = createAiEscalationTicket({
+        subject: text.slice(0, 100),
+        content: `Telegram-пользователь @${username || telegramId} запросил оператора.\n\nСообщение: ${text}`,
+        owner: {
+          telegramId,
+          telegramChatId: chatId,
+          username: username || telegramId,
+          name: firstName || username || "Telegram User",
+          provider: "telegram",
+        },
+        lang: "ru",
+      });
+
+      if (ticket) {
+        await notifyAiEscalation({ ticket, conversationSummary: text });
+      }
+
+      const escalateReply = reply
+        ? `${reply}\n\n📋 Тикет #${ticket?.number || "?"} создан — оператор скоро ответит.`
+        : `Понял, передаю оператору! 📋 Тикет #${ticket?.number || "?"} создан — мы ответим в ближайшее время.`;
+      await sendTelegramPayload({ chatId, text: escalateReply }).catch(() => {});
+      return;
+    }
+
+    if (reply) {
+      await sendTelegramPayload({ chatId, text: reply }).catch(() => {});
+    }
+  } catch (err) {
+    logger.warn("[ai-telegram] response_failed", String(err?.message || err));
+  }
+};
+
+const runTelegramPollingTick = async () => {
+  const token = String(TELEGRAM_BOT_TOKEN || "").trim();
+  if (!token) return;
+
+  const url = `https://api.telegram.org/bot${token}/getUpdates?offset=${telegramPollingOffset}&timeout=25&allowed_updates=["message"]`;
+
+  let data;
+  try {
+    const controller = new AbortController();
+    telegramPollingAbort = controller;
+    const response = await fetch(url, { signal: controller.signal });
+    telegramPollingAbort = null;
+    if (!response.ok) return;
+    data = await response.json();
+  } catch {
+    telegramPollingAbort = null;
+    return;
+  }
+
+  if (!data?.ok || !Array.isArray(data.result)) return;
+
+  for (const update of data.result) {
+    const updateId = Number(update?.update_id || 0);
+    if (updateId >= telegramPollingOffset) {
+      telegramPollingOffset = updateId + 1;
+    }
+    await handleTelegramMessage(update).catch(() => {});
+  }
+};
+
+const startTelegramPollingLoop = () => {
+  const token = String(TELEGRAM_BOT_TOKEN || "").trim();
+  if (!token || telegramPollingActive) return;
+
+  telegramPollingActive = true;
+  logger.info("[telegram-polling] started");
+
+  const loop = async () => {
+    while (telegramPollingActive) {
+      await runTelegramPollingTick().catch(() => {});
+      if (telegramPollingActive) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  };
+
+  loop().catch(() => {});
+};
+
+// ─── POST /api/ai/chat ───────────────────────────────────────────────────────
+
+app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
+  if (!ANTHROPIC_API_KEY) {
+    res.status(503).json({ error: "AI assistant is not configured" });
+    return;
+  }
+
+  const rawMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+  const lang = normalizeAdminText(req.body?.lang || "").toLowerCase() || "ru";
+
+  const messages = rawMessages
+    .filter((m) => m && typeof m === "object" && (m.role === "user" || m.role === "assistant"))
+    .map((m) => ({ role: m.role, content: String(m.content || "").slice(0, 4000) }))
+    .slice(-20); // last 20 messages for context
+
+  if (!messages.length || messages[messages.length - 1]?.role !== "user") {
+    res.status(400).json({ error: "Last message must be from user" });
+    return;
+  }
+
+  try {
+    const { reply, escalate } = await callClaudeAI(messages, lang);
+
+    if (escalate) {
+      const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
+      const ticket = createAiEscalationTicket({
+        subject: messages[messages.length - 1]?.content?.slice(0, 100) || "Запрос оператора",
+        content: `Пользователь запросил оператора через AI-помощника на сайте.\n\nДиалог:\n${userMessages.slice(0, 2000)}`,
+        owner: { provider: "ai-assistant", name: "Пользователь сайта", username: "site-visitor" },
+        lang,
+      });
+
+      if (ticket) {
+        await notifyAiEscalation({ ticket, conversationSummary: userMessages.slice(0, 400) }).catch(() => {});
+      }
+
+      res.json({ reply, escalate: true, ticketNumber: ticket?.number || null });
+      return;
+    }
+
+    res.json({ reply, escalate: false });
+  } catch (err) {
+    logger.warn("[ai-chat] error", String(err?.message || err));
+    res.status(500).json({ error: "AI response failed", message: String(err?.message || err) });
+  }
+});
+
 const publishNewsToDiscord = async ({ title, content, category, author }) => {
   return sendDiscordBotNotification({
     eventKey: "newsCreated",
@@ -35118,6 +35500,7 @@ const server = app.listen(PORT, () => {
   startUnifiedCatalogSyncScheduler();
   startDashboardCatalogNightlyRefreshScheduler();
   startDiscordWebhookAutomationScheduler();
+  startTelegramPollingLoop();
   startPilotChallengesScheduler();
   startPilotLocationSyncScheduler();
   // Pre-warm admin bootstrap and overview so first navigation to admin panel is instant
