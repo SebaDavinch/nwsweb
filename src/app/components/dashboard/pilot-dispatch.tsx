@@ -393,7 +393,7 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
           {tr("Не удалось загрузить данные. Обновите страницу.", "Failed to load data. Refresh the page.")}
         </div>
       ) : step === "map" ? (
-        <div className="relative flex flex-1 overflow-hidden">
+        <div className="relative flex flex-1 overflow-hidden isolate">
           {/* Сайдбар */}
           <div className={`relative z-[1000] flex flex-col border-r border-gray-100 bg-white transition-all dark:border-white/10 dark:bg-zinc-900 ${sidebarOpen ? "w-72" : "w-0"}`}>
             {sidebarOpen ? (
