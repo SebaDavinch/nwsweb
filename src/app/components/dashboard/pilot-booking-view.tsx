@@ -652,6 +652,24 @@ export function PilotBookingView() {
       setSimbriefData(payload);
       if (payload?.available) {
         toast.success("SimBrief OFP привязан");
+        // Auto-fill altitude from OFP if booking doesn't have one yet
+        const cruiseAltRaw = payload?.ofp?.cruiseAlt;
+        if (cruiseAltRaw && booking && !booking.altitude) {
+          const n = Number(cruiseAltRaw);
+          const altStr = Number.isFinite(n) && n > 1000 ? `FL${Math.round(n / 100)}` : String(cruiseAltRaw);
+          try {
+            const patchRes = await fetch(`/api/pilot/bookings/${booking.id}`, {
+              method: "PATCH",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ altitude: altStr }),
+            });
+            const patchPayload = (await patchRes.json().catch(() => null)) as BookingDetailResponse & { error?: string };
+            if (patchRes.ok && patchPayload?.booking) {
+              setBooking(patchPayload.booking);
+            }
+          } catch { /* non-critical */ }
+        }
       } else {
         toast.message(payload?.message || "SimBrief OFP не найден — создайте план в SimBrief и попробуйте снова.");
       }
@@ -947,7 +965,19 @@ export function PilotBookingView() {
                     </div>
                     <div>
                       <div className="text-[11px] uppercase text-gray-400">Эшелон</div>
-                      <div className="mt-0.5 font-bold text-gray-900">{booking.altitude || "—"}</div>
+                      <div className="mt-0.5 font-bold text-gray-900">
+                        {booking.altitude || (() => {
+                          const raw = simbriefData?.ofp?.cruiseAlt;
+                          if (!raw) return "—";
+                          const n = Number(raw);
+                          return Number.isFinite(n) && n > 1000
+                            ? `FL${Math.round(n / 100)}`
+                            : String(raw);
+                        })()}
+                        {!booking.altitude && simbriefData?.ofp?.cruiseAlt && (
+                          <span className="ml-1.5 text-[10px] font-normal text-blue-500">SimBrief</span>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <div className="text-[11px] uppercase text-gray-400">Пассажиры</div>
@@ -997,6 +1027,12 @@ export function PilotBookingView() {
                     >
                       {isDispatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                       Подать на VATSIM / Phoenix
+                    </Button>
+                    {/* View booking in vAMSYS Phoenix portal */}
+                    <Button variant="outline" className="w-full justify-start"
+                      onClick={() => window.open(`https://vamsys.io/phoenix/bookings/${booking.id}`, "_blank", "noopener,noreferrer")}>
+                      <ExternalLink className="mr-2 h-4 w-4" />
+                      Просмотреть в vAMSYS
                     </Button>
                     {/* VATSIM Prefile — direct flight plan filing on my.vatsim.net */}
                     <Button variant="outline" className="w-full justify-start"
