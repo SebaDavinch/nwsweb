@@ -272,7 +272,7 @@ let flightMapCache = {
   expiresAt: 0,
 };
 
-const FLIGHT_MAP_CACHE_MS = Math.max(Number(process.env.FLIGHT_MAP_CACHE_MS || 100) || 100, 80);
+const FLIGHT_MAP_CACHE_MS = Math.max(Number(process.env.FLIGHT_MAP_CACHE_MS || 5000) || 5000, 2000);
 const FLIGHT_MAP_IDLE_CACHE_MS = Math.max(Number(process.env.FLIGHT_MAP_IDLE_CACHE_MS || 30000) || 30000, 5000);
 const DASHBOARD_CATALOG_CACHE_MS = Math.max(Number(process.env.DASHBOARD_CATALOG_CACHE_MS || 10 * 60 * 1000) || 10 * 60 * 1000, 60 * 1000);
 const ACTIVE_FLIGHT_GRACE_MS = Math.max(Number(process.env.ACTIVE_FLIGHT_GRACE_MS || 15000) || 15000, 2000);
@@ -16183,7 +16183,8 @@ app.get("/api/pilot/location", async (req, res) => {
     // Лимит: тяжёлый форс-синк с vAMSYS — не чаще раза в PILOT_LOCATION_MIN_REFRESH_MS на пилота.
     // В пределах окна (частые F5) отдаём кэшированную локацию из соединения — без обращений к vAMSYS.
     const lastRefresh = pilotLocationRefreshAt.get(pilotId) || 0;
-    const shouldForce = Date.now() - lastRefresh >= PILOT_LOCATION_MIN_REFRESH_MS;
+    const forceParam = String(req.query?.force || "").toLowerCase() === "true";
+    const shouldForce = forceParam || Date.now() - lastRefresh >= PILOT_LOCATION_MIN_REFRESH_MS;
 
     let connection = await ensurePilotApiConnection({
       pilotId,
@@ -19554,6 +19555,12 @@ const apiFetch = async (path) => {
     respText = "";
   }
 
+  if (response.status === 429) {
+    logVamsys("warn", "operations_api_rate_limited", { path, durationMs: Date.now() - startedAt });
+    await new Promise((resolve) => setTimeout(resolve, 60000));
+    return apiFetch(path);
+  }
+
   if (!response.ok) {
     const details = truncateForLog(respText);
     logVamsys("error", "operations_api_fetch_failed", {
@@ -19608,6 +19615,12 @@ const apiRequest = async (path, { method = "GET", body } = {}) => {
     respText = await response.clone().text().catch(() => "");
   } catch (e) {
     respText = "";
+  }
+
+  if (response.status === 429) {
+    logVamsys("warn", "operations_api_rate_limited", { path, method, durationMs: Date.now() - startedAt });
+    await new Promise((resolve) => setTimeout(resolve, 60000));
+    return apiRequest(path, { method, body });
   }
 
   if (!response.ok) {

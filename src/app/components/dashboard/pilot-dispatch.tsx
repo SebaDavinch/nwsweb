@@ -14,6 +14,7 @@ import {
   Navigation,
   Clock,
   Ruler,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLanguage } from "../../context/language-context";
@@ -51,6 +52,12 @@ interface AircraftOption {
 
 const upper = (v: unknown) => String(v || "").trim().toUpperCase();
 
+const defaultDepartureTime = () => {
+  const d = new Date(Date.now() + 40 * 60 * 1000);
+  // datetime-local format: YYYY-MM-DDTHH:MM
+  return d.toISOString().slice(0, 16);
+};
+
 function Flag({ icao, className = "h-3.5 w-5" }: { icao?: string; className?: string }) {
   const code = icaoToCountry(icao || "");
   const uri = code ? getFlagUri(code) : "";
@@ -64,11 +71,13 @@ function FlightCard({
   route,
   selected,
   onSelect,
+  aircraftModels,
   tr,
 }: {
   route: RouteOption;
   selected: boolean;
   onSelect: () => void;
+  aircraftModels?: string[];
   tr: (ru: string, en: string) => string;
 }) {
   return (
@@ -102,6 +111,13 @@ function FlightCard({
         {route.frequency ? <span className="inline-flex items-center gap-1"><Navigation className="h-3 w-3" />{route.frequency}</span> : null}
         <span className="ml-auto font-medium text-[#E31E24] opacity-0 transition-opacity group-hover:opacity-100">{tr("Выбрать →", "Select →")}</span>
       </div>
+      {aircraftModels && aircraftModels.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {aircraftModels.map((m) => (
+            <span key={m} className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-gray-500 dark:bg-white/10 dark:text-zinc-400">{m}</span>
+          ))}
+        </div>
+      )}
     </button>
   );
 }
@@ -131,9 +147,24 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
   // Выбор рейса/ВС/времени (экран подтверждения).
   const [selectedRouteId, setSelectedRouteId] = useState<number | null>(null);
   const [aircraftId, setAircraftId] = useState<number | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string>("");
   const [departureTime, setDepartureTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [movingTo, setMovingTo] = useState("");
+  const [syncingLocation, setSyncingLocation] = useState(false);
+
+  const syncLocation = async () => {
+    setSyncingLocation(true);
+    try {
+      const locRes = await fetch("/api/pilot/location?force=true", { credentials: "include" });
+      const locP = await locRes.json().catch(() => null);
+      const code = upper(locP?.airportCode);
+      setLocationCode(code);
+      setLocationLabel(String(locP?.locationLabel || "").trim());
+    } finally {
+      setSyncingLocation(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -253,6 +284,37 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
     return aircraft.filter((a) => selectedRoute.fleetIds?.includes(a.fleetId));
   }, [aircraft, selectedRoute]);
 
+  // Уникальные типы ВС (для фильтра и карточек маршрутов)
+  const routeAircraftTypes = useMemo(
+    () => [...new Set(routeAircraft.map((a) => a.model).filter(Boolean))],
+    [routeAircraft]
+  );
+
+  const filteredAircraft = useMemo(
+    () => (typeFilter ? routeAircraft.filter((a) => a.model === typeFilter) : routeAircraft),
+    [routeAircraft, typeFilter]
+  );
+
+  // Map fleetId → уникальные модели (для карточек в списке рейсов)
+  const fleetModelsMap = useMemo(() => {
+    const map = new Map<number, string[]>();
+    for (const a of aircraft) {
+      if (!map.has(a.fleetId)) map.set(a.fleetId, []);
+      const list = map.get(a.fleetId)!;
+      if (!list.includes(a.model)) list.push(a.model);
+    }
+    return map;
+  }, [aircraft]);
+
+  const getRouteAircraftModels = (route: RouteOption): string[] => {
+    if (!Array.isArray(route.fleetIds) || !route.fleetIds.length) return [];
+    const models = new Set<string>();
+    for (const fid of route.fleetIds) {
+      for (const m of fleetModelsMap.get(fid) ?? []) models.add(m);
+    }
+    return [...models];
+  };
+
   const selectedMapRoute = useMemo<FlightMapRoute | null>(() => {
     if (!selectedRoute) return null;
     const fromLat = Number(selectedRoute.fromLat);
@@ -286,6 +348,8 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
     const toThere = routes.filter((r) => upper(r.fromCode) === locationCode && upper(r.toCode) === normalized);
     setSelectedRouteId(toThere.length === 1 ? toThere[0].id : null);
     setAircraftId(null);
+    setTypeFilter("");
+    setDepartureTime(defaultDepartureTime());
     setStep("flights");
   };
 
@@ -293,6 +357,8 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
     setStep("map");
     setSelectedRouteId(null);
     setAircraftId(null);
+    setTypeFilter("");
+    setDepartureTime("");
   };
 
   const moveToAirport = async (code: string) => {
@@ -385,6 +451,15 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
           <Flag icao={locationCode} />
           <span className="font-mono font-semibold text-gray-800 dark:text-zinc-200">{locationCode || "—"}</span>
           {locationLabel ? <span className="hidden sm:inline">· {locationLabel}</span> : null}
+          <button
+            type="button"
+            onClick={() => void syncLocation()}
+            disabled={syncingLocation}
+            title={tr("Синхронизировать локацию с vAMSYS", "Sync location with vAMSYS")}
+            className="ml-1 rounded p-0.5 text-gray-400 transition hover:text-[#E31E24] disabled:opacity-40"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncingLocation ? "animate-spin" : ""}`} />
+          </button>
         </div>
       </div>
 
@@ -506,7 +581,7 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
             ) : view === "cards" ? (
               <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
                 {flightsToDestination.map((r) => (
-                  <FlightCard key={r.id} route={r} selected={r.id === selectedRouteId} onSelect={() => { setSelectedRouteId(r.id); setAircraftId(null); }} tr={tr} />
+                  <FlightCard key={r.id} route={r} selected={r.id === selectedRouteId} onSelect={() => { setSelectedRouteId(r.id); setAircraftId(null); setTypeFilter(""); setDepartureTime(defaultDepartureTime()); }} aircraftModels={getRouteAircraftModels(r)} tr={tr} />
                 ))}
               </div>
             ) : (
@@ -515,7 +590,7 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
                   <button
                     key={r.id}
                     type="button"
-                    onClick={() => { setSelectedRouteId(r.id); setAircraftId(null); }}
+                    onClick={() => { setSelectedRouteId(r.id); setAircraftId(null); setTypeFilter(""); setDepartureTime(defaultDepartureTime()); }}
                     className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors ${r.id === selectedRouteId ? "bg-[#E31E24]/5 dark:bg-[#E31E24]/10" : "hover:bg-gray-50 dark:hover:bg-white/5"}`}
                   >
                     <div className="font-mono font-bold text-gray-900 dark:text-zinc-100">{r.flightNumber || r.callsign}</div>
@@ -558,21 +633,46 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
                       {tr("Нет доступного флота для маршрута.", "No aircraft available for this route.")}
                     </div>
                   ) : (
-                    <div className="nws-scroll-hover max-h-44 space-y-1 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/5">
-                      {routeAircraft.map((a) => (
-                        <button
-                          key={a.id}
-                          type="button"
-                          onClick={() => setAircraftId(a.id)}
-                          className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${a.id === aircraftId ? "bg-[#E31E24]/10 text-[#E31E24] dark:text-red-300" : "hover:bg-gray-50 text-gray-700 dark:text-zinc-300 dark:hover:bg-white/5"}`}
-                        >
-                          <Plane className="h-3.5 w-3.5 shrink-0" />
-                          <span className="font-medium">{a.model}</span>
-                          {a.registration ? <span className="font-mono text-xs text-gray-400 dark:text-zinc-500">{a.registration}</span> : null}
-                          {a.id === aircraftId ? <Check className="ml-auto h-4 w-4" /> : null}
-                        </button>
-                      ))}
-                    </div>
+                    <>
+                      {routeAircraftTypes.length > 1 && (
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => { setTypeFilter(""); setAircraftId(null); }}
+                            className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${!typeFilter ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-zinc-300"}`}
+                          >
+                            {tr("Все", "All")}
+                          </button>
+                          {routeAircraftTypes.map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => { setTypeFilter(t); setAircraftId(null); }}
+                              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${typeFilter === t ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-white/10 dark:text-zinc-300"}`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="nws-scroll-hover max-h-44 space-y-1 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-white/10 dark:bg-white/5">
+                        {filteredAircraft.map((a) => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => setAircraftId(a.id)}
+                            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${a.id === aircraftId ? "bg-[#E31E24]/10 text-[#E31E24] dark:text-red-300" : "hover:bg-gray-50 text-gray-700 dark:text-zinc-300 dark:hover:bg-white/5"}`}
+                          >
+                            <Plane className="h-3.5 w-3.5 shrink-0" />
+                            {routeAircraftTypes.length > 1 || !typeFilter
+                              ? <span className="font-medium">{a.model}</span>
+                              : null}
+                            {a.registration ? <span className="font-mono text-xs text-gray-400 dark:text-zinc-500">{a.registration}</span> : null}
+                            {a.id === aircraftId ? <Check className="ml-auto h-4 w-4" /> : null}
+                          </button>
+                        ))}
+                      </div>
+                    </>
                   )}
                 </div>
 
@@ -584,7 +684,7 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
                     onChange={(e) => setDepartureTime(e.target.value)}
                     className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-[#E31E24] focus:outline-none dark:border-white/10 dark:bg-white/5 dark:text-zinc-100 dark:[color-scheme:dark]"
                   />
-                  <p className="text-[11px] text-gray-400 dark:text-zinc-500">{tr("Не указано — через 1 час от текущего момента.", "If empty — 1 hour from now.")}</p>
+                  <p className="text-[11px] text-gray-400 dark:text-zinc-500">{tr("Предзаполнено: текущее время + 40 мин (UTC).", "Pre-filled: current time + 40 min (UTC).")}</p>
                 </div>
 
                 <Button
