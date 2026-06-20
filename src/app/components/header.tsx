@@ -293,7 +293,7 @@ function HeaderProfileMenu({ primaryColor }: { primaryColor: string }) {
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem asChild className="dark:text-gray-200 dark:focus:bg-white/[0.06] dark:focus:text-white">
-            <Link to="/dashboard?tab=recent" className="flex items-center gap-2.5 rounded-xl px-3 py-2">
+            <Link to="/dashboard?tab=my-flights" className="flex items-center gap-2.5 rounded-xl px-3 py-2">
               <History className="h-4 w-4 text-gray-400 dark:text-gray-500" />
               <span>{t("nav.recentFlights")}</span>
             </Link>

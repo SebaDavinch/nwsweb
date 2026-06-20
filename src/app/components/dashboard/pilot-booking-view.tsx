@@ -591,7 +591,7 @@ export function PilotBookingView() {
       } else {
         toast.success(t("bookings.toast.cancelSuccess"));
       }
-      navigate("/dashboard?tab=bookings", { replace: true });
+      navigate("/dashboard?tab=my-flights", { replace: true });
     } catch (error) {
       toast.error(String(error || t("bookings.toast.cancelError")));
     } finally {
@@ -670,7 +670,7 @@ export function PilotBookingView() {
       const response = await fetch(`/api/pilot/bookings/${booking.id}`, { method: "DELETE", credentials: "include" });
       const payload = (await response.json().catch(() => null)) as { error?: string; cancelledCount?: number } | null;
       if (!response.ok) throw new Error(payload?.error || t("bookings.toast.cancelError"));
-      navigate(routeId ? `/dashboard?tab=bookings&rebook=${routeId}` : "/dashboard?tab=bookings", { replace: true });
+      navigate(routeId ? `/dashboard?tab=my-flights&rebook=${routeId}` : "/dashboard?tab=my-flights", { replace: true });
     } catch (error) {
       toast.error(String(error || t("bookings.toast.cancelError")));
     } finally {
@@ -718,7 +718,7 @@ export function PilotBookingView() {
   }
 
   if (bookingId <= 0) {
-    return <Navigate to="/dashboard?tab=bookings" replace />;
+    return <Navigate to="/dashboard?tab=my-flights" replace />;
   }
 
   const durationMin = booking ? parseDurationMinutes(route?.duration || "") : 0;
@@ -728,7 +728,7 @@ export function PilotBookingView() {
     <div className="min-h-screen bg-gray-50">
       {/* Top bar */}
       <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard?tab=bookings")}>
+        <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard?tab=my-flights")}>
           <ArrowLeft className="mr-2 h-4 w-4" />
           К бронированиям
         </Button>

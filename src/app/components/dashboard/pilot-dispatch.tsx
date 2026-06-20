@@ -113,7 +113,7 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
   const { addNotification } = useNotifications();
   const inApp = variant === "app";
   // Куда возвращаться/уходить после брони — зависит от контекста (сайт ЛК vs приложение).
-  const bookingsTo = inApp ? "/app/flight" : "/dashboard?tab=bookings";
+  const bookingsTo = inApp ? "/app/flight" : "/dashboard?tab=my-flights";
 
   const [routes, setRoutes] = useState<RouteOption[]>([]);
   const [aircraft, setAircraft] = useState<AircraftOption[]>([]);

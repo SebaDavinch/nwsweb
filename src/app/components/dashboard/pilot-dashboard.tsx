@@ -44,6 +44,7 @@ import { Progress } from "../ui/progress";
 import { Where2Fly } from "./where2fly";
 import { PilotBookings } from "./pilot-bookings";
 import { RecentFlights } from "./recent-flights";
+import { MyFlights } from "./my-flights";
 import { SimBriefBriefing } from "./simbrief-briefing";
 import { PilotSettings } from "./pilot-settings";
 import { NotificationCenter } from "./notification-center";
@@ -377,7 +378,13 @@ export function PilotDashboard() {
     const discordState = String(params.get("discord") || "").trim();
 
     const normalizedRequestedTab = normalizeDashboardTab(requestedTab);
-    const allowedTabs = new Set(["home", "feed", "bookings", "all-flights", "manual-pirep", "notams", "badges", "achievements", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "gallery", "pirep", "passport", "balance", "stats", "leaderboard", "settings"]);
+    const allowedTabs = new Set(["home", "feed", "my-flights", "bookings", "all-flights", "manual-pirep", "notams", "badges", "achievements", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "gallery", "pirep", "passport", "balance", "stats", "leaderboard", "settings"]);
+    // redirect legacy tabs to merged page
+    if (normalizedRequestedTab === "bookings" || normalizedRequestedTab === "recent") {
+      setActiveTab("my-flights");
+      setSelectedPirepId(null);
+      return;
+    }
     if (normalizedRequestedTab && allowedTabs.has(normalizedRequestedTab)) {
       setActiveTab(normalizedRequestedTab);
       setSelectedPirepId(normalizedRequestedTab === "pirep" ? requestedPirepId : null);
@@ -470,8 +477,7 @@ export function PilotDashboard() {
   const navItems = [
     { id: "home", label: t("dashboard.tabs.overview"), icon: Home },
     { id: "feed", label: tr("Лента", "Feed"), icon: Activity },
-    { id: "bookings", label: t("dashboard.tabs.bookings"), icon: Plane },
-    { id: "recent", label: t("dashboard.tabs.recentFlights"), icon: History },
+    { id: "my-flights", label: tr("Мои полёты", "My Flights"), icon: Plane },
     { id: "all-flights", label: t("dashboard.tabs.allFlights"), icon: MapPin },
     { id: "manual-pirep", label: t("dashboard.tabs.claims"), icon: ClipboardCheck },
     { id: "notams", label: t("dashboard.tabs.notams"), icon: ShieldAlert },
@@ -757,7 +763,7 @@ export function PilotDashboard() {
                             <Plane className="h-4 w-4 text-[#E31E24]" />
                             {t("dashboard.upcoming.title")}
                           </CardTitle>
-                          <Button size="sm" variant="ghost" className="text-xs text-gray-500 h-7" onClick={() => openDashboardTab("bookings")}>
+                          <Button size="sm" variant="ghost" className="text-xs text-gray-500 h-7" onClick={() => openDashboardTab("my-flights")}>
                             {t("dashboard.tabs.bookings")} →
                           </Button>
                         </div>
@@ -820,7 +826,7 @@ export function PilotDashboard() {
                           <div className="text-center py-8">
                             <Plane className="w-10 h-10 text-gray-200 mx-auto mb-2" />
                             <p className="text-sm text-gray-400">{t("dashboard.upcoming.noFlights")}</p>
-                            <Button onClick={() => openDashboardTab("bookings")} variant="link" size="sm" className="text-[#E31E24] mt-1">
+                            <Button onClick={() => openDashboardTab("my-flights")} variant="link" size="sm" className="text-[#E31E24] mt-1">
                               {t("dashboard.bookFlight")}
                             </Button>
                           </div>
@@ -836,7 +842,7 @@ export function PilotDashboard() {
                             <History className="h-4 w-4 text-gray-400" />
                             {t("dashboard.home.lastFlights.title")}
                           </CardTitle>
-                          <Button size="sm" variant="ghost" className="text-xs text-gray-500 h-7" onClick={() => openDashboardTab("recent")}>
+                          <Button size="sm" variant="ghost" className="text-xs text-gray-500 h-7" onClick={() => openDashboardTab("my-flights")}>
                             {t("dashboard.tabs.recentFlights")} →
                           </Button>
                         </div>
@@ -1162,6 +1168,12 @@ export function PilotDashboard() {
               </div>
             )}
 
+            {activeTab === "my-flights" && (
+              <div className="animate-in fade-in duration-500">
+                <MyFlights onOpenPirep={openPirepDetail} />
+              </div>
+            )}
+
             {activeTab === "bookings" && (
               <div className="animate-in fade-in duration-500">
                 <PilotBookings />
@@ -1170,7 +1182,7 @@ export function PilotDashboard() {
 
             {activeTab === "all-flights" && (
               <div className="animate-in fade-in duration-500">
-                <PilotAllFlights onOpenBookings={() => openDashboardTab("bookings")} />
+                <PilotAllFlights onOpenBookings={() => openDashboardTab("my-flights")} />
               </div>
             )}
 
@@ -1207,7 +1219,7 @@ export function PilotDashboard() {
 
             {activeTab === "where2fly" && (
               <div className="animate-in fade-in duration-500">
-                <Where2Fly onOpenBookings={() => openDashboardTab("bookings")} />
+                <Where2Fly onOpenBookings={() => openDashboardTab("my-flights")} />
               </div>
             )}
 
@@ -1244,7 +1256,7 @@ export function PilotDashboard() {
 
             {activeTab === "pirep" && (
               <div className="animate-in fade-in duration-500">
-                <PilotPirepDetail pirepId={selectedPirepId} onBack={() => openDashboardTab("recent")} />
+                <PilotPirepDetail pirepId={selectedPirepId} onBack={() => openDashboardTab("my-flights")} />
               </div>
             )}
 

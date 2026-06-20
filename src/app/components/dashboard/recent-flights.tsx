@@ -42,6 +42,8 @@ interface RecentFlightsResponse {
 
 interface RecentFlightsProps {
   onOpenPirep?: (pirepId: number) => void;
+  /** Скрывает заголовок секции — для встраивания в другие страницы */
+  embedded?: boolean;
 }
 
 interface FlightLogPreferences {
@@ -176,7 +178,7 @@ const getLandingRateClassName = (value?: number | null) => {
   return Number(value) <= -300 ? "text-red-600" : "text-green-600";
 };
 
-export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
+export function RecentFlights({ onOpenPirep, embedded = false }: RecentFlightsProps) {
   const { t, language } = useLanguage();
   const ru = language === "ru";
   const [flights, setFlights] = useState<Flight[]>([]);
@@ -409,29 +411,51 @@ export function RecentFlights({ onOpenPirep }: RecentFlightsProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-[#2A2A2A]">{t("dashboard.recent.title")}</h2>
-          <p className="text-gray-600">{t("dashboard.recent.subtitle")}</p>
+      {!embedded ? (
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-[#2A2A2A]">{t("dashboard.recent.title")}</h2>
+            <p className="text-gray-600">{t("dashboard.recent.subtitle")}</p>
+          </div>
+          <ToggleGroup
+            type="single"
+            value={viewMode}
+            onValueChange={handleViewModeChange}
+            variant="outline"
+            className="inline-flex self-start"
+            aria-label={t("dashboard.recent.title")}
+          >
+            <ToggleGroupItem value="gallery" aria-label={t("dashboard.recent.gallery")}>
+              <LayoutGrid className="h-4 w-4" />
+              {t("dashboard.recent.gallery")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="list" aria-label={t("dashboard.recent.list")}>
+              <List className="h-4 w-4" />
+              {t("dashboard.recent.list")}
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
-        <ToggleGroup
-          type="single"
-          value={viewMode}
-          onValueChange={handleViewModeChange}
-          variant="outline"
-          className="inline-flex self-start"
-          aria-label={t("dashboard.recent.title")}
-        >
-          <ToggleGroupItem value="gallery" aria-label={t("dashboard.recent.gallery")}>
-            <LayoutGrid className="h-4 w-4" />
-            {t("dashboard.recent.gallery")}
-          </ToggleGroupItem>
-          <ToggleGroupItem value="list" aria-label={t("dashboard.recent.list")}>
-            <List className="h-4 w-4" />
-            {t("dashboard.recent.list")}
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
+      ) : (
+        <div className="flex justify-end">
+          <ToggleGroup
+            type="single"
+            value={viewMode}
+            onValueChange={handleViewModeChange}
+            variant="outline"
+            className="inline-flex self-start"
+            aria-label={t("dashboard.recent.title")}
+          >
+            <ToggleGroupItem value="gallery" aria-label={t("dashboard.recent.gallery")}>
+              <LayoutGrid className="h-4 w-4" />
+              {t("dashboard.recent.gallery")}
+            </ToggleGroupItem>
+            <ToggleGroupItem value="list" aria-label={t("dashboard.recent.list")}>
+              <List className="h-4 w-4" />
+              {t("dashboard.recent.list")}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+      )}
 
       {(savedFlights.length > 0 || comparedFlights.length > 0) ? (
         <div className="grid gap-4 xl:grid-cols-2">
