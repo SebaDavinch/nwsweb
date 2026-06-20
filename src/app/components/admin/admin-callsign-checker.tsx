@@ -209,10 +209,10 @@ export function AdminCallsignChecker() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">{tr("Проверка каллсайнов", "Callsign Checker")}</h2>
+        <h2 className="text-2xl font-bold text-gray-900">{tr("Проверка позывнойов", "Callsign Checker")}</h2>
         <p className="text-sm text-gray-500 mt-1">
           {tr(
-            "Введите каллсайны (по одному на строку) и проверьте наличие в базе маршрутов и их актуальность.",
+            "Введите позывнойы (по одному на строку) и проверьте наличие в базе маршрутов и их актуальность.",
             "Enter callsigns (one per line) to check their presence in the route database and current status."
           )}
         </p>
@@ -270,7 +270,7 @@ export function AdminCallsignChecker() {
 
           <div className="rounded-lg bg-gray-50 border border-gray-200 p-3 text-xs text-gray-500 space-y-1">
             <div className="font-medium text-gray-600">{tr("Формат ввода", "Input format")}</div>
-            <div>{tr("• По одному каллсайну на строку", "• One callsign per line")}</div>
+            <div>{tr("• По одному позывнойу на строку", "• One callsign per line")}</div>
             <div>{tr("• Или через запятую / точку с запятой", "• Or comma / semicolon separated")}</div>
             <div>{tr("• Регистр не важен", "• Case insensitive")}</div>
           </div>

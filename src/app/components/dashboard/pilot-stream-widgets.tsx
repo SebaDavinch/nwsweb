@@ -246,7 +246,7 @@ export function PilotStreamWidgets() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium text-gray-800">{tr("Показывать HUD", "Show HUD")}</div>
-                <div className="text-xs text-gray-400 mt-0.5">{tr("Маршрут, каллсайн, телеметрия", "Route, callsign, telemetry")}</div>
+                <div className="text-xs text-gray-400 mt-0.5">{tr("Маршрут, позывной, телеметрия", "Route, callsign, telemetry")}</div>
               </div>
               <button type="button" onClick={() => saveSettings({ showHud: !settings.showHud })}
                 className={`flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors ${settings.showHud ? "bg-[#E31E24]/10 text-[#E31E24]" : "bg-gray-200 text-gray-500"}`}>

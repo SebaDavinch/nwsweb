@@ -15,7 +15,7 @@ function getResponse(text: string, ru: boolean): string {
 
   if (/вступ|присоедин|регистр|как стать|начать летать|как летать|как зарегистр/.test(lower) || /join|register|sign.?up|how to start|how do i/.test(lower)) {
     return ru
-      ? "Чтобы вступить в Nordwind Virtual:\n\n1. Нажми «Вступить» в меню\n2. Зарегистрируйся на платформе vAMSYS\n3. Тебе назначат каллсайн\n4. Доступен личный кабинет пилота\n\nРегистрация занимает 2–3 минуты."
+      ? "Чтобы вступить в Nordwind Virtual:\n\n1. Нажми «Вступить» в меню\n2. Зарегистрируйся на платформе vAMSYS\n3. Тебе назначат позывной\n4. Доступен личный кабинет пилота\n\nРегистрация занимает 2–3 минуты."
       : "To join Nordwind Virtual:\n\n1. Click «Join» in the menu\n2. Register on the vAMSYS platform\n3. You'll receive a callsign\n4. Pilot dashboard will be available\n\nRegistration takes 2–3 minutes.";
   }
 

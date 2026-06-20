@@ -125,7 +125,7 @@ export function HubMode() {
     { id: "overview", label: tr("Обзор", "Overview"), icon: <Home className="h-4 w-4" /> },
     { id: "feed", label: tr("Лента", "Feed"), icon: <Activity className="h-4 w-4" /> },
     { id: "recent", label: tr("Крайние полёты", "Recent"), icon: <History className="h-4 w-4" /> },
-    { id: "flights", label: tr("Все рейсы", "All flights"), icon: <MapPin className="h-4 w-4" /> },
+    { id: "flights", label: tr("Карта полётов", "Flight Map"), icon: <MapPin className="h-4 w-4" /> },
     { id: "stats", label: tr("Статистика", "Stats"), icon: <BarChart2 className="h-4 w-4" /> },
     { id: "balance", label: tr("Баланс", "Balance"), icon: <Coins className="h-4 w-4" /> },
     { id: "passport", label: tr("Паспорт", "Passport"), icon: <BookOpen className="h-4 w-4" /> },

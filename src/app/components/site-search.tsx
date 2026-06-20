@@ -311,7 +311,7 @@ function generateAnswer(raw: string, q: ParsedQuery, results: SearchItem[], lang
   // Join / registration
   if (/вступ|присоедин|регистр|как стать|начать летать/.test(lower) || /join|register|sign[\s-]?up|how to start/.test(lower)) {
     return ru
-      ? "Чтобы вступить, открой страницу «Вступить» — регистрация через vAMSYS занимает пару минут. После этого тебе назначат каллсайн и откроется личный кабинет пилота."
+      ? "Чтобы вступить, открой страницу «Вступить» — регистрация через vAMSYS занимает пару минут. После этого тебе назначат позывной и откроется личный кабинет пилота."
       : "To join, go to the Join page — registration via vAMSYS takes a couple of minutes. You'll get a callsign and access to your pilot dashboard.";
   }
 

@@ -337,6 +337,173 @@ let pilotsRosterCache = {
 
 let dashboardLeaderboardCache = new Map();
 
+// ── Disk-backed shared caches for high-frequency vAMSYS endpoints ─────────────
+// Features: memory-first, disk persistence (survives restarts), promise coalescing
+// (prevents thundering herd when TTL expires under concurrent load).
+
+const makeDiskBackedCache = ({ cacheFile, ttlMs, fetcher }) => {
+  let mem = { data: null, expiresAt: 0, inflight: null };
+
+  const loadDisk = () => {
+    try {
+      const raw = fs.readFileSync(cacheFile, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.data && typeof parsed.expiresAt === "number" && Date.now() < parsed.expiresAt) {
+        return parsed;
+      }
+    } catch { /* no file or malformed */ }
+    return null;
+  };
+
+  const saveDisk = (data) => {
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify({ data, expiresAt: mem.expiresAt }), "utf-8");
+    } catch { /* best-effort */ }
+  };
+
+  return {
+    get: async (...args) => {
+      // 1. Memory hit
+      if (mem.data && Date.now() < mem.expiresAt) return mem.data;
+      // 2. Coalesce concurrent in-flight fetches
+      if (mem.inflight) return mem.inflight;
+      // 3. Disk hit (fast path after restart)
+      const disk = loadDisk();
+      if (disk) {
+        mem.data = disk.data;
+        mem.expiresAt = disk.expiresAt;
+        // Background refresh so next request is fresh
+        if (Date.now() > disk.expiresAt - ttlMs * 0.1) {
+          void (async () => {
+            try {
+              const fresh = await fetcher(...args);
+              mem.data = fresh;
+              mem.expiresAt = Date.now() + ttlMs;
+              saveDisk(fresh);
+            } catch { /* keep disk data */ }
+          })();
+        }
+        return disk.data;
+      }
+      // 4. Fetch from API with coalescing
+      mem.inflight = fetcher(...args).then((data) => {
+        mem.data = data;
+        mem.expiresAt = Date.now() + ttlMs;
+        mem.inflight = null;
+        saveDisk(data);
+        return data;
+      }).catch((err) => {
+        mem.inflight = null;
+        throw err;
+      });
+      return mem.inflight;
+    },
+    invalidate: () => {
+      mem = { data: null, expiresAt: 0, inflight: null };
+      try { fs.unlinkSync(cacheFile); } catch { /* ok */ }
+    },
+    peek: () => mem.data,
+  };
+};
+
+const DATA_DIR = path.dirname(AUTH_STORE_FILE);
+
+const notamsCache = makeDiskBackedCache({
+  cacheFile: path.join(DATA_DIR, "cache-notams.json"),
+  ttlMs: 10 * 60 * 1000, // 10 min
+  fetcher: (pageSize = 100) => fetchAllPages(`/notams?page[size]=${pageSize}`),
+});
+const getCachedNotams = (pageSize) => notamsCache.get(pageSize);
+const invalidateNotamsCache = () => notamsCache.invalidate();
+
+const alertsCache = makeDiskBackedCache({
+  cacheFile: path.join(DATA_DIR, "cache-alerts.json"),
+  ttlMs: 10 * 60 * 1000, // 10 min
+  fetcher: (pageSize = 100) => fetchAllPages(`/alerts?page[size]=${pageSize}`),
+});
+const getCachedAlerts = (pageSize) => alertsCache.get(pageSize);
+const invalidateAlertsCache = () => alertsCache.invalidate();
+
+const slottedEventsCache = makeDiskBackedCache({
+  cacheFile: path.join(DATA_DIR, "cache-slotted-events.json"),
+  ttlMs: 5 * 60 * 1000, // 5 min
+  fetcher: () => fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at"),
+});
+const getCachedSlottedEvents = () => slottedEventsCache.get();
+const invalidateSlottedEventsCache = () => slottedEventsCache.invalidate();
+
+const pilotsRosterDiskCache = makeDiskBackedCache({
+  cacheFile: path.join(DATA_DIR, "cache-pilots-roster.json"),
+  ttlMs: 15 * 60 * 1000, // 15 min
+  fetcher: () => fetchAllPages("/pilots?page[size]=300"),
+});
+const getCachedPilotsRoster = () => pilotsRosterDiskCache.get();
+const invalidatePilotsRosterCache = () => pilotsRosterDiskCache.invalidate();
+
+// getCachedAirportsArray — pulls from unifiedCatalogCache (already disk-backed) when ready,
+// falls back to a dedicated disk cache so airport lookups don't hit the API directly.
+const airportsDiskCache = makeDiskBackedCache({
+  cacheFile: path.join(DATA_DIR, "cache-airports.json"),
+  ttlMs: 30 * 60 * 1000, // 30 min — airports rarely change
+  fetcher: () => fetchAllPages("/airports?page[size]=300&sort=name"),
+});
+
+const getCachedAirportsArray = async () => {
+  // Prefer unified catalog (already synced, Map → array)
+  if (unifiedCatalogCache.initialized && unifiedCatalogCache.airportsById?.size > 0) {
+    return Array.from(unifiedCatalogCache.airportsById.values());
+  }
+  return airportsDiskCache.get();
+};
+
+// ── vAMSYS API rate limiter (token bucket, max 80 req/min, queues excess) ─────
+const RATE_LIMIT_MAX = 80;
+const RATE_LIMIT_WINDOW_MS = 60 * 1000;
+let rlTokens = RATE_LIMIT_MAX;
+let rlLastRefill = Date.now();
+const rlQueue = [];
+let rlDraining = false;
+
+function rlRefill() {
+  const now = Date.now();
+  const elapsed = now - rlLastRefill;
+  const refill = Math.floor((elapsed / RATE_LIMIT_WINDOW_MS) * RATE_LIMIT_MAX);
+  if (refill > 0) {
+    rlTokens = Math.min(RATE_LIMIT_MAX, rlTokens + refill);
+    rlLastRefill = now;
+  }
+}
+
+function rlAcquire() {
+  return new Promise((resolve) => {
+    rlRefill();
+    if (rlTokens > 0) {
+      rlTokens--;
+      resolve();
+      return;
+    }
+    rlQueue.push(resolve);
+    if (!rlDraining) drainRlQueue();
+  });
+}
+
+function drainRlQueue() {
+  rlDraining = true;
+  const tryDrain = () => {
+    rlRefill();
+    while (rlQueue.length > 0 && rlTokens > 0) {
+      rlTokens--;
+      rlQueue.shift()();
+    }
+    if (rlQueue.length > 0) {
+      setTimeout(tryDrain, Math.ceil(RATE_LIMIT_WINDOW_MS / RATE_LIMIT_MAX));
+    } else {
+      rlDraining = false;
+    }
+  };
+  setTimeout(tryDrain, Math.ceil(RATE_LIMIT_WINDOW_MS / RATE_LIMIT_MAX));
+}
+
 const pilotNameCache = new Map();
 
 const UNIFIED_CATALOG_DELTA_SYNC_MS = Math.max(
@@ -7620,7 +7787,7 @@ const buildAdminRouteDetail = async (routeId) => {
 
   const [catalogRoutes, airports, rawRouteResponse] = await Promise.all([
     loadAdminRoutesCatalog(),
-    fetchAllPages("/airports?page[size]=300"),
+    getCachedAirportsArray(),
     apiRequest(`/routes/${encodeURIComponent(String(normalizedRouteId))}?weight_unit=kg`),
   ]);
 
@@ -7750,7 +7917,7 @@ const resolveAirportReferenceIds = async (input) => {
     return [];
   }
 
-  const airports = await fetchAllPages("/airports?page[size]=300");
+  const airports = await getCachedAirportsArray();
   const byId = new Map();
   const byCode = new Map();
 
@@ -7790,7 +7957,7 @@ const resolveAirportReferenceIds = async (input) => {
 };
 
 const loadAdminAirportsCatalog = async () => {
-  const airports = await fetchAllPages("/airports?page[size]=300&sort=name");
+  const airports = await getCachedAirportsArray();
 
   return (Array.isArray(airports) ? airports : []).map((airport) => ({
     id: Number(airport?.id || 0) || 0,
@@ -12501,7 +12668,7 @@ const resolveVamsysDiscordMatch = (pilot, discordUser) => {
 };
 
 const loadVamsysPilotByDiscord = async (discordUser) => {
-  const pilots = await fetchAllPages("/pilots?page[size]=300");
+  const pilots = await getCachedPilotsRoster();
   for (const pilot of pilots) {
     const match = resolveVamsysDiscordMatch(pilot, discordUser);
     if (match.matched) {
@@ -14599,7 +14766,7 @@ app.post("/api/pilot/bookings", async (req, res) => {
     try {
       const notamPilotContext = await resolveCurrentPilotContext(req).catch(() => null);
       const notamPilot = notamPilotContext?.pilot || session.user || {};
-      const currentNotams = await fetchAllPages("/notams?page[size]=100");
+      const currentNotams = await getCachedNotams(100);
       const serializedNotams = (Array.isArray(currentNotams) ? currentNotams : []).map((item) =>
         serializeVamsysNotam(item)
       );
@@ -14933,7 +15100,7 @@ app.get("/api/pilot/activities/registrations", async (req, res) => {
   }
 });
 
-app.post("/api/pilot/activities/:id/register", async (req, res) => {
+app.post("/api/pilot/activities/:id/register", express.json(), async (req, res) => {
   const session = requirePilotApiSession(req, res);
   if (!session) {
     return;
@@ -14945,6 +15112,17 @@ app.post("/api/pilot/activities/:id/register", async (req, res) => {
       res.status(400).json({ ok: false, error: "Activity ID is required", code: "activity_id_required" });
       return;
     }
+
+    // Optional slot metadata passed from frontend for notifications
+    const body = req.body && typeof req.body === "object" ? req.body : {};
+    const slotMeta = {
+      slotTime: String(body.slotTime || "").trim() || null,
+      callsign: String(body.callsign || "").trim() || null,
+      eventName: String(body.eventName || "").trim() || null,
+      departureAirport: String(body.departureAirport || "").trim() || null,
+      arrivalAirport: String(body.arrivalAirport || "").trim() || null,
+      routeId: Number(body.routeId || 0) || null,
+    };
 
     const payload = await pilotApiRequest({
       pilotId: Number(session?.user?.id || 0) || 0,
@@ -15000,10 +15178,38 @@ app.post("/api/pilot/activities/:id/register", async (req, res) => {
       // challenge tracking must not block successful activity registration
     }
 
+    const registrationId = Number(registration?.id || 0) || 0;
+
+    // Fire-and-forget: immediate confirmation + schedule reminders
+    if (slotMeta.slotTime) {
+      const pilotId = Number(session?.user?.id || 0) || 0;
+      const reminderEntry = {
+        pilotId,
+        registrationId,
+        eventId: activityId,
+        eventName: slotMeta.eventName || `Ивент #${activityId}`,
+        slotTime: slotMeta.slotTime,
+        callsign: slotMeta.callsign,
+        departureAirport: slotMeta.departureAirport,
+        arrivalAirport: slotMeta.arrivalAirport,
+        routeId: slotMeta.routeId,
+      };
+
+      // Immediate booking confirmation notification
+      sendSlotNotification({
+        reminder: reminderEntry,
+        title: "Слот успешно забронирован ✅",
+        discordColor: 0x10b981,
+      }).catch(() => {});
+
+      // Schedule 3-day and 1-day reminders
+      addSlotReminder(reminderEntry);
+    }
+
     res.status(201).json({
       ok: true,
       registration: {
-        id: Number(registration?.id || 0) || 0,
+        id: registrationId,
         activityId: Number(registration?.activity_id || registration?.activityId || activityId) || activityId,
         createdAt: String(registration?.created_at || registration?.createdAt || "").trim() || null,
       },
@@ -15032,6 +15238,9 @@ app.delete("/api/pilot/activities/registrations/:id", async (req, res) => {
       path: `/activities/registrations/${encodeURIComponent(String(registrationId))}`,
       method: "DELETE",
     });
+
+    // Remove scheduled reminders for this registration
+    removeSlotReminder({ registrationId });
 
     res.status(204).end();
   } catch (error) {
@@ -16585,7 +16794,7 @@ app.get("/api/vamsys/search", async (req, res) => {
       }
 
       // Last-resort: perform live scan of operations pilots list (may be heavy)
-      const all = await fetchAllPages("/pilots?page[size]=300").catch(() => null);
+      const all = await getCachedPilotsRoster().catch(() => null);
       if (Array.isArray(all)) {
         const lower = q.toLowerCase();
         const candidate = all.find((p) => {
@@ -18272,6 +18481,7 @@ const sendTelegramPayload = async ({ chatId, text }) => {
     body: JSON.stringify({
       chat_id: normalizedChatId,
       text: String(text || "").slice(0, 4096),
+      parse_mode: "Markdown",
       disable_web_page_preview: true,
     }),
   });
@@ -18914,6 +19124,7 @@ const getAccessToken = async () => {
 };
 
 const apiFetch = async (path) => {
+  await rlAcquire();
   const startedAt = Date.now();
   const token = await getAccessToken();
   const maskedToken = String(token || "").slice(0, 8) ? `${String(token || "").slice(0, 8)}...` : "(none)";
@@ -18966,6 +19177,7 @@ const apiFetch = async (path) => {
 };
 
 const apiRequest = async (path, { method = "GET", body } = {}) => {
+  if (method === "GET") await rlAcquire();
   const startedAt = Date.now();
   const token = await getAccessToken();
   const maskedToken = String(token || "").slice(0, 8) ? `${String(token || "").slice(0, 8)}...` : "(none)";
@@ -19617,7 +19829,7 @@ const loadAirportsLookup = async () => {
     return airportsLookupCache.map;
   }
 
-  const airports = await fetchAllPages("/airports?page[size]=300");
+  const airports = await getCachedAirportsArray();
   const map = new Map();
 
   airports.forEach((airport) => {
@@ -19999,7 +20211,7 @@ const loadPilotsLookup = async () => {
     return pilotsLookupCache.byUsername;
   }
 
-  const pilots = await fetchAllPages("/pilots?page[size]=300");
+  const pilots = await getCachedPilotsRoster();
   const byUsername = new Map();
 
   pilots.forEach((pilot) => {
@@ -20049,7 +20261,7 @@ const loadPilotsRoster = async ({ force = false } = {}) => {
   }
 
   const [pilots, ranks] = await Promise.all([
-    fetchAllPages("/pilots?page[size]=300"),
+    getCachedPilotsRoster(),
     fetchAllPages("/ranks?page[size]=200"),
   ]);
 
@@ -21509,7 +21721,7 @@ const loadRoutesData = async () => {
     return null;
   };
 
-  const airports = await fetchAllPages("/airports?page[size]=200");
+  const airports = await getCachedAirportsArray();
   const airportMap = new Map();
   airports.forEach((airport) => {
     if (!airport?.id) {
@@ -25424,8 +25636,8 @@ app.get("/api/vamsys/dashboard/home", async (req, res) => {
             limit: 5,
           }),
       loadSystemStatus(),
-      fetchAllPages("/notams?page[size]=25").catch(() => []),
-      fetchAllPages("/alerts?page[size]=25").catch(() => []),
+      getCachedNotams(25).catch(() => []),
+      getCachedAlerts(25).catch(() => []),
     ]);
 
     const flights = Array.isArray(recentFlightsPayload?.flights) ? recentFlightsPayload.flights : [];
@@ -28785,7 +28997,7 @@ const buildAdminOverviewPayload = async () => {
   const [summary, flightMap, notamsResponse, pirepsResponse] = await Promise.all([
     loadSummaryStats().catch(() => null),
     loadFlightMap().catch(() => null),
-    fetchAllPages("/notams?page[size]=100").catch(() => []),
+    getCachedNotams(100).catch(() => []),
     fetchAllPages("/pireps?page[size]=250&sort=-created_at").catch(() => []),
   ]);
 
@@ -29113,7 +29325,7 @@ app.get("/api/admin/alerts", async (_req, res) => {
   }
 
   try {
-    const payload = await fetchAllPages("/alerts?page[size]=100");
+    const payload = await getCachedAlerts(100);
     res.json({
       alerts: (Array.isArray(payload) ? payload : []).map((item) => serializeVamsysAlert(item)),
     });
@@ -29266,6 +29478,7 @@ const flattenSlottedEvent = (raw) => {
           available: Boolean(a?.available ?? true),
           booked: Boolean(a?.booked ?? false),
           registeredPilotId: Number(a?.registered_pilot_id || 0) || null,
+          callsign: String(a?.callsign || "").trim() || null,
         };
       })
       .sort((a, b) => a.time.localeCompare(b.time));
@@ -29278,7 +29491,19 @@ const flattenSlottedEvent = (raw) => {
       available: Boolean(s?.available ?? true),
       booked: Boolean(s?.booked ?? false),
       registeredPilotId: Number(s?.registered_pilot_id || 0) || null,
+      callsign: String(s?.callsign || "").trim() || null,
     })).sort((a, b) => a.time.localeCompare(b.time));
+  })();
+
+  // criteria contains routes (subtype=routes) or airports (subtype=airports)
+  const criteria = (() => {
+    const raw = Array.isArray(attrs?.criteria) ? attrs.criteria : [];
+    if (!raw.length) return [];
+    return raw.map((c) => ({
+      routeId: Number(c?.route_id || 0) || null,
+      departureAirportId: Number(c?.departure_airport_id || 0) || null,
+      arrivalAirportId: Number(c?.arrival_airport_id || 0) || null,
+    }));
   })();
 
   return {
@@ -29286,18 +29511,55 @@ const flattenSlottedEvent = (raw) => {
     name: String(attrs?.name || "").trim(),
     description: String(attrs?.description || "").trim() || null,
     image: String(attrs?.image || attrs?.image_url || "").trim() || null,
+    imageDark: String(attrs?.image_dark || "").trim() || null,
     start: String(attrs?.start || attrs?.starts_at || "").trim() || null,
     end: String(attrs?.end || attrs?.ends_at || "").trim() || null,
     showFrom: String(attrs?.show_from || attrs?.advertise_from || "").trim() || null,
+    registrationStart: String(attrs?.registration_start || "").trim() || null,
+    registrationEnd: String(attrs?.registration_end || "").trim() || null,
     slotInterval: Number(attrs?.slot_interval || attrs?.slotInterval || 0) || null,
     points: Number(attrs?.points || 0) || 0,
+    pointsAsPercentage: Boolean(attrs?.points_as_percentage ?? false),
+    completionCount: Number(attrs?.completion_count || 0) || 0,
     registrationCount: Number(attrs?.registration_count || attrs?.registrationCount || 0) || 0,
+    subtype: String(attrs?.subtype || "").trim() || null,
+    type: String(attrs?.type || "").trim() || null,
+    tags: Array.isArray(attrs?.tags) ? attrs.tags.filter(Boolean) : [],
+    restrictions: Array.isArray(attrs?.restrictions) ? attrs.restrictions.filter(Boolean) : [],
+    sidebarTitle: String(attrs?.sidebar_title || "").trim() || null,
+    sidebarContent: String(attrs?.sidebar_content || "").trim() || null,
+    timeLeeway: Number(attrs?.time_leeway || 0) || null,
+    timeAwardScale: Number(attrs?.time_award_scale || 0) || null,
+    replicates: Boolean(attrs?.replicates ?? false),
+    replicateInterval: String(attrs?.replicate_interval || "").trim() || null,
+    // legacy airport fields (subtype=airports)
     departureAirport: String(attrs?.departure_airport || attrs?.departureAirport || attrs?.departure_icao || "").trim() || null,
     arrivalAirport: String(attrs?.arrival_airport || attrs?.arrivalAirport || attrs?.arrival_icao || "").trim() || null,
+    // criteria: routes (subtype=routes) or airports (subtype=airports)
+    criteria,
     hidden: Boolean(attrs?.hidden ?? false),
     slots,
     totalSlots: slots.length,
     availableSlots: slots.filter((s) => s.available && !s.booked).length,
+    slotRules: (() => {
+      const sr = attrs?.slot_rules || attrs?.slotRules || null;
+      if (!sr) return null;
+      return {
+        networks: Array.isArray(sr?.networks) ? sr.networks : [],
+        callsign: sr?.callsign
+          ? {
+              system: String(sr.callsign?.system || "").trim() || null,
+              generator: String(sr.callsign?.generator || "").trim() || null,
+            }
+          : null,
+        flightDispatch: sr?.flight_dispatch
+          ? {
+              opensBeforeMinutes: Number(sr.flight_dispatch?.opens_before_minutes ?? null) || null,
+              closesAfterMinutes: Number(sr.flight_dispatch?.closes_after_minutes ?? null) || null,
+            }
+          : null,
+      };
+    })(),
   };
 };
 
@@ -29305,7 +29567,7 @@ const flattenSlottedEvent = (raw) => {
 
 app.get("/api/admin/slotted-events", requireAdmin, async (_req, res) => {
   try {
-    const raw = await fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at");
+    const raw = await getCachedSlottedEvents();
     const events = (Array.isArray(raw) ? raw : []).map((item) => flattenSlottedEvent({ data: item }));
     res.json({ slottedEvents: events });
   } catch (error) {
@@ -29390,7 +29652,7 @@ app.delete("/api/admin/slotted-events/:id", requireAdmin, async (req, res) => {
 
 app.get("/api/public/slotted-events", async (_req, res) => {
   try {
-    const raw = await fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at");
+    const raw = await getCachedSlottedEvents();
     const events = (Array.isArray(raw) ? raw : []).map((item) => flattenSlottedEvent({ data: item }));
     res.json({ slottedEvents: events });
   } catch (error) {
@@ -30402,7 +30664,7 @@ app.get("/api/public/activities", async (_req, res) => {
       return !liveIds.has(linkedId);
     });
 
-    const slottedEventsRaw = await fetchAllPages("/activities/slotted-events?page[size]=100&sort=-created_at").catch(() => []);
+    const slottedEventsRaw = await getCachedSlottedEvents().catch(() => []);
     const slottedEvents = (Array.isArray(slottedEventsRaw) ? slottedEventsRaw : [])
       .map((item) => flattenSlottedEvent({ data: item }))
       .filter((ev) => !ev.hidden && ev.name && ev.id > 0)
@@ -34631,6 +34893,186 @@ const attachChatWebSocketServer = (httpServer) => {
 
   console.log("[chat] WebSocket ready on /api/chat/ws");
 };
+
+// ─── Slot Reminder System ─────────────────────────────────────────────────────
+
+const SLOT_REMINDERS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "slot-reminders.json");
+
+const readSlotRemindersStore = () => {
+  try {
+    const raw = fs.readFileSync(SLOT_REMINDERS_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeSlotRemindersStore = (reminders) => {
+  try {
+    fs.writeFileSync(SLOT_REMINDERS_FILE, JSON.stringify(reminders, null, 2), "utf-8");
+  } catch (err) {
+    logger.error("[slot-reminders] write_failed", { error: String(err) });
+  }
+};
+
+const addSlotReminder = ({ pilotId, registrationId, eventId, eventName, slotTime, callsign, departureAirport, arrivalAirport, routeId }) => {
+  const reminders = readSlotRemindersStore();
+  // Remove any existing reminder for this pilot+event
+  const filtered = reminders.filter((r) => !(r.pilotId === pilotId && r.eventId === eventId));
+  filtered.push({
+    id: randomUUID(),
+    pilotId,
+    registrationId,
+    eventId,
+    eventName,
+    slotTime,
+    callsign,
+    departureAirport,
+    arrivalAirport,
+    routeId,
+    createdAt: new Date().toISOString(),
+    reminders: { sent3days: false, sent1day: false },
+  });
+  writeSlotRemindersStore(filtered);
+};
+
+const removeSlotReminder = ({ pilotId, eventId, registrationId }) => {
+  const reminders = readSlotRemindersStore();
+  const filtered = reminders.filter((r) => {
+    if (pilotId && eventId) return !(r.pilotId === pilotId && r.eventId === eventId);
+    if (registrationId) return r.registrationId !== registrationId;
+    return true;
+  });
+  writeSlotRemindersStore(filtered);
+};
+
+const getPilotNotificationChannels = (pilotId) => {
+  const id = String(pilotId || "");
+  const vamsysLink = vamsysLinksCache.get(id) || null;
+  const discordId = String(vamsysLink?.discordId || "").trim() || null;
+  const telegramChatId = String(vamsysLink?.metadata?.telegram?.chatId || "").trim() || null;
+  return { discordId, telegramChatId };
+};
+
+const sendDiscordDM = async (discordId, payload) => {
+  if (!discordId || !DISCORD_BOT_TOKEN) return;
+  try {
+    // Create DM channel
+    const dmChannel = await discordApiRequest("/users/@me/channels", {
+      method: "POST",
+      body: JSON.stringify({ recipient_id: discordId }),
+    });
+    const channelId = dmChannel?.id;
+    if (!channelId) return;
+    await discordApiRequest(`/channels/${channelId}/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    logger.warn("[slot-reminders] discord_dm_failed", { discordId, error: String(err) });
+  }
+};
+
+const fmtSlotTimeUtc = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} UTC`;
+};
+
+const buildSlotDiscordEmbed = ({ title, color, reminder }) => ({
+  embeds: [{
+    title,
+    color,
+    fields: [
+      { name: "Ивент", value: String(reminder.eventName || "—"), inline: false },
+      { name: "Маршрут", value: `${reminder.departureAirport || "?"} → ${reminder.arrivalAirport || "?"}`, inline: true },
+      { name: "Время вылета", value: fmtSlotTimeUtc(reminder.slotTime), inline: true },
+      ...(reminder.callsign ? [{ name: "Позывной", value: `\`${reminder.callsign}\``, inline: true }] : []),
+    ],
+    footer: { text: "Nordwind Virtual Airlines" },
+    timestamp: new Date().toISOString(),
+  }],
+});
+
+const buildSlotTelegramText = ({ title, reminder }) => {
+  const lines = [
+    `✈️ *${title}*`,
+    ``,
+    `📋 *Ивент:* ${reminder.eventName || "—"}`,
+    `🛫 *Маршрут:* ${reminder.departureAirport || "?"} → ${reminder.arrivalAirport || "?"}`,
+    `🕐 *Время вылета:* ${fmtSlotTimeUtc(reminder.slotTime)}`,
+  ];
+  if (reminder.callsign) lines.push(`📡 *Позывной:* \`${reminder.callsign}\``);
+  lines.push(``, `_Nordwind Virtual Airlines_`);
+  return lines.join("\n");
+};
+
+const sendSlotNotification = async ({ reminder, title, discordColor }) => {
+  const { discordId, telegramChatId } = getPilotNotificationChannels(reminder.pilotId);
+
+  const discordPayload = buildSlotDiscordEmbed({ title, color: discordColor, reminder });
+  const telegramText = buildSlotTelegramText({ title, reminder });
+
+  await Promise.allSettled([
+    discordId ? sendDiscordDM(discordId, discordPayload) : Promise.resolve(),
+    telegramChatId ? sendTelegramPayload({ chatId: telegramChatId, text: telegramText }).catch(() => {}) : Promise.resolve(),
+  ]);
+};
+
+const runSlotReminderTick = async () => {
+  const reminders = readSlotRemindersStore();
+  if (!reminders.length) return;
+
+  const now = Date.now();
+  let changed = false;
+
+  for (const reminder of reminders) {
+    const slotMs = new Date(reminder.slotTime).getTime();
+    if (isNaN(slotMs)) continue;
+
+    const msUntilSlot = slotMs - now;
+
+    // Remove reminders for past slots (>2h after slot time)
+    if (msUntilSlot < -2 * 60 * 60 * 1000) {
+      reminder._remove = true;
+      changed = true;
+      continue;
+    }
+
+    // 3 days = 259200000ms, window: between 3d+30min and 3d
+    if (!reminder.reminders.sent3days && msUntilSlot <= 3 * 24 * 60 * 60 * 1000 && msUntilSlot > 3 * 24 * 60 * 60 * 1000 - 35 * 60 * 1000) {
+      try {
+        await sendSlotNotification({ reminder, title: "Напоминание: ваш слот через 3 дня", discordColor: 0xf59e0b });
+        reminder.reminders.sent3days = true;
+        changed = true;
+        logger.info("[slot-reminders] sent_3days", { pilotId: reminder.pilotId, eventId: reminder.eventId });
+      } catch (err) {
+        logger.warn("[slot-reminders] send_3days_failed", { error: String(err) });
+      }
+    }
+
+    // 1 day = 86400000ms, window: between 1d+30min and 1d
+    if (!reminder.reminders.sent1day && msUntilSlot <= 24 * 60 * 60 * 1000 && msUntilSlot > 24 * 60 * 60 * 1000 - 35 * 60 * 1000) {
+      try {
+        await sendSlotNotification({ reminder, title: "Напоминание: ваш слот завтра!", discordColor: 0xe31e24 });
+        reminder.reminders.sent1day = true;
+        changed = true;
+        logger.info("[slot-reminders] sent_1day", { pilotId: reminder.pilotId, eventId: reminder.eventId });
+      } catch (err) {
+        logger.warn("[slot-reminders] send_1day_failed", { error: String(err) });
+      }
+    }
+  }
+
+  if (changed) {
+    writeSlotRemindersStore(reminders.filter((r) => !r._remove));
+  }
+};
+
+// Check every 5 minutes
+setInterval(() => { runSlotReminderTick().catch(() => {}); }, 5 * 60 * 1000).unref();
 
 // Email-рассылки (маркетинг) — монтируем до static/catch-all.
 mountEmailCampaigns(app, {
