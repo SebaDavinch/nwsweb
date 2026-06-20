@@ -18685,6 +18685,14 @@ const callClaudeAI = async (messages, lang = "ru") => {
     throw new Error("ANTHROPIC_API_KEY not configured");
   }
 
+  // buildAiSiteContext() использует in-memory кэш (TTL 1ч, диск при старте) — реального API не вызывает
+  const knowledgeText = typeof buildAiSiteContext === "function"
+    ? await buildAiSiteContext().catch(() => getAiKnowledgeText())
+    : getAiKnowledgeText();
+  const systemPrompt = knowledgeText
+    ? `${VA_AI_SYSTEM_PROMPT}\n\n${knowledgeText}`
+    : VA_AI_SYSTEM_PROMPT;
+
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -18695,7 +18703,7 @@ const callClaudeAI = async (messages, lang = "ru") => {
     body: JSON.stringify({
       model: "claude-sonnet-4-6",
       max_tokens: 1024,
-      system: VA_AI_SYSTEM_PROMPT,
+      system: systemPrompt,
       messages: messages.map((m) => ({
         role: m.role === "user" ? "user" : "assistant",
         content: String(m.content || "").slice(0, 4000),
@@ -18954,6 +18962,10 @@ const startTelegramPollingLoop = () => {
   loop().catch(() => {});
 };
 
+// getAiKnowledgeText — мост к aiKnowledgeCache (заполняется buildAiSiteContext ниже).
+// Возвращает закэшированный snapshot или пустую строку если ещё не готов.
+const getAiKnowledgeText = () => aiKnowledgeCache?.text || "";
+
 // ─── AI response cache ───────────────────────────────────────────────────────
 
 const AI_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -19029,6 +19041,16 @@ const setAiCached = (key, reply, escalate) => {
 loadAiResponseCache();
 // Persist cache every 10 minutes to protect against crashes
 setInterval(() => persistAiResponseCache(), 10 * 60 * 1000).unref();
+
+app.post("/api/admin/ai/refresh-knowledge", requireAdmin, async (_req, res) => {
+  aiKnowledgeCache = { text: "", builtAt: 0 }; // сброс кэша — форсирует пересборку
+  const text = await buildAiSiteContext().catch(() => "");
+  res.json({ ok: true, chars: text.length, builtAt: aiKnowledgeCache.builtAt });
+});
+
+app.get("/api/admin/ai/knowledge", requireAdmin, (_req, res) => {
+  res.json({ text: aiKnowledgeCache.text, chars: aiKnowledgeCache.text.length, builtAt: aiKnowledgeCache.builtAt });
+});
 
 // ─── POST /api/ai/chat ───────────────────────────────────────────────────────
 
@@ -31477,11 +31499,21 @@ const XAI_API_KEY = process.env.XAI_API_KEY || "";
 const AI_CHAT_RATE_LIMIT_MS = 4000;
 const aiChatLastRequestByIp = new Map();
 
-// AI knowledge base cache — rebuilt when bootstrap data refreshes or on demand
+// AI knowledge base cache — rebuilt hourly, persisted to disk across restarts
+const AI_KNOWLEDGE_FILE = path.join(path.dirname(AUTH_STORE_FILE), "ai-knowledge.json");
+const AI_KNOWLEDGE_TTL_MS = 60 * 60 * 1000; // 1 hour
 let aiKnowledgeCache = { text: "", builtAt: 0 };
-const invalidateAiKnowledge = () => { aiKnowledgeCache = { text: "", builtAt: 0 }; };
-invalidateAiKnowledge(); // reset on server start so prompt changes take effect immediately
-const AI_KNOWLEDGE_TTL_MS = 10 * 60 * 1000; // 10 min
+
+// Load from disk on startup (instant — no API call)
+try {
+  if (fs.existsSync(AI_KNOWLEDGE_FILE)) {
+    const raw = JSON.parse(fs.readFileSync(AI_KNOWLEDGE_FILE, "utf8"));
+    if (raw?.text && Date.now() - Number(raw.builtAt || 0) < AI_KNOWLEDGE_TTL_MS) {
+      aiKnowledgeCache = raw;
+      logger.info("[ai-knowledge] loaded_from_disk", { chars: raw.text.length });
+    }
+  }
+} catch { /* ignore */ }
 
 const buildAiSiteContext = async () => {
   const now = Date.now();
@@ -31682,6 +31714,11 @@ const buildAiSiteContext = async () => {
 
   const text = sections.join("\n\n");
   aiKnowledgeCache = { text, builtAt: now };
+  // Persist to disk so next server restart loads instantly
+  setImmediate(() => {
+    try { fs.writeFileSync(AI_KNOWLEDGE_FILE, JSON.stringify({ text, builtAt: now }), "utf8"); } catch { /* ignore */ }
+  });
+  logger.info("[ai-knowledge] rebuilt", { chars: text.length });
   return text;
 };
 
