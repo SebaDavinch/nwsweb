@@ -99,7 +99,7 @@ export function AiSearchWidget() {
   };
 
   const requestOperator = () => {
-    send(tr("Хочу поговорить с живым оператором", "I want to speak with a live operator"));
+    send(tr("Хочу обратиться за помощью к команде", "I'd like to get help from the team"));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -178,7 +178,7 @@ export function AiSearchWidget() {
                 className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs text-gray-400 transition hover:text-[#E31E24] disabled:opacity-40"
               >
                 <Headphones className="h-3.5 w-3.5" />
-                {tr("Соединить с оператором", "Connect with an operator")}
+                {tr("Обратиться за помощью", "Get help from support")}
               </button>
             </div>
           )}
