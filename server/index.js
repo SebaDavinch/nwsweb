@@ -18860,7 +18860,17 @@ const handleTelegramMessage = async (update) => {
   if (!ANTHROPIC_API_KEY) return; // AI не настроен, молчим
 
   try {
-    const { reply, escalate } = await callClaudeAI([{ role: "user", content: text }]);
+    const tgMessages = [{ role: "user", content: text }];
+    const tgCacheKey = buildAiCacheKey(tgMessages);
+    const tgCached = getAiCached(tgCacheKey);
+
+    let reply, escalate;
+    if (tgCached && !tgCached.escalate) {
+      ({ reply, escalate } = { reply: tgCached.reply, escalate: false });
+    } else {
+      ({ reply, escalate } = await callClaudeAI(tgMessages));
+      if (!escalate && reply) setAiCached(tgCacheKey, reply, false);
+    }
 
     if (escalate) {
       const ticket = createAiEscalationTicket({
@@ -18944,6 +18954,82 @@ const startTelegramPollingLoop = () => {
   loop().catch(() => {});
 };
 
+// ─── AI response cache ───────────────────────────────────────────────────────
+
+const AI_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const AI_CACHE_MAX_ENTRIES = 2000;
+const AI_CACHE_FILE = path.join(path.dirname(AUTH_STORE_FILE), "ai-response-cache.json");
+
+const aiResponseCache = new Map(); // key → { reply, escalate, cachedAt }
+
+const loadAiResponseCache = () => {
+  try {
+    if (!fs.existsSync(AI_CACHE_FILE)) return;
+    const raw = fs.readFileSync(AI_CACHE_FILE, "utf8");
+    const entries = JSON.parse(raw);
+    const now = Date.now();
+    let loaded = 0;
+    for (const [k, v] of Object.entries(entries)) {
+      if (v && typeof v === "object" && now - Number(v.cachedAt || 0) < AI_CACHE_TTL_MS) {
+        aiResponseCache.set(k, v);
+        loaded++;
+      }
+    }
+    logger.info("[ai-cache] loaded", { entries: loaded });
+  } catch {
+    /* ignore */
+  }
+};
+
+const persistAiResponseCache = () => {
+  try {
+    const now = Date.now();
+    const obj = {};
+    for (const [k, v] of aiResponseCache.entries()) {
+      if (now - Number(v.cachedAt || 0) < AI_CACHE_TTL_MS) obj[k] = v;
+    }
+    fs.writeFileSync(AI_CACHE_FILE, JSON.stringify(obj), "utf8");
+  } catch {
+    /* ignore */
+  }
+};
+
+const buildAiCacheKey = (messages) => {
+  // Normalize: lowercase, collapse whitespace, trim
+  const normalized = messages
+    .map((m) => `${m.role}:${String(m.content || "").toLowerCase().trim().replace(/\s+/g, " ")}`)
+    .join("|");
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 32);
+};
+
+const getAiCached = (key) => {
+  const entry = aiResponseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - Number(entry.cachedAt || 0) > AI_CACHE_TTL_MS) {
+    aiResponseCache.delete(key);
+    return null;
+  }
+  return entry;
+};
+
+const setAiCached = (key, reply, escalate) => {
+  // Evict oldest entries if over limit
+  if (aiResponseCache.size >= AI_CACHE_MAX_ENTRIES) {
+    const oldest = [...aiResponseCache.entries()].sort((a, b) => Number(a[1].cachedAt) - Number(b[1].cachedAt));
+    for (let i = 0; i < Math.floor(AI_CACHE_MAX_ENTRIES * 0.1); i++) {
+      aiResponseCache.delete(oldest[i][0]);
+    }
+  }
+  aiResponseCache.set(key, { reply, escalate, cachedAt: Date.now() });
+  // Persist async
+  setImmediate(() => persistAiResponseCache());
+};
+
+// Load cache on startup
+loadAiResponseCache();
+// Persist cache every 10 minutes to protect against crashes
+setInterval(() => persistAiResponseCache(), 10 * 60 * 1000).unref();
+
 // ─── POST /api/ai/chat ───────────────────────────────────────────────────────
 
 app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
@@ -18965,6 +19051,13 @@ app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
     return;
   }
 
+  const cacheKey = buildAiCacheKey(messages);
+  const cached = getAiCached(cacheKey);
+  if (cached && !cached.escalate) {
+    res.json({ reply: cached.reply, escalate: false, cached: true });
+    return;
+  }
+
   try {
     const { reply, escalate } = await callClaudeAI(messages, lang);
 
@@ -18981,11 +19074,13 @@ app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
         await notifyAiEscalation({ ticket, conversationSummary: userMessages.slice(0, 400) }).catch(() => {});
       }
 
+      // Не кэшируем эскалации
       res.json({ reply, escalate: true, ticketNumber: ticket?.number || null });
       return;
     }
 
-    res.json({ reply, escalate: false });
+    setAiCached(cacheKey, reply, false);
+    res.json({ reply, escalate: false, cached: false });
   } catch (err) {
     logger.warn("[ai-chat] error", String(err?.message || err));
     res.status(500).json({ error: "AI response failed", message: String(err?.message || err) });
