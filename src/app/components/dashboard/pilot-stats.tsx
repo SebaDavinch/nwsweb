@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Loader2, Plane, Clock, Route, TrendingUp, MapPin, Star,
-  Moon, Sun, Zap, Radio,
+  Moon, Sun, Zap, Radio, ArrowRight,
 } from "lucide-react";
 import {
   AreaChart, Area, BarChart, Bar,
@@ -238,6 +238,78 @@ export function PilotStats() {
           iconBg="bg-white/20"
         />
       </div>
+
+      {/* ── Favourites strip ── */}
+      {(() => {
+        const favAc = favorites?.aircraft ?? null;
+        const favRt = favorites?.route ?? null;
+        // route format from server: "UWKD - URKK"
+        const routeParts = favRt?.route ? favRt.route.split(/\s*-\s*/) : [];
+        const depIcao = routeParts[0] ?? null;
+        const arrIcao = routeParts[1] ?? null;
+        return (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Любимый самолёт */}
+            <div className="relative overflow-hidden rounded-3xl border border-zinc-100 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-zinc-900">
+              <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                <Star className="h-3.5 w-3.5 text-amber-400" />
+                {tr("Любимый самолёт", "Favourite aircraft")}
+              </div>
+              {favAc ? (
+                <div className="mt-2 flex items-end justify-between gap-3">
+                  <div>
+                    <div className="text-2xl font-black text-zinc-900 dark:text-zinc-100">{favAc.type}</div>
+                    {favAc.registration && (
+                      <div className="mt-0.5 font-mono text-sm text-zinc-400">{favAc.registration}</div>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-black text-[#E31E24]">{favAc.count}</div>
+                    <div className="text-xs text-zinc-400">{tr("рейсов", "flights")}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-zinc-400">{tr("Нет данных", "No data yet")}</div>
+              )}
+              <div className="pointer-events-none absolute -right-6 -bottom-6 opacity-[0.06]">
+                <Plane className="h-28 w-28 text-zinc-900 dark:text-zinc-100" />
+              </div>
+            </div>
+
+            {/* Любимый маршрут */}
+            <div className="relative overflow-hidden rounded-3xl border border-zinc-100 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-zinc-900">
+              <div className="mb-1 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+                <Star className="h-3.5 w-3.5 text-amber-400" />
+                {tr("Любимый маршрут", "Favourite route")}
+              </div>
+              {favRt && depIcao && arrIcao ? (
+                <div className="mt-2 flex items-end justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <IcaoFlag icao={depIcao} />
+                      <span className="font-mono text-xl font-black text-zinc-900 dark:text-zinc-100">{depIcao}</span>
+                    </div>
+                    <ArrowRight className="h-4 w-4 shrink-0 text-zinc-300" />
+                    <div className="flex items-center gap-1.5">
+                      <IcaoFlag icao={arrIcao} />
+                      <span className="font-mono text-xl font-black text-zinc-900 dark:text-zinc-100">{arrIcao}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-black text-[#E31E24]">{favRt.count}</div>
+                    <div className="text-xs text-zinc-400">{tr("рейсов", "flights")}</div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 text-sm text-zinc-400">{tr("Нет данных", "No data yet")}</div>
+              )}
+              <div className="pointer-events-none absolute -right-6 -bottom-6 opacity-[0.06]">
+                <Route className="h-28 w-28 text-zinc-900 dark:text-zinc-100" />
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── Monthly trend ── */}
       {monthly.length > 0 && (
