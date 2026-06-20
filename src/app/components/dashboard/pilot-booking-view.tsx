@@ -1028,11 +1028,12 @@ export function PilotBookingView() {
                       {isDispatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                       Подать на VATSIM / Phoenix
                     </Button>
-                    {/* View booking in vAMSYS Phoenix portal */}
+                    {/* View booking in Phoenix — same dispatch-url endpoint, secondary style */}
                     <Button variant="outline" className="w-full justify-start"
-                      onClick={() => window.open(`https://vamsys.io/phoenix/bookings/${booking.id}`, "_blank", "noopener,noreferrer")}>
+                      onClick={handleOpenDispatch}
+                      disabled={isDispatching || !booking.routeId}>
                       <ExternalLink className="mr-2 h-4 w-4" />
-                      Просмотреть в vAMSYS
+                      Просмотреть в Phoenix
                     </Button>
                     {/* VATSIM Prefile — direct flight plan filing on my.vatsim.net */}
                     <Button variant="outline" className="w-full justify-start"
