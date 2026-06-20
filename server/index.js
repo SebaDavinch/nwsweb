@@ -17912,20 +17912,9 @@ const loadDiscordDailyStatsBooking = async (bookingId) => {
 };
 
 const buildDiscordDailyStatsCardPayload = (snapshot = {}) => ({
-  title: "Nordwind VA Daily Summary",
-  subtitle: "Operational totals for the last 24 hours",
   generatedAt: String(snapshot?.generatedAtLabel || "Unknown").trim() || "Unknown",
-  windowLabel: `${formatDiscordUtcDateTime(snapshot?.windowStart)} - ${formatDiscordUtcDateTime(snapshot?.windowEnd)}`,
-  metrics: [
-    { label: "Pilots", value: String(snapshot?.pilots ?? 0) },
-    { label: "PIREPs", value: String(snapshot?.pireps ?? 0) },
-    { label: "Flights", value: String(snapshot?.flights ?? 0) },
-    { label: "Flight Time", value: String(snapshot?.flightTime || "0m") },
-    { label: "Passengers", value: String(snapshot?.passengers ?? 0) },
-    { label: "Cargo", value: String(snapshot?.cargo ?? 0) },
-  ],
-  backgroundPath: DISCORD_DAILY_STATS_CARD_BACKGROUND,
   logoPath: DISCORD_DAILY_STATS_CARD_LOGO,
+  windows: Array.isArray(snapshot?.windows) ? snapshot.windows : [],
 });
 
 const generateDiscordDailyStatsCard = async (snapshot = {}) => {
@@ -17968,88 +17957,87 @@ const generateDiscordDailyStatsCard = async (snapshot = {}) => {
   throw lastError || new Error("Failed to generate daily stats card");
 };
 
+const computeStatsWindow = (allPireps, windowStartMs, windowEndMs) => {
+  const inWindow = (Array.isArray(allPireps) ? allPireps : []).filter((p) => {
+    const ts = resolveDiscordAutomationTimestamp(p?.landing_time, p?.on_blocks_time, p?.created_at, p?.submitted_at, p?.updated_at);
+    return Number.isFinite(ts) && ts >= windowStartMs && ts <= windowEndMs;
+  });
+  const completed = inWindow.filter(isAcceptedPilotPirep);
+  const uniquePilots = new Set(inWindow.map((p) => String(p?.pilot_id || p?.user_id || "").trim()).filter(Boolean));
+  let totalHours = 0;
+  const routeCounts = new Map();
+  const airportCounts = new Map();
+  for (const p of completed) {
+    totalHours += resolveDiscordAutomationHours(p);
+    const dep = String(p?.departure_airport?.icao || p?.departure_icao || "").trim().toUpperCase();
+    const arr = String(p?.arrival_airport?.icao || p?.arrival_icao || "").trim().toUpperCase();
+    if (dep && arr) {
+      routeCounts.set(`${dep}-${arr}`, (routeCounts.get(`${dep}-${arr}`) || 0) + 1);
+      airportCounts.set(dep, (airportCounts.get(dep) || 0) + 1);
+      airportCounts.set(arr, (airportCounts.get(arr) || 0) + 1);
+    }
+  }
+  return {
+    flights: completed.length,
+    pilots: uniquePilots.size,
+    flightTimeHours: Math.round(totalHours * 10) / 10,
+    flightTime: formatDiscordDailyStatsFlightTime(totalHours),
+    topRoutes: Array.from(routeCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([route, count]) => ({ route, count })),
+    busiestAirports: Array.from(airportCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([icao, count]) => ({ icao, count })),
+  };
+};
+
+const fmtDateShort = (ms) => {
+  const d = new Date(ms);
+  return `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${d.getUTCFullYear()}`;
+};
+
 const buildDailyStats24hSnapshot = async () => {
+  // Fetch enough PIREPs to cover the current month (up to 500)
   const allPireps = await fetchAllPages("/pireps?page[size]=250&sort=-created_at").catch(() => []);
   const nowMs = Date.now();
-  const windowStartMs = nowMs - 24 * 60 * 60 * 1000;
   const generatedAt = new Date(nowMs).toISOString();
-  const recentPireps = (Array.isArray(allPireps) ? allPireps : []).filter((pirep) => {
-    const timestamp = resolveDiscordAutomationTimestamp(
-      pirep?.landing_time,
-      pirep?.on_blocks_time,
-      pirep?.created_at,
-      pirep?.submitted_at,
-      pirep?.updated_at
-    );
-    return Number.isFinite(timestamp) && timestamp >= windowStartMs && timestamp <= nowMs;
-  });
-  const completedFlights = recentPireps.filter((item) => isAcceptedPilotPirep(item));
-  const uniquePilotIds = new Set(
-    recentPireps
-      .map((item) => String(item?.pilot_id || item?.user_id || "").trim())
-      .filter(Boolean)
-  );
-  const bookingIds = Array.from(
-    new Set(
-      completedFlights
-        .map((item) => Number(item?.booking_id || 0) || 0)
-        .filter((bookingId) => bookingId > 0)
-    )
-  );
-  const bookingsById = new Map(
-    (await Promise.all(
-      bookingIds.map(async (bookingId) => [bookingId, await loadDiscordDailyStatsBooking(bookingId)])
-    )).filter((entry) => entry[1])
-  );
-  const totalFlightHours = completedFlights.reduce((sum, item) => sum + resolveDiscordAutomationHours(item), 0);
-  const totals = completedFlights.reduce(
-    (sum, item) => {
-      const bookingId = Number(item?.booking_id || 0) || 0;
-      const booking = bookingId > 0 ? bookingsById.get(bookingId) || null : null;
-      const passengers = resolveDiscordDailyStatsMetricValue(
-        item?.passengers,
-        item?.pax,
-        item?.booked_passengers,
-        item?.bookedPassengers,
-        booking?.passengers,
-        booking?.pax,
-        booking?.booked_passengers,
-        booking?.bookedPassengers
-      );
-      const cargo = resolveDiscordDailyStatsMetricValue(
-        item?.cargo,
-        item?.cargo_weight,
-        item?.freight,
-        item?.freight_weight,
-        booking?.cargo,
-        booking?.cargo_weight,
-        booking?.freight,
-        booking?.freight_weight
-      );
 
-      return {
-        passengers: sum.passengers + Math.round(passengers || 0),
-        cargo: sum.cargo + Math.round(cargo || 0),
-      };
+  // Window boundaries
+  const yesterday24hStart = nowMs - 24 * 60 * 60 * 1000;
+  const sevenDaysStart = nowMs - 7 * 24 * 60 * 60 * 1000;
+  const now = new Date(nowMs);
+  const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+
+  const w24h = computeStatsWindow(allPireps, yesterday24hStart, nowMs);
+  const w7d = computeStatsWindow(allPireps, sevenDaysStart, nowMs);
+  const wMonth = computeStatsWindow(allPireps, monthStart, nowMs);
+
+  const windows = [
+    {
+      label: "ВЧЕРА",
+      dateLabel: fmtDateShort(yesterday24hStart),
+      ...w24h,
     },
-    { passengers: 0, cargo: 0 }
-  );
-  const windowStart = new Date(windowStartMs).toISOString();
-  const windowEnd = new Date(nowMs).toISOString();
-  const flightTime = formatDiscordDailyStatsFlightTime(totalFlightHours);
+    {
+      label: "7 ДНЕЙ",
+      dateLabel: `${fmtDateShort(sevenDaysStart)} – ${fmtDateShort(nowMs)}`,
+      ...w7d,
+    },
+    {
+      label: "МЕСЯЦ",
+      dateLabel: `${fmtDateShort(monthStart)} – ${fmtDateShort(nowMs)}`,
+      ...wMonth,
+    },
+  ];
 
+  // Legacy flat fields kept for backward-compat with existing embed title
+  const w = w24h;
   return {
-    pilots: uniquePilotIds.size,
-    pireps: recentPireps.length,
-    flights: completedFlights.length,
-    flightTimeHours: Math.round(totalFlightHours * 10) / 10,
-    flightTime,
-    passengers: totals.passengers,
-    cargo: totals.cargo,
+    pilots: w.pilots,
+    flights: w.flights,
+    flightTimeHours: w.flightTimeHours,
+    flightTime: w.flightTime,
     generatedAt,
     generatedAtLabel: formatDiscordUtcDateTime(generatedAt),
-    windowStart,
-    windowEnd,
+    windowStart: new Date(yesterday24hStart).toISOString(),
+    windowEnd: new Date(nowMs).toISOString(),
+    windows,
   };
 };
 
@@ -18226,7 +18214,35 @@ const sweepDiscordDailyStats24h = async (settings = getDiscordBotSettingsStore()
   let sentSuccessfully = false;
   try {
     const snapshot = await buildDailyStats24hSnapshot();
-    const card = await generateDiscordDailyStatsCard(snapshot);
+    const windows = Array.isArray(snapshot?.windows) ? snapshot.windows : [];
+
+    const buildWindowFields = (win) => {
+      const routes = Array.isArray(win.topRoutes) ? win.topRoutes : [];
+      const airports = Array.isArray(win.busiestAirports) ? win.busiestAirports : [];
+      const routeLines = routes.length
+        ? routes.map((r, i) => `\`${String(i + 1)}.\` **${r.route}** ×${r.count}`).join("\n")
+        : "—";
+      const airportLines = airports.length
+        ? airports.map((a, i) => `\`${String(i + 1)}.\` **${a.icao}** ×${a.count}`).join("\n")
+        : "—";
+      return [
+        {
+          name: `✈ ${win.label}  ·  ${win.dateLabel}`,
+          value: [
+            `**${win.flights}** рейс${win.flights !== 1 ? "ов" : ""}  ·  **${win.flightTime}**  ·  **${win.pilots}** пилот${win.pilots !== 1 ? "ов" : ""}`,
+          ].join("\n"),
+          inline: false,
+        },
+        { name: "Топ маршруты", value: routeLines, inline: true },
+        { name: "Аэропорты", value: airportLines, inline: true },
+        { name: "​", value: "​", inline: false }, // spacer between windows
+      ];
+    };
+
+    const fields = windows.flatMap(buildWindowFields);
+    // Remove trailing spacer
+    if (fields.length && fields[fields.length - 1]?.name === "​") fields.pop();
+
     const result = await sendDiscordPayload({
       channelId: String(route?.channelId || settings?.channels?.news || "").trim(),
       webhookUrl: String(route?.webhookUrl || settings?.webhookUrl || "").trim(),
@@ -18234,22 +18250,11 @@ const sweepDiscordDailyStats24h = async (settings = getDiscordBotSettingsStore()
         allowed_mentions: { parse: [] },
         embeds: [
           {
-            title: "Nordwind VA stats for the last 24 hours",
-            description: `Generated: ${snapshot.generatedAtLabel}`,
+            title: "📊 Nordwind VA — Статистика",
             color: 0xe31e24,
-            image: { url: `attachment://${card.fileName}` },
-            footer: {
-              text: `Window: ${formatDiscordUtcDateTime(snapshot.windowStart)} - ${formatDiscordUtcDateTime(snapshot.windowEnd)}`,
-            },
+            fields,
+            footer: { text: "Nordwind Virtual Group" },
             timestamp: snapshot.generatedAt,
-          },
-        ],
-        files: [
-          {
-            name: card.fileName,
-            description: "Nordwind daily operations summary card",
-            contentType: "image/png",
-            data: card.buffer,
           },
         ],
       },
