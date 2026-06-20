@@ -16,6 +16,7 @@ import { useLanguage } from "../../context/language-context";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { RecentFlights } from "./recent-flights";
+import { icaoToCountry, getFlagUri } from "./flag-data";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -44,6 +45,24 @@ interface Booking {
   status: string;
   statusLabel: string;
   canCancel: boolean;
+}
+
+const cityFromName = (name?: string | null, fallback?: string) => {
+  const raw = String(name || "").trim();
+  if (!raw) return String(fallback || "").trim().toUpperCase();
+  return raw
+    .replace(/\s*\([A-Z]{3,4}\)\s*/g, " ")
+    .replace(/\binternational\s+airport\b/gi, "")
+    .replace(/\bairport\b/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim() || String(fallback || "").trim().toUpperCase();
+};
+
+function IcaoFlag({ icao, className = "h-3.5 w-5" }: { icao?: string; className?: string }) {
+  const code = icaoToCountry(String(icao || "").trim());
+  const uri = code ? getFlagUri(code) : "";
+  if (!uri) return null;
+  return <img src={uri} alt={code} className={`inline-block shrink-0 rounded-[2px] border border-black/10 object-cover ${className}`} />;
 }
 
 const fmt = (iso?: string | null, lang = "ru") => {
@@ -213,13 +232,14 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
                 </div>
 
                 {/* Row 2: route */}
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#1d1d1f]">
-                  <span className="font-mono text-base">{b.departureCode}</span>
-                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-300" />
-                  <span className="font-mono text-base">{b.arrivalCode}</span>
-                  <span className="ml-1 truncate font-normal text-zinc-400 text-xs">
-                    {b.departureName} → {b.arrivalName}
-                  </span>
+                <div className="flex items-center gap-1.5 text-sm font-semibold text-[#1d1d1f]">
+                  <IcaoFlag icao={b.departureCode} />
+                  <span>{cityFromName(b.departureName, b.departureCode)}</span>
+                  <span className="font-mono text-xs font-normal text-zinc-400">({b.departureCode})</span>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-zinc-300 mx-0.5" />
+                  <IcaoFlag icao={b.arrivalCode} />
+                  <span>{cityFromName(b.arrivalName, b.arrivalCode)}</span>
+                  <span className="font-mono text-xs font-normal text-zinc-400">({b.arrivalCode})</span>
                 </div>
 
                 {/* Row 3: time */}
