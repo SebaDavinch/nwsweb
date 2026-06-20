@@ -1,5 +1,5 @@
 import { ChangeEvent, useEffect, useRef, useState } from "react";
-import { Bell, ImageUp, Lock, MapPinned, MessageSquare, Plane, RotateCcw, Send, Shield } from "lucide-react";
+import { Bell, ImageUp, Lock, MapPinned, MessageSquare, Plane, RefreshCw, RotateCcw, Send, Shield } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useLanguage } from "../../context/language-context";
@@ -186,7 +186,8 @@ const resizeAvatarToDataUrl = async (file: File) => {
 };
 
 export function PilotSettings() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const ru = language === "ru";
   const { connectPilotApi, loginWithDiscord, pilot, refreshAuth } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -207,6 +208,14 @@ export function PilotSettings() {
   });
   const [sbPreferencesText, setSbPreferencesText] = useState("");
   const [isSavingPilotLocation, setIsSavingPilotLocation] = useState(false);
+  const [isSyncingLocation, setIsSyncingLocation] = useState(false);
+  const [locationSyncedAt, setLocationSyncedAt] = useState<Date | null>(null);
+  const [, setTimerTick] = useState(0);
+  useEffect(() => {
+    if (!locationSyncedAt) return;
+    const id = setInterval(() => setTimerTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [locationSyncedAt]);
   const [isSavingNotifications, setIsSavingNotifications] = useState(false);
   const [isSavingPilotPreferences, setIsSavingPilotPreferences] = useState(false);
   const [profilePreferences, setProfilePreferences] = useState<Required<ProfilePreferences>>(normalizeProfilePreferences());
@@ -582,6 +591,22 @@ export function PilotSettings() {
       profile: null,
     }));
     setPilotLocationCode("");
+  };
+
+  const handleSyncLocation = async () => {
+    setIsSyncingLocation(true);
+    try {
+      const response = await fetch("/api/pilot/location?force=true", { credentials: "include" });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(String(payload?.error || "Sync failed"));
+      setLocationSyncedAt(new Date());
+      await refreshPilotApiStatus();
+      toast.success(ru ? "Локация синхронизирована с vAMSYS" : "Location synced with vAMSYS");
+    } catch (error) {
+      toast.error(String(error || "Failed to sync location"));
+    } finally {
+      setIsSyncingLocation(false);
+    }
   };
 
   const handleUpdatePilotLocation = async (airportCode?: string | null) => {
@@ -968,35 +993,58 @@ export function PilotSettings() {
                   </div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-white p-4 space-y-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
-                    <MapPinned className="w-4 h-4 text-[#E31E24]" />
-                    Pilot location
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                      <MapPinned className="w-4 h-4 text-[#E31E24]" />
+                      {ru ? "Локация пилота" : "Pilot location"}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {locationSyncedAt && (
+                        <span className="text-[11px] text-gray-400">
+                          {ru ? "Обновлено" : "Updated"} {Math.round((Date.now() - locationSyncedAt.getTime()) / 60000) < 1
+                            ? (ru ? "только что" : "just now")
+                            : `${Math.round((Date.now() - locationSyncedAt.getTime()) / 60000)} ${ru ? "мин назад" : "min ago"}`}
+                        </span>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleSyncLocation()}
+                        disabled={isSyncingLocation}
+                        className="h-7 gap-1.5 text-xs"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${isSyncingLocation ? "animate-spin" : ""}`} />
+                        {isSyncingLocation
+                          ? (ru ? "Синхронизация..." : "Syncing...")
+                          : (ru ? "Синхронизировать с vAMSYS" : "Sync with vAMSYS")}
+                      </Button>
+                    </div>
                   </div>
                   <div className="text-sm text-gray-500">
-                    Current location: {pilotApiProfile?.location ? pilotApiProfile.location : "not set"}
+                    {ru ? "Текущая локация:" : "Current location:"} {pilotApiProfile?.location ? pilotApiProfile.location : (ru ? "не задана" : "not set")}
                   </div>
                   <div className="flex flex-col gap-3 sm:flex-row">
                     <Input
                       value={pilotLocationCode}
                       onChange={(event) => setPilotLocationCode(event.target.value.toUpperCase())}
-                      placeholder="ICAO, for example UUEE"
+                      placeholder={ru ? "ИКАО, например UUEE" : "ICAO, for example UUEE"}
                       maxLength={4}
                       className="sm:max-w-xs"
                     />
                     <div className="flex gap-2">
                       <Button
                         variant="outline"
-                        onClick={() => handleUpdatePilotLocation()}
+                        onClick={() => void handleUpdatePilotLocation()}
                         disabled={isSavingPilotLocation || !pilotLocationCode.trim()}
                       >
-                        {isSavingPilotLocation ? "Saving..." : "Save location"}
+                        {isSavingPilotLocation ? (ru ? "Сохранение..." : "Saving...") : (ru ? "Сохранить" : "Save location")}
                       </Button>
                       <Button
                         variant="outline"
-                        onClick={() => handleUpdatePilotLocation(null)}
+                        onClick={() => void handleUpdatePilotLocation(null)}
                         disabled={isSavingPilotLocation}
                       >
-                        Clear
+                        {ru ? "Очистить" : "Clear"}
                       </Button>
                     </div>
                   </div>
