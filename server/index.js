@@ -2954,7 +2954,7 @@ const startPilotChallengesScheduler = () => {
 // Локация может меняться в vAMSYS — синкаем периодически по активным сессиям (не только при /me).
 const PILOT_LOCATION_SYNC_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
-  Number(process.env.PILOT_LOCATION_SYNC_INTERVAL_MS || 60 * 60 * 1000) || 60 * 60 * 1000 // по умолчанию ежечасно
+  Number(process.env.PILOT_LOCATION_SYNC_INTERVAL_MS || 15 * 60 * 1000) || 15 * 60 * 1000 // по умолчанию каждые 15 мин
 );
 let pilotLocationSchedulerTimer = null;
 
@@ -2962,7 +2962,7 @@ let pilotLocationSchedulerTimer = null;
 // на одного пилота (защита API от частых F5/перемонтирований). По умолчанию 10 мин, минимум 1 мин.
 const PILOT_LOCATION_MIN_REFRESH_MS = Math.max(
   60 * 1000,
-  Number(process.env.PILOT_LOCATION_MIN_REFRESH_MS || 10 * 60 * 1000) || 10 * 60 * 1000
+  Number(process.env.PILOT_LOCATION_MIN_REFRESH_MS || 5 * 60 * 1000) || 5 * 60 * 1000
 );
 const pilotLocationRefreshAt = new Map(); // pilotId -> ms последнего форс-обновления локации
 
@@ -13712,6 +13712,27 @@ app.get("/api/auth/vamsys/callback", async (req, res) => {
       sessionUsername: enriched.user?.username || null,
       durationMs: Date.now() - startedAt,
     });
+
+    // Сброс кэша локации при логине — чтобы следующий запрос /api/pilot/location
+    // форсировал свежий синк из vAMSYS, не дожидаясь PILOT_LOCATION_MIN_REFRESH_MS.
+    const loginPilotId = Number(enriched.user?.id || 0) || 0;
+    if (loginPilotId > 0) {
+      pilotLocationRefreshAt.delete(loginPilotId);
+      void (async () => {
+        try {
+          const airportsMap = await loadAirportsLookup().catch(() => new Map());
+          await syncPilotApiLocationFromVamsys({
+            pilotId: loginPilotId,
+            sessionUser: enriched.user || {},
+            airportsMap,
+          });
+          pilotLocationRefreshAt.set(loginPilotId, Date.now());
+          logger.info("[pilot-location] synced_on_login", { pilotId: loginPilotId });
+        } catch (err) {
+          logger.warn("[pilot-location] login_sync_failed", { pilotId: loginPilotId, error: String(err) });
+        }
+      })();
+    }
 
     recordAuthActivity({
       req,
