@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
-import { CalendarDays, Loader2, Pencil, Plus, RefreshCw, Search, Target, Trash2 } from "lucide-react";
+import { CalendarDays, Globe, Loader2, MessageSquare, Pencil, Plus, RefreshCw, Search, Send, Target, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "../ui/badge";
@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
 import { useLanguage } from "../../context/language-context";
@@ -237,6 +238,10 @@ export function AdminEvents() {
   const [editorSection, setEditorSection] = useState<ActivitySection>("events");
   const [editingItem, setEditingItem] = useState<ActivityCatalogItem | null>(null);
   const [payloadText, setPayloadText] = useState("{}");
+  const [pubDiscord, setPubDiscord] = useState(false);
+  const [pubTelegram, setPubTelegram] = useState(false);
+  const [pubVk, setPubVk] = useState(false);
+  const [pubBannerUrl, setPubBannerUrl] = useState<string | null>(null);
 
   const currentView = normalizeView(searchParams.get("view"));
 
@@ -345,6 +350,10 @@ export function AdminEvents() {
     setEditingItem(null);
     setEditorSection(defaultSection);
     setPayloadText(JSON.stringify(buildDefaultPayload(defaultSection), null, 2));
+    setPubDiscord(false);
+    setPubTelegram(false);
+    setPubVk(false);
+    setPubBannerUrl(null);
     setEditorOpen(true);
   };
 
@@ -362,6 +371,9 @@ export function AdminEvents() {
       setEditorSection(section);
       setEditingItem(item);
       setPayloadText(JSON.stringify(data.activity || {}, null, 2));
+      setPubDiscord(false);
+      setPubTelegram(false);
+      setPubVk(false);
       setEditorOpen(true);
     } catch (error) {
       toast.error(String((error as Error)?.message || tr("Не удалось загрузить детали активности", "Failed to load activity detail")));
@@ -417,7 +429,13 @@ export function AdminEvents() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...(payload as object),
+          sendToDiscord: pubDiscord,
+          sendToTelegram: pubTelegram,
+          sendToVK: pubVk,
+          bannerUrl: pubBannerUrl || null,
+        }),
       });
       const data = await response.json().catch(() => ({})) as { ok?: boolean; error?: string };
       if (!response.ok || data.ok === false) {
@@ -453,16 +471,17 @@ export function AdminEvents() {
         </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+      <div className="flex flex-wrap gap-2">
         {EVENT_VIEWS.map((view) => (
-          <Card key={view.value} className={currentView === view.value ? "border-[#E31E24] shadow-sm" : "border-gray-200"}>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-semibold text-gray-700">{t(view.labelKey)}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-gray-900">{counts[view.value]}</div>
-            </CardContent>
-          </Card>
+          <button
+            key={view.value}
+            type="button"
+            onClick={() => setSearchParams({ view: normalizeView(view.value) })}
+            className={`flex items-center gap-2.5 rounded-lg border px-3 py-2 text-sm transition-colors ${currentView === view.value ? "border-[#E31E24] bg-[#E31E24]/5 text-[#E31E24]" : "border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50"}`}
+          >
+            <span className="font-medium">{t(view.labelKey)}</span>
+            <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold ${currentView === view.value ? "bg-[#E31E24] text-white" : "bg-gray-100 text-gray-600"}`}>{counts[view.value]}</span>
+          </button>
         ))}
       </div>
 
@@ -680,9 +699,78 @@ export function AdminEvents() {
               <Textarea
                 value={payloadText}
                 onChange={(event) => setPayloadText(event.target.value)}
-                className="min-h-[340px] font-mono text-xs"
+                className="min-h-[280px] font-mono text-xs"
                 placeholder='{"name":"New item"}'
               />
+            </div>
+
+            {/* Banner */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{tr("Баннер публикации", "Publication banner")}</div>
+              <Input
+                placeholder="https://cdn.example.com/banner.webp"
+                value={pubBannerUrl ?? ""}
+                onChange={(e) => setPubBannerUrl(e.target.value || null)}
+              />
+              {pubBannerUrl && (
+                <img src={pubBannerUrl} alt="banner" className="w-full max-h-40 rounded-xl object-cover border border-gray-200" />
+              )}
+            </div>
+
+            {/* Publication channels */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{tr("Публикация", "Publication")}</div>
+              <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-2.5 bg-indigo-50/60">
+                  <MessageSquare className="h-4 w-4 text-indigo-500 shrink-0" />
+                  <span className="flex-1 text-sm font-medium text-indigo-900">Discord</span>
+                  <Switch checked={pubDiscord} onCheckedChange={setPubDiscord} className="data-[state=checked]:bg-indigo-600" />
+                </div>
+                <div className="flex items-center gap-3 px-4 py-2.5 bg-sky-50/60">
+                  <Send className="h-4 w-4 text-sky-500 shrink-0" />
+                  <span className="flex-1 text-sm font-medium text-sky-900">Telegram</span>
+                  <Switch checked={pubTelegram} onCheckedChange={setPubTelegram} className="data-[state=checked]:bg-sky-500" />
+                </div>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-50/60">
+                    <Globe className="h-4 w-4 text-blue-500 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-blue-900">ВКонтакте</div>
+                      {pubBannerUrl && <div className="text-[11px] text-blue-500">{tr("с баннером", "with banner")}</div>}
+                    </div>
+                    <Switch checked={pubVk} onCheckedChange={setPubVk} className="data-[state=checked]:bg-blue-600" />
+                  </div>
+                  {pubVk && (() => {
+                    let parsed: { name?: string; description?: string } = {};
+                    try { parsed = JSON.parse(payloadText) as { name?: string; description?: string }; } catch { /* ignore */ }
+                    return (
+                      <div className="border-t border-blue-100 bg-blue-50/30 px-4 py-4 space-y-2">
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">{tr("Так будет выглядеть пост", "Post preview")}</div>
+                        <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden font-sans">
+                          {pubBannerUrl && <img src={pubBannerUrl} alt="banner" className="w-full max-h-48 object-cover" />}
+                          <div className="p-4 space-y-3">
+                            <div className="flex items-center gap-2">
+                              <div className="h-9 w-9 rounded-full bg-red-600 flex items-center justify-center text-white font-bold text-base leading-none select-none shrink-0">N</div>
+                              <div>
+                                <div className="font-semibold text-[#000000de] text-[13px]">Nordwind Virtual</div>
+                                <div className="text-[11px] text-gray-400">{tr("только что", "just now")}</div>
+                              </div>
+                            </div>
+                            <div className="whitespace-pre-wrap text-[13px] leading-[1.5] text-[#000000de] break-words">
+                              {`[EVENT] ${parsed.name || tr("Название события", "Event name")}\n\n${parsed.description ? (parsed.description.length > 300 ? parsed.description.slice(0, 300) + "…" : parsed.description) : tr("Описание события...", "Event description...")}\n\n${tr("Ознакомиться с мероприятием", "View event")}: nordwindva.ru/activities\n\n${tr("Автор", "Author")}: Ops`}
+                            </div>
+                            <div className="flex items-center gap-4 pt-2 border-t border-gray-100 text-gray-400 text-[12px]">
+                              <span>♥ {tr("Нравится", "Like")}</span>
+                              <span>💬 {tr("Комментировать", "Comment")}</span>
+                              <span>↗ {tr("Поделиться", "Share")}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
             </div>
           </div>
 

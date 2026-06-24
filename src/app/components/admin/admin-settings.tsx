@@ -23,10 +23,19 @@ interface SystemStatus {
   };
 }
 
+interface AiStatus {
+  configured?: boolean;
+  lastError?: { reason: string; at: string } | null;
+  knowledgeChars?: number;
+  knowledgeBuiltAt?: number;
+  cacheEntries?: number;
+}
+
 export function AdminSettings() {
   const { language } = useLanguage();
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [status, setStatus] = useState<SystemStatus>({});
+  const [aiStatus, setAiStatus] = useState<AiStatus>({});
   const [design, setDesign] = useState<SiteDesignSettings>(DEFAULT_SITE_DESIGN);
   const [isSaving, setIsSaving] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -62,7 +71,17 @@ export function AdminSettings() {
       }
     };
 
+    const loadAiStatus = async () => {
+      try {
+        const response = await fetch("/api/admin/ai/status", { credentials: "include" });
+        if (response.ok && active) {
+          setAiStatus(await response.json());
+        }
+      } catch { /* ignore */ }
+    };
+
     loadStatus();
+    loadAiStatus().catch(() => undefined);
     loadDesign().catch(() => undefined);
 
     return () => {
@@ -135,9 +154,10 @@ export function AdminSettings() {
     try {
       await Promise.all([
         fetch("/api/admin/system-status").then((response) => (response.ok ? response.json() : null)).then((payload) => {
-          if (payload) {
-            setStatus(payload || {});
-          }
+          if (payload) setStatus(payload || {});
+        }),
+        fetch("/api/admin/ai/status", { credentials: "include" }).then((r) => r.ok ? r.json() : null).then((payload) => {
+          if (payload) setAiStatus(payload);
         }),
         loadDesign(),
       ]);
@@ -179,14 +199,6 @@ export function AdminSettings() {
                 <div className="space-y-2">
                   <Label>{tr("Подзаголовок", "Tagline")}</Label>
                   <Input value={design.tagline} onChange={(event) => setDesign((current) => ({ ...current, tagline: event.target.value }))} />
-                </div>
-                <div className="space-y-2 md:col-span-2">
-                  <Label>{tr("Рабочий процесс баннеров", "Banner workflow")}</Label>
-                  <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-600">
-                    {tr("Генератор баннеров теперь встроен в админку и работает по маршруту ", "The banner generator is now embedded into admin and is available at ")}
-                    <span className="font-mono">/admin/banner-generator</span>
-                    {tr(". Редактор активностей открывает его с уже заполненными полями, а сохранение складывает готовый PNG в локальные ассеты сайта через API.", ". The activities editor opens it with prefilled fields, and save stores the final PNG in local site assets via API.")}
-                  </div>
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <Label>{tr("Ссылка на VK-сообщество", "VK community URL")}</Label>
@@ -297,12 +309,29 @@ export function AdminSettings() {
                   <span className="text-gray-700">{tr("Публикация в Discord настроена", "Discord publish configured")}</span>
                   {healthBadge(Boolean(status.discord?.configured))}
                 </div>
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
                   <span className="text-gray-700">{tr("Порт сервера", "Server port")}</span>
                   <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">
                     {status.server?.port || 8787}
                   </Badge>
                 </div>
+                <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                  <span className="text-gray-700">{tr("AI-помощник (ключ API)", "AI assistant (API key)")}</span>
+                  {healthBadge(Boolean(aiStatus.configured))}
+                </div>
+                {aiStatus.lastError ? (
+                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700 break-all">
+                    <span className="font-semibold">{tr("Последняя ошибка AI: ", "Last AI error: ")}</span>
+                    {aiStatus.lastError.reason}
+                    {aiStatus.lastError.at ? <span className="ml-1 text-red-400">({new Date(aiStatus.lastError.at).toLocaleString()})</span> : null}
+                  </div>
+                ) : aiStatus.configured ? (
+                  <div className="text-xs text-gray-400">
+                    {tr("AI работает штатно", "AI operating normally")}
+                    {aiStatus.knowledgeChars ? tr(` · база знаний ${Math.round(aiStatus.knowledgeChars / 1024)} кб`, ` · knowledge ${Math.round(aiStatus.knowledgeChars / 1024)} kb`) : ""}
+                    {aiStatus.cacheEntries ? tr(` · кэш ${aiStatus.cacheEntries} отв.`, ` · cache ${aiStatus.cacheEntries} entries`) : ""}
+                  </div>
+                ) : null}
               </div>
             </CardContent>
           </Card>

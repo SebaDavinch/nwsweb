@@ -1,7 +1,5 @@
 import { Badge } from "../ui/badge";
 import { AdminContentManager } from "./admin-content-manager";
-import { Button } from "../ui/button";
-import { useSiteDesign } from "../../hooks/use-site-design";
 import { useLanguage } from "../../context/language-context";
 
 interface ActivityItem {
@@ -23,35 +21,8 @@ interface ActivityItem {
 }
 
 export function AdminActivities() {
-  const design = useSiteDesign();
   const { language } = useLanguage();
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
-
-  const openBannerGenerator = (formData: Record<string, string | boolean>) => {
-    if (typeof window === "undefined") {
-      return;
-    }
-
-    const params = new URL("/admin/banner-generator", window.location.origin);
-    const push = (key: string, value: string | boolean | undefined) => {
-      const normalized = String(value ?? "").trim();
-      if (normalized) {
-        params.searchParams.set(key, normalized);
-      }
-    };
-
-    push("title", formData.title);
-    push("category", formData.category);
-    push("type", formData.type);
-    push("tag", formData.tag);
-    push("summary", formData.summary);
-    push("author", formData.author);
-    push("date", formData.date);
-    push("target", formData.target);
-    push("brand", design.siteTitle);
-
-    window.open(params.toString(), "_blank", "noopener,noreferrer");
-  };
 
   return (
     <AdminContentManager<ActivityItem>
@@ -61,20 +32,6 @@ export function AdminActivities() {
       singularLabel={tr("Активность", "Activity")}
       searchKeys={["title", "category", "type", "author", "tag", "summary", "content", "bannerUrl"]}
       filterKeys={["category", "status", "type"]}
-      renderFieldExtras={({ field, formData }) => {
-        if (field.key !== "bannerUrl") {
-          return null;
-        }
-
-        return (
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-3 py-2">
-            <span className="text-xs text-gray-500">{tr("Открыть встроенный генератор баннеров с уже заполненными полями текущей активности, затем сохранить локальный ассет и вставить полученный URL сюда.", "Open the embedded banner generator with current activity fields prefilled, save the local asset, then paste the resulting URL here.")}</span>
-            <Button type="button" variant="outline" size="sm" onClick={() => openBannerGenerator(formData)}>
-              {tr("Открыть генератор", "Open generator")}
-            </Button>
-          </div>
-        );
-      }}
       columns={[
         {
           key: "bannerUrl",
@@ -141,6 +98,9 @@ export function AdminActivities() {
         { key: "content", label: tr("Содержимое", "Content"), type: "textarea" },
         { key: "published", label: tr("Опубликовано", "Published"), type: "checkbox" },
         { key: "featured", label: tr("Рекомендуемое", "Featured"), type: "checkbox" },
+        { key: "sendToDiscord", label: tr("Опубликовать в Discord", "Publish to Discord"), type: "checkbox" },
+        { key: "sendToTelegram", label: tr("Опубликовать в Telegram", "Publish to Telegram"), type: "checkbox" },
+        { key: "sendToVK", label: tr("Опубликовать ВКонтакте", "Publish to VK"), type: "checkbox" },
         { key: "order", label: tr("Порядок", "Order"), type: "number" },
         { key: "views", label: tr("Просмотры", "Views"), type: "number" },
       ]}

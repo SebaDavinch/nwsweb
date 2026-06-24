@@ -23,7 +23,7 @@ import { AdminTelegramBot } from "./admin-telegram-bot";
 import { AdminVkBot } from "./admin-vk-bot";
 import { AdminAuditLogs } from "./admin-audit-logs";
 import { AdminAuthLogs } from "./admin-auth-logs";
-import { AdminBannerGeneratorPage } from "./admin-banner-generator";
+
 import { AdminGallery } from "./admin-gallery";
 import { AdminCallsignChecker } from "./admin-callsign-checker";
 import { AdminAchievements } from "./admin-achievements";
@@ -41,7 +41,7 @@ import {
   FileText,
   Images,
   Mail,
-  ImagePlus,
+
   LayoutDashboard,
   LogOut,
   MapPinned,
@@ -71,7 +71,7 @@ const ADMIN_PAGES = new Set([
   "fleet", "news", "activities", "notams", "pilots", "pilot-profile", "documents",
   "events", "slotted-events", "staff", "badges", "achievements", "bookings", "routes", "pireps", "pirep-detail",
   "airports", "hubs", "tickets", "discord-bot", "telegram-bot", "vk-bot",
-  "banner-generator", "acars", "settings", "audit-logs", "auth-logs", "gallery",
+  "acars", "settings", "audit-logs", "auth-logs", "gallery",
   "callsign-checker",
 ]);
 
@@ -98,7 +98,7 @@ function AdminPageContent({ page, pageId, view }: { page: string; pageId: number
   if (page === "discord-bot") return <AdminDiscordBot />;
   if (page === "telegram-bot") return <AdminTelegramBot />;
   if (page === "vk-bot") return <AdminVkBot />;
-  if (page === "banner-generator") return <AdminBannerGeneratorPage />;
+
   if (page === "gallery") return <AdminGallery />;
   if (page === "callsign-checker") return <AdminCallsignChecker />;
   if (page === "acars") return <AdminAcars />;
@@ -229,7 +229,7 @@ export function AdminLayout() {
             ],
           },
           { page: "activities", icon: Bell, label: tr("Активности", "Activities") },
-          { page: "banner-generator", icon: ImagePlus, label: tr("Генератор баннеров", "Banner Generator"), standalone: "/banner-generator" },
+
           { page: "gallery", icon: Images, label: tr("Галерея", "Gallery") },
           { page: "email", icon: Mail, label: tr("Рассылки", "Email") },
         ],

@@ -49,7 +49,6 @@ import { AdminAuthLogs } from "./components/admin/admin-auth-logs";
 import { StaffTeam } from "./components/staff-team";
 import { DownloadPage } from "./components/download-page";
 import { GateAssigner } from "./components/gate-assigner";
-import { AdminBannerGeneratorPage, BannerGeneratorStandalonePage } from "./components/admin/admin-banner-generator";
 
 export const router = createBrowserRouter([
   {
@@ -73,8 +72,7 @@ export const router = createBrowserRouter([
       { path: "download", Component: DownloadPage },
       { path: "tickets", Component: TicketsPage },
       { path: "testivent", Component: TestSlottedEvent },
-      { path: "banner", Component: BannerGeneratorStandalonePage },
-      { path: "banner-generator", Component: BannerGeneratorStandalonePage },
+
       { path: "dashboard", Component: PilotDashboard },
       { path: "dashboard/passport/:countryIso2", Component: PilotDashboard },
       { path: "dashboard/booking/:id", Component: PilotBookingView },
@@ -114,7 +112,7 @@ export const router = createBrowserRouter([
       { path: "tickets", Component: AdminTickets },
       { path: "discord-bot", Component: AdminDiscordBot },
       { path: "telegram-bot", Component: AdminTelegramBot },
-      { path: "banner-generator", Component: AdminBannerGeneratorPage },
+
       { path: "acars", Component: AdminAcars },
       { path: "settings", Component: AdminSettings },
       { path: "*", Component: AdminDashboard },

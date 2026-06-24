@@ -163,7 +163,6 @@ const EVENT_COINS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "event-coins.j
 const PILOT_BALANCE_ADJUSTMENTS_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-balance-adjustments.json");
 const PILOT_CHALLENGES_FILE = path.join(path.dirname(AUTH_STORE_FILE), "pilot-challenges.json");
 const SOCIAL_GALLERY_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "social-gallery-assets");
-const BANNER_GENERATOR_ASSETS_DIR = path.join(path.dirname(AUTH_STORE_FILE), "banner-generator-assets");
 // Релизы десктоп-приложения: метаданные + бинарники для скачивания с сайта.
 const APP_RELEASES_FILE = path.join(path.dirname(AUTH_STORE_FILE), "app-releases.json");
 const APP_RELEASES_DIR = path.join(path.dirname(AUTH_STORE_FILE), "app-releases");
@@ -176,7 +175,6 @@ const ADMIN_AUDIT_MAX_ENTRIES = Math.max(Number(process.env.ADMIN_AUDIT_MAX_ENTR
 const AUTH_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.AUTH_ACTIVITY_MAX_ENTRIES || 5000) || 5000, 500);
 const SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES = Math.max(Number(process.env.SOCIAL_GALLERY_ACTIVITY_MAX_ENTRIES || 4000) || 4000, 200);
 const SOCIAL_GALLERY_MAX_UPLOAD_BYTES = Math.max(Number(process.env.SOCIAL_GALLERY_MAX_UPLOAD_BYTES || 8 * 1024 * 1024) || 8 * 1024 * 1024, 512000);
-const BANNER_GENERATOR_MAX_UPLOAD_BYTES = Math.max(Number(process.env.BANNER_GENERATOR_MAX_UPLOAD_BYTES || 10 * 1024 * 1024) || 10 * 1024 * 1024, 512000);
 const DISCORD_STATE_COOKIE = "nws_discord_oauth_state";
 const DISCORD_SESSION_COOKIE = "nws_discord_session";
 const DISCORD_STATE_TTL_MS = 10 * 60 * 1000;
@@ -720,6 +718,7 @@ const DEFAULT_DISCORD_AUTOMATION_RUNTIME = {
   lastDailyStatsDateUtc: "",
   activeFlightKeys: [],
   landedPirepIds: [],
+  reviewedPirepIds: [],
   vatrusSeenArticleIds: [],
   lastFlightPollAt: null,
   lastVatrusPollAt: null,
@@ -811,6 +810,9 @@ const DEFAULT_VK_BOT_SETTINGS = {
   accessToken: "",
   sync: {
     news: true,
+    events: true,
+    notams: true,
+    alerts: true,
     telegramMirror: true,
   },
   telegramMirrorChatId: "",
@@ -1403,12 +1405,6 @@ const ensureSocialGalleryAssetsDir = () => {
   }
 };
 
-const ensureBannerGeneratorAssetsDir = () => {
-  ensureAuthStoreDir();
-  if (!fs.existsSync(BANNER_GENERATOR_ASSETS_DIR)) {
-    fs.mkdirSync(BANNER_GENERATOR_ASSETS_DIR, { recursive: true });
-  }
-};
 
 // Event coins store: { [activityId]: { rewardMode: "fixed"|"multiplier", rewardValue: number, awardLimit?: number, registrationRequired?: boolean, name: string } }
 const normalizeEventCoinRewardMode = (value) =>
@@ -3149,42 +3145,6 @@ const storeSocialGalleryAsset = ({ imageDataUrl = "", mimeType = "", fileName = 
   return {
     assetFileName,
     assetUrl: `/api/public/social-gallery/assets/${assetFileName}`,
-    mimeType: resolvedMimeType,
-    size: assetBuffer.length,
-  };
-};
-
-const storeBannerGeneratorAsset = ({ imageDataUrl = "", mimeType = "", fileName = "banner" } = {}) => {
-  const payload = extractBase64Payload(imageDataUrl);
-  const resolvedMimeType = String(payload.mimeType || mimeType || "image/png").trim().toLowerCase();
-  const allowedMimeTypes = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp"]);
-  if (!allowedMimeTypes.has(resolvedMimeType)) {
-    throw new Error("Only JPG, PNG and WEBP banner assets are supported");
-  }
-
-  const assetBuffer = Buffer.from(String(payload.base64 || ""), "base64");
-  if (!assetBuffer.length) {
-    throw new Error("Banner payload is empty");
-  }
-  if (assetBuffer.length > BANNER_GENERATOR_MAX_UPLOAD_BYTES) {
-    throw new Error(`Banner exceeds ${Math.round(BANNER_GENERATOR_MAX_UPLOAD_BYTES / 1024 / 1024)} MB limit`);
-  }
-
-  ensureBannerGeneratorAssetsDir();
-  const extension = resolveSocialGalleryImageExtension(resolvedMimeType);
-  const safeBaseName = slugifyAdminValue(fileName, "banner");
-  const hashedBase = createHash("sha1")
-    .update(assetBuffer)
-    .update(String(fileName || "banner"))
-    .digest("hex")
-    .slice(0, 16);
-  const assetFileName = `${Date.now()}-${safeBaseName}-${hashedBase}.${extension}`;
-  const assetPath = path.join(BANNER_GENERATOR_ASSETS_DIR, assetFileName);
-  fs.writeFileSync(assetPath, assetBuffer);
-
-  return {
-    assetFileName,
-    assetUrl: `/api/public/banner-generator/assets/${assetFileName}`,
     mimeType: resolvedMimeType,
     size: assetBuffer.length,
   };
@@ -5549,6 +5509,9 @@ const getVkBotSettingsStore = () => {
       ...defaults.sync,
       ...(existing?.sync && typeof existing.sync === "object" ? existing.sync : {}),
       news: normalizeAdminBoolean(existing?.sync?.news, defaults.sync.news),
+      events: normalizeAdminBoolean(existing?.sync?.events, defaults.sync.events),
+      notams: normalizeAdminBoolean(existing?.sync?.notams, defaults.sync.notams),
+      alerts: normalizeAdminBoolean(existing?.sync?.alerts, defaults.sync.alerts),
       telegramMirror: normalizeAdminBoolean(existing?.sync?.telegramMirror, defaults.sync.telegramMirror),
     },
     faqItems: (Array.isArray(existing?.faqItems) ? existing.faqItems : defaults.faqItems)
@@ -5605,6 +5568,9 @@ const upsertVkBotSettingsStore = (payload = {}) => {
         ...current.sync,
         ...(payload?.sync && typeof payload.sync === "object" ? payload.sync : {}),
         news: normalizeAdminBoolean(payload?.sync?.news, current.sync.news),
+        events: normalizeAdminBoolean(payload?.sync?.events, current.sync.events),
+        notams: normalizeAdminBoolean(payload?.sync?.notams, current.sync.notams),
+        alerts: normalizeAdminBoolean(payload?.sync?.alerts, current.sync.alerts),
         telegramMirror: normalizeAdminBoolean(payload?.sync?.telegramMirror, current.sync.telegramMirror),
       },
       faqItems: Array.isArray(payload?.faqItems)
@@ -8817,6 +8783,21 @@ const loadAdminPirepsCatalogPage = async ({
   if (filterAircraftId > 0) {
     pireps = pireps.filter((p) => Number(p?.aircraft_id || p?.attributes?.aircraft_id || 0) === filterAircraftId).slice(0, normalizedPageSize);
   }
+
+  // Enrich pirep list items with airport info (city, country, ICAO) for the route column
+  const airportsMap = await loadAirportsLookup().catch(() => new Map());
+  pireps = pireps.map((p) => {
+    const depId = Number(p?.attributes?.departure_airport_id || p?.departure_airport_id || 0) || 0;
+    const arrId = Number(p?.attributes?.arrival_airport_id || p?.arrival_airport_id || 0) || 0;
+    const depApt = depId > 0 ? airportsMap.get(depId) : null;
+    const arrApt = arrId > 0 ? airportsMap.get(arrId) : null;
+    return {
+      ...p,
+      _departure_info: depApt ? { icao: depApt.icao, city: depApt.city, countryIso2: depApt.countryIso2 } : null,
+      _arrival_info: arrApt ? { icao: arrApt.icao, city: arrApt.city, countryIso2: arrApt.countryIso2 } : null,
+    };
+  });
+
   return {
     pireps,
     meta: data?.meta || null,
@@ -15943,7 +15924,28 @@ app.get("/api/pilot/analytics", async (req, res) => {
         .sort((a, b) => b.count - a.count);
     };
 
-    const byAircraft = breakdown((p) => aircraftLabel(p) || "Unknown");
+    const byAircraftRaw = breakdown((p) => aircraftLabel(p) || "Unknown");
+
+    // Attach sorted registration list per aircraft type (for hover tooltip on frontend)
+    const aircraftRegsByType = new Map();
+    src.forEach((p) => {
+      const type = aircraftLabel(p) || "Unknown";
+      const reg = String(
+        p?.aircraft_registration || p?.registration ||
+        p?.aircraft?.registration || p?.aircraft?.reg || ""
+      ).trim().toUpperCase();
+      if (!reg || reg === "N/A") return;
+      const m = aircraftRegsByType.get(type) || new Map();
+      m.set(reg, (m.get(reg) || 0) + 1);
+      aircraftRegsByType.set(type, m);
+    });
+    const byAircraft = byAircraftRaw.map((row) => {
+      const regMap = aircraftRegsByType.get(row.key);
+      const registrations = regMap
+        ? Array.from(regMap.entries()).sort((a, b) => b[1] - a[1]).map(([r]) => r)
+        : [];
+      return { ...row, registrations };
+    });
 
     const byNetwork = breakdown((p) =>
       String(p?.network || p?.network_name || "Offline").trim() || "Offline"
@@ -17585,6 +17587,7 @@ const getDiscordAutomationRuntime = (settings = {}) => ({
   ...(settings?.automation?.runtime && typeof settings.automation.runtime === "object" ? settings.automation.runtime : {}),
   activeFlightKeys: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.activeFlightKeys, 400),
   landedPirepIds: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.landedPirepIds, 400),
+  reviewedPirepIds: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.reviewedPirepIds, 400),
   vatrusSeenArticleIds: sanitizeDiscordAutomationIdList(settings?.automation?.runtime?.vatrusSeenArticleIds, 400),
 });
 
@@ -18080,6 +18083,9 @@ const sendDiscordBookingCreatedLog = async (booking = {}) => {
     arrival: String(booking?.arrival || "").trim().toUpperCase(),
   };
 
+  void sendTelegramAdminNotification({
+    text: `📋 *Бронирование: ${variables.flightNumber}*\n${variables.pilotName} | ${variables.route} | ${variables.aircraft}`,
+  }).catch(() => {});
   return sendDiscordAutomationEventNotification({
     settings,
     routeKey: "flightLogs",
@@ -18148,26 +18154,28 @@ const sweepDiscordFlightLogs = async (settings = getDiscordBotSettingsStore()) =
       continue;
     }
 
+    const takeoffCallsign = String(flight?.flightNumber || flight?.callsign || "Flight").trim() || "Flight";
+    const takeoffPilot = String(flight?.pilotName || "Pilot").trim() || "Pilot";
+    const takeoffDep = String(flight?.departure || "---").trim().toUpperCase();
+    const takeoffArr = String(flight?.arrival || "---").trim().toUpperCase();
     await sendDiscordAutomationEventNotification({
       settings,
       routeKey: "flightLogs",
       eventKey: "flightTakeoff",
       title: "Flight departed",
-      description: `${String(flight?.pilotName || "Pilot").trim() || "Pilot"} is now airborne from ${String(flight?.departure || "---").trim().toUpperCase()} to ${String(flight?.arrival || "---").trim().toUpperCase()}.`,
+      description: `${takeoffPilot} is now airborne from ${takeoffDep} to ${takeoffArr}.`,
       fields: [
-        { name: "Flight", value: String(flight?.flightNumber || flight?.callsign || "Flight").trim() || "Flight", inline: true },
-        { name: "Route", value: `${String(flight?.departure || "---").trim().toUpperCase()}-${String(flight?.arrival || "---").trim().toUpperCase()}`, inline: true },
+        { name: "Flight", value: takeoffCallsign, inline: true },
+        { name: "Route", value: `${takeoffDep}-${takeoffArr}`, inline: true },
         { name: "Phase", value: String(flight?.currentPhase || flight?.status || "En Route").trim() || "En Route", inline: true },
       ],
-      variables: {
-        flightNumber: String(flight?.flightNumber || flight?.callsign || "Flight").trim() || "Flight",
-        pilotName: String(flight?.pilotName || "Pilot").trim() || "Pilot",
-        departure: String(flight?.departure || "").trim().toUpperCase(),
-        arrival: String(flight?.arrival || "").trim().toUpperCase(),
-      },
+      variables: { flightNumber: takeoffCallsign, pilotName: takeoffPilot, departure: takeoffDep, arrival: takeoffArr },
     }).catch((error) => {
       logger.warn("[discord-automation] flight_takeoff_send_failed", String(error?.message || error));
     });
+    void sendTelegramAdminNotification({
+      text: `✈️ *Вылет: ${takeoffCallsign}*\n${takeoffPilot} | ${takeoffDep} → ${takeoffArr}`,
+    }).catch(() => {});
   }
 
   const landedSeen = new Set(sanitizeDiscordAutomationIdList(runtime?.landedPirepIds, 400));
@@ -18188,30 +18196,85 @@ const sweepDiscordFlightLogs = async (settings = getDiscordBotSettingsStore()) =
     }
 
     landedSeen.add(pirepId);
+    const landingPilot = String(await loadPilotName(pirep?.pilot_id).catch(() => "Pilot") || "Pilot").trim();
+    const landingCallsign = String(pirep?.callsign || pirep?.flight_number || "PIREP").trim() || "PIREP";
+    const landingRoute = resolveDiscordAutomationRouteLabel(pirep);
+    const landingArr = String(pirep?.arrival_airport?.icao || pirep?.arrival_icao || "---").trim().toUpperCase();
+    const landingDep = String(pirep?.departure_airport?.icao || pirep?.departure_icao || "---").trim().toUpperCase();
+    const landingRate = Number.isFinite(Number(pirep?.landing_rate)) ? `${Math.round(Number(pirep.landing_rate))} fpm` : "—";
     await sendDiscordAutomationEventNotification({
       settings,
       routeKey: "flightLogs",
       eventKey: "flightLanding",
       title: "Flight landed",
-      description: `${String(await loadPilotName(pirep?.pilot_id).catch(() => "Pilot") || "Pilot").trim()} landed at ${String(pirep?.arrival_airport?.icao || pirep?.arrival_icao || "---").trim().toUpperCase()} from ${String(pirep?.departure_airport?.icao || pirep?.departure_icao || "---").trim().toUpperCase()}.`,
+      description: `${landingPilot} landed at ${landingArr} from ${landingDep}.`,
       fields: [
-        { name: "Flight", value: String(pirep?.callsign || pirep?.flight_number || "PIREP").trim() || "PIREP", inline: true },
-        { name: "Route", value: resolveDiscordAutomationRouteLabel(pirep), inline: true },
-        { name: "Landing rate", value: Number.isFinite(Number(pirep?.landing_rate)) ? `${Math.round(Number(pirep.landing_rate))} fpm` : "—", inline: true },
+        { name: "Flight", value: landingCallsign, inline: true },
+        { name: "Route", value: landingRoute, inline: true },
+        { name: "Landing rate", value: landingRate, inline: true },
       ],
-      variables: {
-        flightNumber: String(pirep?.callsign || pirep?.flight_number || "PIREP").trim() || "PIREP",
-        departure: String(pirep?.departure_airport?.icao || pirep?.departure_icao || "").trim().toUpperCase(),
-        arrival: String(pirep?.arrival_airport?.icao || pirep?.arrival_icao || "").trim().toUpperCase(),
-      },
+      variables: { flightNumber: landingCallsign, pilotName: landingPilot, departure: landingDep, arrival: landingArr, route: landingRoute },
     }).catch((error) => {
       logger.warn("[discord-automation] flight_landing_send_failed", String(error?.message || error));
     });
+    void sendTelegramAdminNotification({
+      text: `🛬 *Посадка: ${landingCallsign}*\n${landingPilot} | ${landingDep} → ${landingArr} | ${landingRate}`,
+    }).catch(() => {});
+  }
+
+  // ── PIREP review notifications ─────────────────────────────────────────────
+  // Detect PIREPs that entered awaiting_review / manual_review status recently
+  // and fire a pirepReview notification (Discord + Telegram) once per PIREP.
+  const PIREP_REVIEW_STATUSES = /^(awaiting_review|manual_review|pending_review|review|under_review|pending)$/i;
+  const reviewSeen = new Set(sanitizeDiscordAutomationIdList(runtime?.reviewedPirepIds, 400));
+  const notificationsSettings = settings?.notifications ?? {};
+  const pirepReviewEnabled = notificationsSettings?.pirepReview !== false;
+
+  if (pirepReviewEnabled) {
+    for (const pirep of recentPireps) {
+      const pirepId = String(Number(pirep?.id || 0) || "").trim();
+      if (!pirepId || reviewSeen.has(pirepId)) continue;
+      const status = String(pirep?.status || "").trim();
+      if (!PIREP_REVIEW_STATUSES.test(status)) continue;
+
+      const submittedAt = resolveDiscordAutomationTimestamp(
+        pirep?.submitted_at, pirep?.filed_at, pirep?.created_at, pirep?.updated_at
+      );
+      if (!Number.isFinite(submittedAt) || now - submittedAt > 6 * 60 * 60 * 1000) continue;
+
+      reviewSeen.add(pirepId);
+
+      const pilotName = String(await loadPilotName(pirep?.pilot_id).catch(() => "") || pirep?.pilot?.name || "Пилот").trim() || "Пилот";
+      const callsign = String(pirep?.callsign || pirep?.flight_number || `#${pirepId}`).trim();
+      const route = resolveDiscordAutomationRouteLabel(pirep);
+
+      // Discord
+      await sendDiscordBotNotification({
+        eventKey: "pirepReview",
+        title: `PIREP на проверку: ${callsign}`,
+        description: `**${pilotName}** подал PIREP по маршруту **${route}**. Статус: \`${status}\``,
+        color: 0xf59e0b,
+        fields: [
+          { name: "Рейс", value: callsign, inline: true },
+          { name: "Маршрут", value: route, inline: true },
+          { name: "Статус", value: status, inline: true },
+        ],
+        variables: { pilotName, flightNumber: callsign, route },
+      }).catch((err) => {
+        logger.warn("[discord-automation] pirep_review_send_failed", String(err?.message || err));
+      });
+
+      // Telegram admin notification
+      await sendTelegramAdminNotification({
+        text: `📋 *PIREP на проверку*\n✈️ ${callsign} | ${route}\n👤 ${pilotName}\nСтатус: \`${status}\``,
+      }).catch(() => {});
+    }
   }
 
   updateDiscordAutomationRuntime({
     activeFlightKeys: Array.from(activeNow),
     landedPirepIds: Array.from(landedSeen),
+    reviewedPirepIds: Array.from(reviewSeen),
     lastFlightPollAt: new Date(now).toISOString(),
   });
 };
@@ -18680,10 +18743,22 @@ Telegram-бот:
 - Не придумывай несуществующие факты о флоте, маршрутах или правилах
 - При запросе технической помощи (ошибка в ACARS, проблема с PIREP) — предложи тикет`;
 
+const AI_UNAVAILABLE_REPLY = {
+  ru: "Помощник временно недоступен — попробуйте чуть позже или обратитесь к команде напрямую.",
+  en: "The assistant is temporarily unavailable — please try again later or contact the team directly.",
+};
+
+// Последняя ошибка AI — видна только в /api/admin/ai/status
+let aiLastError = null;
+
 const callClaudeAI = async (messages, lang = "ru") => {
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error("ANTHROPIC_API_KEY not configured");
-  }
+  const unavailable = (hint) => {
+    aiLastError = { reason: hint, at: new Date().toISOString() };
+    logger.warn("[ai-chat] unavailable:", hint);
+    return { reply: lang === "en" ? AI_UNAVAILABLE_REPLY.en : AI_UNAVAILABLE_REPLY.ru, escalate: false, unavailable: true };
+  };
+
+  if (!ANTHROPIC_API_KEY) return unavailable("no_api_key");
 
   // buildAiSiteContext() использует in-memory кэш (TTL 1ч, диск при старте) — реального API не вызывает
   const knowledgeText = typeof buildAiSiteContext === "function"
@@ -18693,33 +18768,44 @@ const callClaudeAI = async (messages, lang = "ru") => {
     ? `${VA_AI_SYSTEM_PROMPT}\n\n${knowledgeText}`
     : VA_AI_SYSTEM_PROMPT;
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": ANTHROPIC_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages: messages.map((m) => ({
-        role: m.role === "user" ? "user" : "assistant",
-        content: String(m.content || "").slice(0, 4000),
-      })),
-    }),
-  });
+  let response;
+  try {
+    response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages: messages.map((m) => ({
+          role: m.role === "user" ? "user" : "assistant",
+          content: String(m.content || "").slice(0, 4000),
+        })),
+      }),
+    });
+  } catch (fetchErr) {
+    return unavailable(`fetch_error: ${String(fetchErr)}`);
+  }
 
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    throw new Error(String(err?.error?.message || `Anthropic API error ${response.status}`));
+    const status = response.status;
+    // 401 = invalid key, 403 = forbidden, 429 = rate limit / quota, 529 = overloaded
+    if (status === 401 || status === 403 || status === 429 || status === 529 || status >= 500) {
+      return unavailable(`http_${status}: ${String(err?.error?.message || "")}`);
+    }
+    return unavailable(`http_${status}`);
   }
 
   const data = await response.json();
   const text = data?.content?.[0]?.text || "";
   const escalate = /\[ESCALATE\]/.test(text);
   const reply = text.replace(/\[ESCALATE\]/g, "").trim();
+  aiLastError = null; // сброс — последний вызов был успешным
   return { reply, escalate };
 };
 
@@ -19052,6 +19138,16 @@ app.get("/api/admin/ai/knowledge", requireAdmin, (_req, res) => {
   res.json({ text: aiKnowledgeCache.text, chars: aiKnowledgeCache.text.length, builtAt: aiKnowledgeCache.builtAt });
 });
 
+app.get("/api/admin/ai/status", requireAdmin, (_req, res) => {
+  res.json({
+    configured: !!ANTHROPIC_API_KEY,
+    lastError: aiLastError,
+    knowledgeChars: aiKnowledgeCache?.text?.length || 0,
+    knowledgeBuiltAt: aiKnowledgeCache?.builtAt || 0,
+    cacheEntries: aiResponseCache?.size || 0,
+  });
+});
+
 // ─── POST /api/ai/chat ───────────────────────────────────────────────────────
 
 app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
@@ -19081,7 +19177,12 @@ app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
   }
 
   try {
-    const { reply, escalate } = await callClaudeAI(messages, lang);
+    const { reply, escalate, unavailable } = await callClaudeAI(messages, lang);
+
+    if (unavailable) {
+      res.json({ reply, escalate: false, cached: false });
+      return;
+    }
 
     if (escalate) {
       const userMessages = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
@@ -19105,9 +19206,23 @@ app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
     res.json({ reply, escalate: false, cached: false });
   } catch (err) {
     logger.warn("[ai-chat] error", String(err?.message || err));
-    res.status(500).json({ error: "AI response failed", message: String(err?.message || err) });
+    const fallback = lang === "en" ? AI_UNAVAILABLE_REPLY.en : AI_UNAVAILABLE_REPLY.ru;
+    res.json({ reply: fallback, escalate: false, cached: false });
   }
 });
+
+const publishActivityToTelegram = ({ title, summary, category, published }) => {
+  const tgSettings = getTelegramBotSettingsStore();
+  if (tgSettings?.enabled === false || tgSettings?.sync?.news === false) return;
+  if (!normalizeAdminBoolean(published, true)) return;
+  const tgTitle = normalizeAdminText(title || "");
+  if (!tgTitle) return;
+  const tgBody = normalizeAdminText(summary || "").slice(0, 280);
+  const tgCat = normalizeAdminText(category || "Новость");
+  void sendTelegramAdminNotification({
+    text: `📰 *${tgCat}: ${tgTitle}*${tgBody ? "\n" + tgBody : ""}`,
+  }).catch(() => {});
+};
 
 const publishNewsToDiscord = async ({ title, content, category, author }) => {
   return sendDiscordBotNotification({
@@ -19167,6 +19282,14 @@ const buildCommunityNewsPostText = ({ title, content, category, author, linkUrl 
   const selectedTemplate = templates[normalizedCategoryKey] || templates.default || null;
 
   if (selectedTemplate?.enabled !== false && normalizeAdminMultilineText(selectedTemplate?.text || "")) {
+    const ctaMapForTemplate = {
+      news: normalizedLink ? `Полная версия новости: ${normalizedLink}` : "",
+      event: normalizedLink ? `Ознакомиться с мероприятием: ${normalizedLink}` : "",
+      notam: normalizedLink ? `Подробнее: ${normalizedLink}` : "",
+      alert: normalizedLink ? `Подробнее: ${normalizedLink}` : "",
+      community: normalizedLink ? `Узнать больше: ${normalizedLink}` : "",
+    };
+    const ctaForTemplate = ctaMapForTemplate[normalizedCategoryKey] ?? (normalizedLink ? `Ссылка: ${normalizedLink}` : "");
     return renderVkTemplateString(selectedTemplate.text, {
       title: normalizedTitle,
       content: normalizedContent,
@@ -19174,16 +19297,26 @@ const buildCommunityNewsPostText = ({ title, content, category, author, linkUrl 
       author: normalizedAuthor,
       link: normalizedLink,
       linkLine: normalizedLink ? `Ссылка: ${normalizedLink}` : "",
+      cta: ctaForTemplate,
     })
       .replace(/\n{3,}/g, "\n\n")
       .trim()
       .slice(0, 4000);
   }
 
+  const ctaMap = {
+    news: normalizedLink ? `Полная версия новости: ${normalizedLink}` : null,
+    event: normalizedLink ? `Ознакомиться с мероприятием: ${normalizedLink}` : null,
+    notam: normalizedLink ? `Подробнее: ${normalizedLink}` : null,
+    alert: normalizedLink ? `Подробнее: ${normalizedLink}` : null,
+    community: normalizedLink ? `Узнать больше: ${normalizedLink}` : null,
+  };
+  const cta = ctaMap[normalizedCategoryKey] ?? (normalizedLink ? `Ссылка: ${normalizedLink}` : null);
+
   return [
     `[${normalizedCategory}] ${normalizedTitle}`,
     normalizedContent,
-    normalizedLink ? `Ссылка: ${normalizedLink}` : null,
+    cta,
     `Автор: ${normalizedAuthor}`,
   ].filter(Boolean).join("\n\n").slice(0, 4000);
 };
@@ -19356,7 +19489,20 @@ const publishNewsToVk = async ({ title, content, category, author, linkUrl = "",
       logVk("info", "publish_skipped", { reason: "disabled" });
       return { sent: false, reason: "disabled" };
     }
-    if (settings?.sync?.news === false) {
+    const cat = normalizeAdminText(category || "").toUpperCase();
+    if (cat === "NOTAM" && settings?.sync?.notams === false) {
+      logVk("info", "publish_skipped", { reason: "notams_sync_disabled" });
+      return { sent: false, reason: "notams_sync_disabled" };
+    }
+    if (cat === "ALERT" && settings?.sync?.alerts === false) {
+      logVk("info", "publish_skipped", { reason: "alerts_sync_disabled" });
+      return { sent: false, reason: "alerts_sync_disabled" };
+    }
+    if (cat === "EVENT" && settings?.sync?.events === false) {
+      logVk("info", "publish_skipped", { reason: "events_sync_disabled" });
+      return { sent: false, reason: "events_sync_disabled" };
+    }
+    if ((cat === "NEWS" || (!cat || cat === "")) && settings?.sync?.news === false) {
       logVk("info", "publish_skipped", { reason: "news_sync_disabled" });
       return { sent: false, reason: "news_sync_disabled" };
     }
@@ -29549,21 +29695,31 @@ app.post("/api/admin/acars/vac/message", express.json(), async (req, res) => {
 });
 
 const buildAdminOverviewPayload = async () => {
-  const [summary, flightMap, notamsResponse, pirepsResponse] = await Promise.all([
+  const [summary, flightMap, notamsResponse] = await Promise.all([
     loadSummaryStats().catch(() => null),
     loadFlightMap().catch(() => null),
     getCachedNotams(100).catch(() => []),
-    fetchAllPages("/pireps?page[size]=250&sort=-created_at").catch(() => []),
   ]);
+
+  // Fetch pireps: try fetchAllPages first, fall back to catalog if empty
+  let pirepsRaw = await fetchAllPages("/pireps?page[size]=250&sort=-created_at").catch(() => []);
+  if (!Array.isArray(pirepsRaw) || pirepsRaw.length === 0) {
+    const fallback = await loadAdminPirepsCatalogPage({ pageSize: 100, sort: "-id" }).catch(() => ({ pireps: [] }));
+    pirepsRaw = Array.isArray(fallback?.pireps) ? fallback.pireps : [];
+  }
 
   const now = new Date();
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  const pireps = Array.isArray(pirepsResponse) ? pirepsResponse : [];
+  const pireps = pirepsRaw;
   const recentRaw = pireps.slice(0, 8);
 
   const pirepTimestamps = pireps
-    .map((pirep) => Date.parse(String(pirep?.created_at || pirep?.submitted_at || pirep?.updated_at || "")))
+    .map((pirep) => {
+      const ts = pirep?.created_at || pirep?.submitted_at || pirep?.updated_at
+               || pirep?.attributes?.created_at || pirep?.attributes?.submitted_at || pirep?.attributes?.updated_at || "";
+      return Date.parse(String(ts));
+    })
     .filter((value) => Number.isFinite(value));
 
   const hourlyBase = new Date(now);
@@ -29637,13 +29793,16 @@ const buildAdminOverviewPayload = async () => {
 
   // Resolve all pilot names in parallel instead of sequential awaits
   const recentActivity = await Promise.all(recentRaw.map(async (pirep) => {
-    const pilotName = await loadPilotName(pirep?.pilot_id).catch(() => null);
-    const callsign = String(pirep?.callsign || pirep?.flight_number || "");
-    const from = String(pirep?.departure_airport?.icao || pirep?.departure_airport?.iata || pirep?.departure_icao || pirep?.departure_iata || "").toUpperCase();
-    const to = String(pirep?.arrival_airport?.icao || pirep?.arrival_airport?.iata || pirep?.arrival_icao || pirep?.arrival_iata || "").toUpperCase();
-    const statusRaw = String(pirep?.status || "completed").toLowerCase();
-    const gForceValue = [pirep?.g_force, pirep?.gForce, pirep?.landing_g_force, pirep?.landingGForce,
-      pirep?.landing_g, pirep?.landingG, pirep?.max_g_force, pirep?.maxGForce]
+    const attr = pirep?.attributes || pirep || {};
+    const pilotName = await loadPilotName(attr?.pilot_id || pirep?.pilot_id).catch(() => null);
+    const callsign = String(attr?.callsign || attr?.flight_number || pirep?.callsign || pirep?.flight_number || "");
+    const depApt = pirep?.departure_airport || pirep?.relationships?.departure_airport?.data || {};
+    const arrApt = pirep?.arrival_airport || pirep?.relationships?.arrival_airport?.data || {};
+    const from = String(depApt?.icao || depApt?.iata || attr?.departure_icao || attr?.departure_iata || "").toUpperCase();
+    const to = String(arrApt?.icao || arrApt?.iata || attr?.arrival_icao || attr?.arrival_iata || "").toUpperCase();
+    const statusRaw = String(attr?.status || pirep?.status || "completed").toLowerCase();
+    const gForceValue = [attr?.g_force, attr?.landing_g_force, attr?.landing_g, attr?.max_g_force,
+      pirep?.g_force, pirep?.gForce, pirep?.landing_g, pirep?.max_g_force]
       .map((v) => Number(v)).find((v) => Number.isFinite(v));
     const status = statusRaw.includes("cancel") ? "cancelled"
       : statusRaw.includes("invalid") ? "invalidated"
@@ -29651,18 +29810,18 @@ const buildAdminOverviewPayload = async () => {
       : statusRaw.includes("pend") ? "pending" : "approved";
     return {
       id: Number(pirep?.id || 0),
-      bookingId: Number(pirep?.booking_id || 0) || null,
-      user: pilotName || `Pilot #${pirep?.pilot_id || ""}`,
+      bookingId: Number(attr?.booking_id || pirep?.booking_id || 0) || null,
+      user: pilotName || `Pilot #${attr?.pilot_id || pirep?.pilot_id || ""}`,
       detail: `${callsign || "PIREP"} ${from || ""}${to ? `-${to}` : ""}`.trim(),
-      time: String(pirep?.created_at || ""),
+      time: String(attr?.created_at || pirep?.created_at || ""),
       status,
       flightNumber: callsign || "PIREP",
       departure: from || null,
       arrival: to || null,
-      landedAt: String(pirep?.landing_time || pirep?.on_blocks_time || pirep?.created_at || pirep?.submitted_at || "") || null,
-      flightLengthSeconds: Number(pirep?.flight_length || 0) || 0,
-      blockLengthSeconds: Number(pirep?.block_length || 0) || 0,
-      landingRate: Number.isFinite(Number(pirep?.landing_rate)) ? Number(pirep?.landing_rate) : null,
+      landedAt: String(attr?.landing_time || attr?.on_blocks_time || attr?.created_at || attr?.submitted_at || pirep?.landing_time || pirep?.on_blocks_time || pirep?.created_at || "") || null,
+      flightLengthSeconds: Number(attr?.flight_length || pirep?.flight_length || 0) || 0,
+      blockLengthSeconds: Number(attr?.block_length || pirep?.block_length || 0) || 0,
+      landingRate: Number.isFinite(Number(attr?.landing_rate ?? pirep?.landing_rate)) ? Number(attr?.landing_rate ?? pirep?.landing_rate) : null,
       gForce: Number.isFinite(gForceValue) ? Number(gForceValue) : null,
     };
   }));
@@ -29783,13 +29942,21 @@ app.post("/api/admin/notams", async (req, res) => {
         ],
       }).catch(() => {});
     }
-    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+    if (normalizeAdminBoolean(req.body?.sendToTelegram, false) && getTelegramBotSettingsStore()?.sync?.notams !== false) {
+      const tgText = String(title || "NOTAM").slice(0, 120);
+      const tgBody = String(content || "").slice(0, 280);
+      void sendTelegramAdminNotification({
+        text: `🚧 *NOTAM: ${tgText}*${tgBody ? "\n" + tgBody : ""}\n_Приоритет: ${priority || "low"}_`,
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(req.body?.sendToVK, false) && getVkBotSettingsStore()?.sync?.notams !== false) {
       void publishNewsToVk({
         title: title || "Untitled NOTAM",
         content: content || "",
         category: "NOTAM",
         author: "Ops",
         linkUrl: url || null,
+        bannerUrl: normalizeAdminText(req.body?.bannerUrl || "") || "",
       }).catch(() => {});
     }
     res.json(payload);
@@ -29841,13 +30008,21 @@ app.put("/api/admin/notams/:id", async (req, res) => {
         ],
       }).catch(() => {});
     }
-    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+    if (normalizeAdminBoolean(req.body?.sendToTelegram, false) && getTelegramBotSettingsStore()?.sync?.notams !== false) {
+      const tgText = String(title || "NOTAM").slice(0, 120);
+      const tgBody = String(content || "").slice(0, 280);
+      void sendTelegramAdminNotification({
+        text: `🚧 *NOTAM: ${tgText}*${tgBody ? "\n" + tgBody : ""}\n_Приоритет: ${priority || "low"}_`,
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(req.body?.sendToVK, false) && getVkBotSettingsStore()?.sync?.notams !== false) {
       void publishNewsToVk({
         title: title || "Untitled NOTAM",
         content: content || "",
         category: "NOTAM",
         author: "Ops",
         linkUrl: url || null,
+        bannerUrl: normalizeAdminText(req.body?.bannerUrl || "") || "",
       }).catch(() => {});
     }
     res.json(payload);
@@ -29923,7 +30098,7 @@ app.post("/api/admin/alerts", async (req, res) => {
         ],
       }).catch(() => {});
     }
-    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+    if (normalizeAdminBoolean(req.body?.sendToVK, false) && getVkBotSettingsStore()?.sync?.alerts !== false) {
       void publishNewsToVk({
         title: String(req.body?.title || "Untitled Alert"),
         content: String(req.body?.content || "").trim(),
@@ -29931,6 +30106,13 @@ app.post("/api/admin/alerts", async (req, res) => {
         author: "Ops",
         linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
         bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(req.body?.sendToTelegram, false) && getTelegramBotSettingsStore()?.sync?.alerts !== false) {
+      const alertTitle = String(req.body?.title || "Alert").slice(0, 120);
+      const alertBody = String(req.body?.content || "").trim().slice(0, 280);
+      void sendTelegramAdminNotification({
+        text: `🔔 *Алерт: ${alertTitle}*${alertBody ? "\n" + alertBody : ""}`,
       }).catch(() => {});
     }
     res.json(payload);
@@ -29974,7 +30156,7 @@ app.put("/api/admin/alerts/:id", async (req, res) => {
         ],
       }).catch(() => {});
     }
-    if (normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, true)) {
+    if (normalizeAdminBoolean(req.body?.sendToVK, false) && getVkBotSettingsStore()?.sync?.alerts !== false) {
       void publishNewsToVk({
         title: String(req.body?.title || "Untitled Alert"),
         content: String(req.body?.content || "").trim(),
@@ -29982,6 +30164,13 @@ app.put("/api/admin/alerts/:id", async (req, res) => {
         author: "Ops",
         linkUrl: normalizeAdminText(req.body?.linkUrl || req.body?.url),
         bannerUrl: normalizeAdminText(req.body?.bannerUrl || req.body?.imageUrl || req.body?.image),
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(req.body?.sendToTelegram, false) && getTelegramBotSettingsStore()?.sync?.alerts !== false) {
+      const alertTitle = String(req.body?.title || "Alert").slice(0, 120);
+      const alertBody = String(req.body?.content || "").trim().slice(0, 280);
+      void sendTelegramAdminNotification({
+        text: `🔔 *Алерт: ${alertTitle}*${alertBody ? "\n" + alertBody : ""}`,
       }).catch(() => {});
     }
     res.json(payload);
@@ -31389,59 +31578,6 @@ app.get("/api/public/social-gallery/assets/:fileName", (req, res) => {
   }
 });
 
-app.post("/api/admin/banner-generator/assets", express.json({ limit: "24mb" }), (req, res) => {
-  if (!requireCredentials(res)) {
-    return;
-  }
-
-  try {
-    const asset = storeBannerGeneratorAsset({
-      imageDataUrl: req.body?.imageDataUrl,
-      mimeType: req.body?.mimeType,
-      fileName: req.body?.fileName,
-    });
-
-    res.status(201).json({
-      ok: true,
-      asset,
-    });
-  } catch (error) {
-    res.status(400).json({
-      ok: false,
-      error: String(error?.message || error || "Failed to store banner asset"),
-    });
-  }
-});
-
-app.get("/api/public/banner-generator/assets/:fileName", (req, res) => {
-  try {
-    const requested = path.basename(String(req.params.fileName || "").trim());
-    if (!requested) {
-      res.status(404).end();
-      return;
-    }
-
-    const assetPath = path.join(BANNER_GENERATOR_ASSETS_DIR, requested);
-    if (!assetPath.startsWith(BANNER_GENERATOR_ASSETS_DIR) || !fs.existsSync(assetPath)) {
-      res.status(404).end();
-      return;
-    }
-
-    const extension = path.extname(requested).toLowerCase();
-    const contentType = extension === ".png"
-      ? "image/png"
-      : extension === ".webp"
-      ? "image/webp"
-      : "image/jpeg";
-
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    res.type(contentType);
-    res.sendFile(assetPath);
-  } catch {
-    res.status(404).end();
-  }
-});
-
 app.get("/api/public/social-gallery/picks", (_req, res) => {
   try {
     res.json(readSocialGalleryPicksStore());
@@ -31514,6 +31650,23 @@ try {
     }
   }
 } catch { /* ignore */ }
+
+// Дополняет существующий кэш базы знаний новым/обновлённым элементом активности,
+// не сбрасывая и не перестраивая весь кэш.
+const appendActivityToAiKnowledge = (item) => {
+  if (!aiKnowledgeCache?.text) return; // кэш ещё не построен — при первом запросе построится сам
+  const title = normalizeAdminText(item?.title || item?.name || "");
+  if (!title) return;
+  const body = normalizeAdminText(item?.body || item?.description || item?.summary || "").slice(0, 200);
+  const date = normalizeAdminText(item?.date || item?.startDate || item?.eventDate || "");
+  const category = normalizeAdminText(item?.category || "");
+  const label = category ? `[${category}] ` : "";
+  const line = `- ${label}**${title}**${date ? " (" + date + ")" : ""}${body ? ": " + body : ""}`;
+  aiKnowledgeCache = {
+    text: aiKnowledgeCache.text + `\n\n### [Обновление ${new Date().toISOString().slice(0, 10)}] Новый контент\n${line}`,
+    builtAt: aiKnowledgeCache.builtAt, // TTL не сбрасываем — полная перестройка произойдёт по расписанию
+  };
+};
 
 const buildAiSiteContext = async () => {
   const now = Date.now();
@@ -32631,17 +32784,21 @@ app.post("/api/admin/content/:collection", express.json(), async (req, res) => {
       }, item.id);
     }
   }
-  if (
-    collection === "activities" &&
-    normalizeAdminBoolean(req.body?.sendToDiscord, false) &&
-    normalizePublicActivityCategory(item?.category || item?.type) === "News"
-  ) {
+  if (collection === "activities" && normalizeAdminBoolean(req.body?.sendToDiscord, false)) {
     void publishNewsToDiscord({
       title: item?.title,
       content: item?.content || item?.summary || item?.description,
       category: item?.category || "News",
       author: item?.author || "Admin",
     }).catch(() => {});
+  }
+  if (collection === "activities" && normalizeAdminBoolean(req.body?.sendToTelegram, false)) {
+    publishActivityToTelegram({
+      title: item?.title,
+      summary: item?.summary || item?.description,
+      category: item?.category,
+      published: item?.published,
+    });
   }
   if (collection === "activities") {
     const vkRequested = normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, false);
@@ -32677,6 +32834,9 @@ app.post("/api/admin/content/:collection", express.json(), async (req, res) => {
         ...vkStatePatch,
       }, item.id);
     }
+  }
+  if (collection === "activities") {
+    appendActivityToAiKnowledge(item);
   }
   res.status(201).json({ ok: true, item, integrations });
 });
@@ -32709,17 +32869,21 @@ app.put("/api/admin/content/:collection/:id", express.json(), async (req, res) =
       }, item.id);
     }
   }
-  if (
-    collection === "activities" &&
-    normalizeAdminBoolean(req.body?.sendToDiscord, false) &&
-    normalizePublicActivityCategory(item?.category || item?.type) === "News"
-  ) {
+  if (collection === "activities" && normalizeAdminBoolean(req.body?.sendToDiscord, false)) {
     void publishNewsToDiscord({
       title: item?.title,
       content: item?.content || item?.summary || item?.description,
       category: item?.category || "News",
       author: item?.author || "Admin",
     }).catch(() => {});
+  }
+  if (collection === "activities" && normalizeAdminBoolean(req.body?.sendToTelegram, false)) {
+    publishActivityToTelegram({
+      title: item?.title,
+      summary: item?.summary || item?.description,
+      category: item?.category,
+      published: item?.published,
+    });
   }
   if (collection === "activities") {
     const vkRequested = normalizeAdminBoolean(req.body?.sendToVK ?? req.body?.publishToVK, false);
@@ -32755,6 +32919,9 @@ app.put("/api/admin/content/:collection/:id", express.json(), async (req, res) =
         ...vkStatePatch,
       }, item.id);
     }
+  }
+  if (collection === "activities") {
+    appendActivityToAiKnowledge(item);
   }
   res.json({ ok: true, item, integrations });
 });
@@ -33146,7 +33313,35 @@ app.post("/api/admin/activities/:section", express.json({ limit: "12mb" }), asyn
   }
 
   try {
-    const payload = await apiRequest(sectionPath, { method: "POST", body: req.body || {} });
+    const { sendToDiscord, sendToTelegram, sendToVK, bannerUrl: evBannerUrl, ...vamsysBody } = req.body || {};
+    const payload = await apiRequest(sectionPath, { method: "POST", body: vamsysBody });
+    const eventName = vamsysBody?.name || "";
+    const eventDesc = vamsysBody?.description || "";
+    if (normalizeAdminBoolean(sendToDiscord, false)) {
+      void sendDiscordBotNotification({
+        eventKey: "eventCreated",
+        title: eventName || "Новое событие",
+        description: eventDesc || "",
+        category: "EVENT",
+        author: "Ops",
+        color: 0x7c3aed,
+        variables: { title: eventName, content: eventDesc, category: "EVENT", author: "Ops" },
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(sendToTelegram, false) && getTelegramBotSettingsStore()?.sync?.events !== false) {
+      void sendTelegramAdminNotification({
+        text: `🗓 *Событие: ${String(eventName).slice(0, 120)}*${eventDesc ? "\n" + String(eventDesc).slice(0, 280) : ""}`,
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(sendToVK, false) && getVkBotSettingsStore()?.sync?.events !== false) {
+      void publishNewsToVk({
+        title: eventName || "Новое событие",
+        content: eventDesc || "",
+        category: "EVENT",
+        author: "Ops",
+        bannerUrl: normalizeAdminText(evBannerUrl || "") || "",
+      }).catch(() => {});
+    }
     res.status(201).json({ ok: true, activity: payload?.data || payload || null });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || "Failed to create activity") });
@@ -33170,7 +33365,35 @@ app.put("/api/admin/activities/:section/:id", express.json({ limit: "12mb" }), a
   }
 
   try {
-    const payload = await apiRequest(`${sectionPath}/${itemId}`, { method: "PUT", body: req.body || {} });
+    const { sendToDiscord, sendToTelegram, sendToVK, bannerUrl: evBannerUrl, ...vamsysBody } = req.body || {};
+    const payload = await apiRequest(`${sectionPath}/${itemId}`, { method: "PUT", body: vamsysBody });
+    const eventName = vamsysBody?.name || "";
+    const eventDesc = vamsysBody?.description || "";
+    if (normalizeAdminBoolean(sendToDiscord, false)) {
+      void sendDiscordBotNotification({
+        eventKey: "eventCreated",
+        title: eventName || "Событие обновлено",
+        description: eventDesc || "",
+        category: "EVENT",
+        author: "Ops",
+        color: 0x7c3aed,
+        variables: { title: eventName, content: eventDesc, category: "EVENT", author: "Ops" },
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(sendToTelegram, false) && getTelegramBotSettingsStore()?.sync?.events !== false) {
+      void sendTelegramAdminNotification({
+        text: `🗓 *Событие: ${String(eventName).slice(0, 120)}*${eventDesc ? "\n" + String(eventDesc).slice(0, 280) : ""}`,
+      }).catch(() => {});
+    }
+    if (normalizeAdminBoolean(sendToVK, false) && getVkBotSettingsStore()?.sync?.events !== false) {
+      void publishNewsToVk({
+        title: eventName || "Событие обновлено",
+        content: eventDesc || "",
+        category: "EVENT",
+        author: "Ops",
+        bannerUrl: normalizeAdminText(evBannerUrl || "") || "",
+      }).catch(() => {});
+    }
     res.json({ ok: true, activity: payload?.data || payload || null });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || "Failed to update activity") });
@@ -35685,6 +35908,10 @@ const server = app.listen(PORT, () => {
     console.warn("[dashboard-bootstrap] initial warmup failed:", String(err));
   });
   attachChatWebSocketServer(server);
+  // Build AI knowledge base on startup so first AI request is instant
+  void buildAiSiteContext().catch((err) => {
+    console.warn("[ai-knowledge] startup build failed:", String(err));
+  });
 });
 
 server.on("error", (error) => {

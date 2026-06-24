@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Send } from "lucide-react";
+import { MessageSquare, Send, Globe } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
@@ -12,6 +12,7 @@ import {
 } from "../ui/select";
 import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
+import { Switch } from "../ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -35,7 +36,9 @@ export interface NewsFormData {
   alertStopShowing?: string | null;
   content: string;
   sendToDiscord: boolean;
+  sendToTelegram: boolean;
   sendToVK: boolean;
+  bannerUrl?: string | null;
   status: "Published" | "Draft" | "Archived";
   date: string;
   author: string;
@@ -63,7 +66,9 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
   const [alertStopShowing, setAlertStopShowing] = useState("");
   const [content, setContent] = useState("");
   const [sendToDiscord, setSendToDiscord] = useState(false);
+  const [sendToTelegram, setSendToTelegram] = useState(false);
   const [sendToVK, setSendToVK] = useState(false);
+  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [status, setStatus] = useState<NewsFormData["status"]>("Published");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -82,7 +87,9 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
       setAlertStopShowing(String(initialData.alertStopShowing || ""));
       setContent(String(initialData.content || ""));
       setSendToDiscord(Boolean(initialData.sendToDiscord));
+      setSendToTelegram(Boolean(initialData.sendToTelegram));
       setSendToVK(Boolean(initialData.sendToVK));
+      setBannerUrl(initialData.bannerUrl ?? null);
       setStatus(initialData.status || "Published");
     } else {
       setTitle("");
@@ -98,7 +105,9 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
       setAlertStopShowing("");
       setContent("");
       setSendToDiscord(false);
+      setSendToTelegram(false);
       setSendToVK(false);
+      setBannerUrl(null);
       setStatus("Published");
     }
   }, [initialData, open]);
@@ -125,7 +134,9 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
         alertStopShowing: alertStopShowing || null,
         content,
         sendToDiscord,
+        sendToTelegram,
         sendToVK,
+        bannerUrl: bannerUrl || null,
         status,
         date: new Date().toISOString().split('T')[0],
         author: "Admin"
@@ -143,7 +154,9 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
       setAlertStopShowing("");
       setContent("");
       setSendToDiscord(false);
+      setSendToTelegram(false);
       setSendToVK(false);
+      setBannerUrl(null);
       setStatus("Published");
     } finally {
       setIsSubmitting(false);
@@ -313,42 +326,90 @@ export function NewsForm({ open, onOpenChange, onSubmit, initialData }: NewsForm
             </div>
           )}
 
-          <div className="flex items-center space-x-2 rounded-lg border p-4 bg-indigo-50 border-indigo-100">
-            <Checkbox 
-              id="discord" 
-              checked={sendToDiscord}
-              onCheckedChange={(checked) => setSendToDiscord(checked as boolean)}
+          {/* Banner */}
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Баннер публикации</div>
+            <Input
+              placeholder="https://cdn.example.com/banner.webp"
+              value={bannerUrl ?? ""}
+              onChange={(e) => setBannerUrl(e.target.value || null)}
             />
-            <div className="grid gap-1.5 leading-none">
-              <Label
-                htmlFor="discord"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-indigo-900"
-              >
-                {t("admin.news.form.discord")}
-              </Label>
-              <p className="text-xs text-indigo-700">
-                {t("admin.news.form.discordDesc")}
-              </p>
-            </div>
-            <Send className="ml-auto h-4 w-4 text-indigo-500" />
+            {bannerUrl && (
+              <img src={bannerUrl} alt="banner" className="w-full max-h-48 rounded-xl object-cover border border-gray-200" />
+            )}
           </div>
 
-          <div className="flex items-center space-x-2 rounded-lg border p-4 bg-emerald-50 border-emerald-100">
-            <Checkbox
-              id="vk"
-              checked={sendToVK}
-              onCheckedChange={(checked) => setSendToVK(checked as boolean)}
-            />
-            <div className="grid gap-1.5 leading-none">
-              <Label
-                htmlFor="vk"
-                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-emerald-900"
-              >
-                Отправить в VK
-              </Label>
-              <p className="text-xs text-emerald-700">
-                Публикует новость в сообщество VK и дублирует ее в Telegram, если backend настроен.
-              </p>
+          {/* Publication channels */}
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Публикация</div>
+            <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+              {/* Discord */}
+              <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50/60">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-100">
+                  <MessageSquare className="h-4 w-4 text-indigo-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-indigo-900">Discord</div>
+                  <div className="text-xs text-indigo-600 truncate">{t("admin.news.form.discordDesc")}</div>
+                </div>
+                <Switch checked={sendToDiscord} onCheckedChange={setSendToDiscord} className="data-[state=checked]:bg-indigo-600" />
+              </div>
+              {/* Telegram */}
+              <div className="flex items-center gap-3 px-4 py-3 bg-sky-50/60">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-100">
+                  <Send className="h-4 w-4 text-sky-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-sky-900">Telegram</div>
+                  <div className="text-xs text-sky-600 truncate">Отправить уведомление в Telegram-канал</div>
+                </div>
+                <Switch checked={sendToTelegram} onCheckedChange={setSendToTelegram} className="data-[state=checked]:bg-sky-500" />
+              </div>
+              {/* VK */}
+              <div className="flex flex-col">
+                <div className="flex items-center gap-3 px-4 py-3 bg-blue-50/60">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100">
+                    <Globe className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-blue-900">ВКонтакте</div>
+                    <div className="text-xs text-blue-600 truncate">
+                      Опубликовать пост в сообщество{bannerUrl ? " · с баннером" : ""}
+                    </div>
+                  </div>
+                  <Switch checked={sendToVK} onCheckedChange={setSendToVK} className="data-[state=checked]:bg-blue-600" />
+                </div>
+                {/* VK preview — inline under VK row */}
+                {sendToVK && (
+                  <div className="border-t border-blue-100 bg-blue-50/30 px-4 py-4 space-y-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">Так будет выглядеть пост</div>
+                    <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden font-sans">
+                      {bannerUrl && (
+                        <img src={bannerUrl} alt="banner" className="w-full max-h-52 object-cover" />
+                      )}
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-9 w-9 rounded-full bg-red-600 flex items-center justify-center text-white font-bold text-base leading-none select-none shrink-0">N</div>
+                          <div>
+                            <div className="font-semibold text-[#000000de] text-[13px]">Nordwind Virtual</div>
+                            <div className="text-[11px] text-gray-400">только что</div>
+                          </div>
+                        </div>
+                        <div className="whitespace-pre-wrap text-[13px] leading-[1.5] text-[#000000de] break-words">
+                          {`[${category.toUpperCase()}] ${title || "Заголовок"}\n\n${content ? (content.length > 300 ? content.slice(0, 300) + "…" : content) : "Текст записи..."}`}
+                          {notamUrl && `\n\n${category === "News" ? "Полная версия новости" : "Подробнее"}: ${notamUrl}`}
+                          {"\n\nАвтор: Admin"}
+                        </div>
+                        <div className="flex items-center gap-4 pt-2 border-t border-gray-100 text-gray-400 text-[12px]">
+                          <span>♥ Нравится</span>
+                          <span>💬 Комментировать</span>
+                          <span>↗ Поделиться</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
           

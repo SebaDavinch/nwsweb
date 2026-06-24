@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   Award,
   Edit2,
   ExternalLink,
-  ImagePlus,
+  Globe,
   Loader2,
+  MessageSquare,
   Plus,
   RefreshCcw,
   Search,
+  Send,
   ShieldAlert,
   Trash2,
-  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "../ui/badge";
@@ -32,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
+import { Switch } from "../ui/switch";
 import { useLanguage } from "../../context/language-context";
 
 type NotamType = "info" | "warning" | "critical";
@@ -60,6 +62,8 @@ interface NotamForm {
   tag: string;
   url: string;
   sendToDiscord: boolean;
+  sendToTelegram: boolean;
+  sendToVK: boolean;
   // Badge
   createBadge: boolean;
   badgeName: string;
@@ -83,6 +87,8 @@ const EMPTY_FORM: NotamForm = {
   tag: "",
   url: "",
   sendToDiscord: false,
+  sendToTelegram: false,
+  sendToVK: false,
   createBadge: false,
   badgeName: "",
   badgeDescription: "",
@@ -223,6 +229,7 @@ export function AdminNotams() {
   const [form, setForm] = useState<NotamForm>(EMPTY_FORM);
   const [isSaving, setIsSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [vkBannerUrl, setVkBannerUrl] = useState<string | null>(null);
 
   const loadNotams = async ({ silent = false } = {}) => {
     if (silent) setIsRefreshing(true);
@@ -246,10 +253,12 @@ export function AdminNotams() {
   const openCreate = () => {
     setEditingNotam(null);
     setForm(EMPTY_FORM);
+    setVkBannerUrl(null);
     setDialogOpen(true);
   };
 
   const openEdit = (notam: VamsysNotam) => {
+    setVkBannerUrl(null);
     setEditingNotam(notam);
     setForm({
       title: notam.title,
@@ -260,6 +269,8 @@ export function AdminNotams() {
       tag: notam.tag || "",
       url: notam.url || "",
       sendToDiscord: false,
+      sendToTelegram: false,
+      sendToVK: false,
       createBadge: false,
       badgeName: notam.title,
       badgeDescription: "",
@@ -304,6 +315,9 @@ export function AdminNotams() {
         tag: form.tag.trim() || null,
         url: form.url.trim() || null,
         sendToDiscord: form.sendToDiscord,
+        sendToTelegram: form.sendToTelegram,
+        sendToVK: form.sendToVK,
+        bannerUrl: vkBannerUrl || null,
       };
       const url = editingNotam ? `/api/admin/notams/${editingNotam.id}` : "/api/admin/notams";
       const res = await fetch(url, {
@@ -560,32 +574,101 @@ export function AdminNotams() {
               </div>
             </div>
 
-            {/* Checkboxes */}
-            <div className="flex flex-col gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300"
-                  checked={form.must_read}
-                  onChange={(e) => setForm((f) => ({ ...f, must_read: e.target.checked }))}
-                />
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{tr("Обязательно к прочтению", "Must Read")}</div>
-                  <div className="text-xs text-gray-500">{tr("Пилоты должны прочитать перед бронированием", "Pilots must read before booking")}</div>
+            {/* Must read */}
+            <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-gray-300"
+                checked={form.must_read}
+                onChange={(e) => setForm((f) => ({ ...f, must_read: e.target.checked }))}
+              />
+              <div>
+                <div className="text-sm font-medium text-gray-900">{tr("Обязательно к прочтению", "Must Read")}</div>
+                <div className="text-xs text-gray-500">{tr("Пилоты должны прочитать перед бронированием", "Pilots must read before booking")}</div>
+              </div>
+            </label>
+
+            {/* Banner */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{tr("Баннер публикации", "Publication banner")}</div>
+              <Input
+                placeholder="https://cdn.example.com/banner.webp"
+                value={vkBannerUrl ?? ""}
+                onChange={(e) => setVkBannerUrl(e.target.value || null)}
+              />
+              {vkBannerUrl && (
+                <img src={vkBannerUrl} alt="banner" className="w-full max-h-48 rounded-xl object-cover border border-gray-200" />
+              )}
+            </div>
+
+            {/* Publication channels */}
+            <div className="space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">{tr("Публикация", "Publication")}</div>
+              <div className="divide-y divide-gray-100 rounded-xl border border-gray-200 overflow-hidden">
+                <div className="flex items-center gap-3 px-4 py-3 bg-indigo-50/60">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-indigo-100">
+                    <MessageSquare className="h-4 w-4 text-indigo-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-indigo-900">Discord</div>
+                    <div className="text-xs text-indigo-600 truncate">{tr("Отправить уведомление в Discord-канал", "Send notification to Discord channel")}</div>
+                  </div>
+                  <Switch checked={form.sendToDiscord} onCheckedChange={(v) => setForm((f) => ({ ...f, sendToDiscord: v }))} className="data-[state=checked]:bg-indigo-600" />
                 </div>
-              </label>
-              <label className="flex cursor-pointer items-center gap-3">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300"
-                  checked={form.sendToDiscord}
-                  onChange={(e) => setForm((f) => ({ ...f, sendToDiscord: e.target.checked }))}
-                />
-                <div>
-                  <div className="text-sm font-medium text-gray-900">{tr("Опубликовать в Discord", "Publish to Discord")}</div>
-                  <div className="text-xs text-gray-500">{tr("Отправить уведомление в настроенный канал Discord", "Send notification to configured Discord channel")}</div>
+                <div className="flex items-center gap-3 px-4 py-3 bg-sky-50/60">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-sky-100">
+                    <Send className="h-4 w-4 text-sky-600" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-sky-900">Telegram</div>
+                    <div className="text-xs text-sky-600 truncate">{tr("Отправить в Telegram-канал", "Send to Telegram channel")}</div>
+                  </div>
+                  <Switch checked={form.sendToTelegram} onCheckedChange={(v) => setForm((f) => ({ ...f, sendToTelegram: v }))} className="data-[state=checked]:bg-sky-500" />
                 </div>
-              </label>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-3 px-4 py-3 bg-blue-50/60">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-100">
+                      <Globe className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-blue-900">ВКонтакте</div>
+                      <div className="text-xs text-blue-600 truncate">
+                        {tr("Опубликовать пост в сообщество", "Post to VK community")}{vkBannerUrl ? tr(" · с баннером", " · with banner") : ""}
+                      </div>
+                    </div>
+                    <Switch checked={form.sendToVK} onCheckedChange={(v) => setForm((f) => ({ ...f, sendToVK: v }))} className="data-[state=checked]:bg-blue-600" />
+                  </div>
+                  {form.sendToVK && (
+                    <div className="border-t border-blue-100 bg-blue-50/30 px-4 py-4 space-y-3">
+                      <div className="text-[11px] font-semibold uppercase tracking-wide text-blue-500">{tr("Так будет выглядеть пост", "Post preview")}</div>
+                      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden font-sans">
+                        {vkBannerUrl && (
+                          <img src={vkBannerUrl} alt="banner" className="w-full max-h-52 object-cover" />
+                        )}
+                        <div className="p-4 space-y-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-9 w-9 rounded-full bg-red-600 flex items-center justify-center text-white font-bold text-base leading-none select-none shrink-0">N</div>
+                            <div>
+                              <div className="font-semibold text-[#000000de] text-[13px]">Nordwind Virtual</div>
+                              <div className="text-[11px] text-gray-400">{tr("только что", "just now")}</div>
+                            </div>
+                          </div>
+                          <div className="whitespace-pre-wrap text-[13px] leading-[1.5] text-[#000000de] break-words">
+                            {`[NOTAM] ${form.title || tr("Заголовок", "Title")}\n\n${form.content ? (form.content.length > 300 ? form.content.slice(0, 300) + "…" : form.content) : tr("Текст NOTAM...", "NOTAM text...")}`}
+                            {form.url ? `\n\n${tr("Подробнее", "Read more")}: ${form.url}` : ""}
+                            {`\n\n${tr("Автор", "Author")}: Ops`}
+                          </div>
+                          <div className="flex items-center gap-4 pt-2 border-t border-gray-100 text-gray-400 text-[12px]">
+                            <span>♥ {tr("Нравится", "Like")}</span>
+                            <span>💬 {tr("Комментировать", "Comment")}</span>
+                            <span>↗ {tr("Поделиться", "Share")}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Badge section */}
