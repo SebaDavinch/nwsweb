@@ -353,8 +353,8 @@ export function AppShell() {
       {/* Нижний статус-бар: живые рейсы + UTC */}
       <LiveStatsBar />
 
-      {/* Плавающий ИИ-ассистент (кружок, как на сайте) */}
-      {isAuthenticated ? <AppAssistantBubble /> : null}
+      {/* ИИ-ассистент временно отключён */}
+      {/* {isAuthenticated ? <AppAssistantBubble /> : null} */}
 
       {/* Первый запуск: выбор языка и темы */}
       {!onboarded ? <AppOnboarding onDone={() => setOnboarded(true)} /> : null}

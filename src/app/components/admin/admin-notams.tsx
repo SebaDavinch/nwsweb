@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   Award,
   Edit2,
   ExternalLink,
   Globe,
+  ImagePlus,
   Loader2,
   MessageSquare,
   Plus,
@@ -13,6 +14,7 @@ import {
   Send,
   ShieldAlert,
   Trash2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "../ui/badge";

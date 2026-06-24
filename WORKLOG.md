@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-06-24 (сессия 11)
+
+### Удаление генератора баннеров из ВАК
+
+Генератор баннеров полностью вынесен в отдельный standalone-сервис. Из проекта удалено:
+
+- **`admin-banner-generator.tsx`** — обёртка-страница (lazy-load).
+- **`banner-generator/`** — директория целиком: `App.tsx` (~7400 строк), `App.css`, `data/`, `assets/` (GeoJSON, логотипы, фоны).
+- **`admin-layout.tsx`** — убраны: импорт, пункт навигации, `ADMIN_PAGES` запись, `ImagePlus` иконка.
+- **`admin-activities.tsx`** — убраны `openBannerGenerator()`, `renderFieldExtras`, `Button`/`useSiteDesign` импорты.
+- **`admin-settings.tsx`** — убран info-блок «Banner workflow».
+- **`news-form.tsx`**, **`admin-events.tsx`**, **`admin-notams.tsx`** — загрузка файла заменена на текстовый `Input` (вставить URL из внешнего сервиса). VK-превью баннера сохранено.
+- **`server/index.js`** — удалены: `BANNER_GENERATOR_ASSETS_DIR`, `BANNER_GENERATOR_MAX_UPLOAD_BYTES`, `ensureBannerGeneratorAssetsDir`, `storeBannerGeneratorAsset`, `POST /api/admin/banner-generator/assets`, `GET /api/public/banner-generator/assets/:fileName`.
+- **`routes.ts`** — удалены маршруты `/banner` и `/banner-generator`.
+- **ИИ-ассистент в NordwindHub** — временно закомментирован (`AppAssistantBubble`) до настройки подписки.
+
+TypeScript без ошибок. Закоммичено и запушено.
+
+---
+
 ## 2026-06-24 (сессия 10)
 
 ### Аудит и фикс тёмной темы NordwindHub
