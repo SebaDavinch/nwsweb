@@ -18649,6 +18649,7 @@ const buildTelegramTicketAdminNotificationText = ({ eventKey = "ticketUpdated", 
   const author = normalizeAdminText(actorName || ticket?.owner?.name || ticket?.owner?.username || "") || "Telegram user";
   const summary = normalizeAdminMultilineText(content || "").slice(0, 400);
 
+  const ticketNum = Number(ticket?.number || 0) || null;
   return [
     title,
     route,
@@ -18657,6 +18658,12 @@ const buildTelegramTicketAdminNotificationText = ({ eventKey = "ticketUpdated", 
     `Приоритет: ${priority}`,
     `Статус: ${status}`,
     summary ? `Сообщение: ${summary}` : null,
+    ticketNum && (eventKey === "ticketCreated" || eventKey === "ticketReply")
+      ? `\n📩 /reply ${ticketNum} <ваш ответ>`
+      : null,
+    ticketNum && eventKey === "ticketCreated"
+      ? `🔒 /close ${ticketNum}`
+      : null,
   ].filter(Boolean).join("\n");
 };
 
@@ -18931,6 +18938,7 @@ const handleTelegramMessage = async (update) => {
 
   // ── Built-in command shortcuts ─────────────────────────────
   if (text === "/start" || text === "/help") {
+    const isAdmin = isTelegramBotAdminChat(chatId);
     const reply = [
       "Привет! Я AI-помощник Nordwind Virtual 🤖",
       "",
@@ -18941,10 +18949,121 @@ const handleTelegramMessage = async (update) => {
       "/news — последние новости",
       "/ticket — создать тикет",
       "/metar ICAO — погода",
+      ...(isAdmin ? [
+        "",
+        "Команды стаффа:",
+        "/reply <номер> <текст> — ответить в тикет",
+        "/close <номер> — закрыть тикет",
+      ] : []),
       "",
       "Или просто задай вопрос — я отвечу на русском или английском.",
     ].join("\n");
     await sendTelegramPayload({ chatId, text: reply }).catch(() => {});
+    return;
+  }
+
+  // ── Staff: /reply <номер> <текст> ─────────────────────────
+  if (text.startsWith("/reply ") || text.startsWith("/ответить ")) {
+    if (!isTelegramBotAdminChat(chatId)) {
+      await sendTelegramPayload({ chatId, text: "⛔ Только для стаффа." }).catch(() => {});
+      return;
+    }
+    const parts = text.replace(/^\/\S+\s+/, "").match(/^(\d+)\s+([\s\S]+)$/);
+    if (!parts) {
+      await sendTelegramPayload({ chatId, text: "Формат: /reply <номер тикета> <текст ответа>" }).catch(() => {});
+      return;
+    }
+    const [, ticketNumberStr, replyContent] = parts;
+    const ticketNumber = Number(ticketNumberStr);
+    const staffName = firstName || username || "Staff";
+    let updatedTicket = null;
+
+    withAdminContentUpdate((draft) => {
+      const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+      const index = items.findIndex((t) => Number(t?.number || 0) === ticketNumber);
+      if (index < 0) return draft;
+      const current = items[index];
+      const now = new Date().toISOString();
+      const nextMessages = Array.isArray(current?.messages) ? [...current.messages] : [];
+      nextMessages.push({
+        id: randomUUID(),
+        authorRole: "staff",
+        authorName: staffName,
+        authorUsername: username || "staff",
+        content: normalizeAdminMultilineText(replyContent),
+        createdAt: now,
+      });
+      updatedTicket = {
+        ...current,
+        messages: nextMessages,
+        status: current?.status === "closed" ? "open" : normalizeTicketStatus(current?.status, "open"),
+        updatedAt: now,
+        closedAt: current?.status === "closed" ? null : (current?.closedAt || null),
+        unreadByOwner: Number(current?.unreadByOwner || 0) + 1,
+        unreadByStaff: 0,
+      };
+      items[index] = updatedTicket;
+      draft.tickets = items;
+      return draft;
+    });
+
+    if (!updatedTicket) {
+      await sendTelegramPayload({ chatId, text: `❌ Тикет #${ticketNumber} не найден.` }).catch(() => {});
+      return;
+    }
+
+    await sendTelegramPayload({ chatId, text: `✅ Ответ добавлен в тикет #${ticketNumber}.` }).catch(() => {});
+
+    // Уведомить пилота, если у него есть Telegram chatId
+    const ownerChatId = normalizeAdminText(updatedTicket?.telegramChatId || updatedTicket?.owner?.telegramChatId || "");
+    if (ownerChatId) {
+      const pilotText = [
+        `📋 Ответ в тикете #${updatedTicket.number}: ${updatedTicket.subject}`,
+        `От: ${staffName}`,
+        "",
+        replyContent.slice(0, 800),
+      ].join("\n");
+      await sendTelegramPayload({ chatId: ownerChatId, text: pilotText }).catch(() => {});
+    }
+    return;
+  }
+
+  // ── Staff: /close <номер> ──────────────────────────────────
+  if (text.startsWith("/close ") || text.startsWith("/закрыть ")) {
+    if (!isTelegramBotAdminChat(chatId)) {
+      await sendTelegramPayload({ chatId, text: "⛔ Только для стаффа." }).catch(() => {});
+      return;
+    }
+    const ticketNumber = Number(text.replace(/^\/\S+\s+/, "").trim());
+    if (!ticketNumber) {
+      await sendTelegramPayload({ chatId, text: "Формат: /close <номер тикета>" }).catch(() => {});
+      return;
+    }
+    const staffName = firstName || username || "Staff";
+    let updatedTicket = null;
+
+    withAdminContentUpdate((draft) => {
+      const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+      const index = items.findIndex((t) => Number(t?.number || 0) === ticketNumber);
+      if (index < 0) return draft;
+      const now = new Date().toISOString();
+      updatedTicket = { ...items[index], status: "closed", updatedAt: now, closedAt: now, unreadByOwner: Number(items[index]?.unreadByOwner || 0) + 1 };
+      items[index] = updatedTicket;
+      draft.tickets = items;
+      return draft;
+    });
+
+    if (!updatedTicket) {
+      await sendTelegramPayload({ chatId, text: `❌ Тикет #${ticketNumber} не найден.` }).catch(() => {});
+      return;
+    }
+
+    await sendTelegramPayload({ chatId, text: `✅ Тикет #${ticketNumber} закрыт.` }).catch(() => {});
+
+    const ownerChatId = normalizeAdminText(updatedTicket?.telegramChatId || updatedTicket?.owner?.telegramChatId || "");
+    if (ownerChatId) {
+      await sendTelegramPayload({ chatId: ownerChatId, text: `📋 Ваш тикет #${updatedTicket.number} закрыт стаффом. Если вопрос не решён — создайте новый тикет.` }).catch(() => {});
+    }
     return;
   }
 
@@ -28673,15 +28792,23 @@ app.post("/api/discord-bot/tickets/:id/status", express.json({ limit: "1mb" }), 
     return;
   }
 
-  const botSettings = getTelegramBotSettingsStore();
+  const botSettings = getDiscordBotSettingsStore();
   if (botSettings?.sync?.tickets === false) {
     res.status(409).json({ error: "Ticket sync is disabled" });
     return;
   }
 
-  const actor = resolveTelegramBotTicketActor(req);
+  const rawActor = req.body?.actor && typeof req.body.actor === "object" ? req.body.actor : {};
+  const actor = {
+    pilotId: Number(rawActor?.pilotId || 0) || null,
+    discordId: normalizeAdminText(rawActor?.discordId || "") || null,
+    username: normalizeAdminText(rawActor?.username || "") || "discord-user",
+    name: normalizeAdminText(rawActor?.name || rawActor?.username || "") || "Discord User",
+    isAdmin: Boolean(rawActor?.isAdmin || req.body?.isAdmin),
+    provider: "discord",
+  };
   if (!actor?.isAdmin && !actor?.pilotId) {
-    res.status(404).json({ error: "not_linked", message: "Pilot not found. Link your Telegram account first via the dashboard." });
+    res.status(403).json({ error: "not_authorized", message: "Only admins or ticket owners can update ticket status." });
     return;
   }
 
