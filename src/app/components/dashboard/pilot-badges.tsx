@@ -110,22 +110,22 @@ export function PilotBadges() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-[#1d1d1f]">{t("badges.title")}</h1>
-        <p className="mt-1 text-sm text-gray-500">{t("badges.subtitle")}</p>
+        <h1 className="text-2xl font-bold text-[#1d1d1f] dark:text-zinc-100">{t("badges.title")}</h1>
+        <p className="mt-1 text-sm text-gray-500 dark:text-zinc-400">{t("badges.subtitle")}</p>
       </div>
 
       {isLoading ? (
-        <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-200 bg-white text-sm text-gray-500">
+        <div className="flex min-h-[240px] items-center justify-center gap-2 rounded-2xl border border-dashed border-gray-200 bg-white text-sm text-gray-500 dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-400">
           <Loader2 className="h-4 w-4 animate-spin" />
           {t("badges.loading")}
         </div>
       ) : badges.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-gray-200 bg-white px-5 py-10 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 text-gray-500">
+        <div className="rounded-2xl border border-dashed border-gray-200 bg-white px-5 py-10 text-center dark:border-white/10 dark:bg-zinc-900">
+          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-zinc-400">
             <Award className="h-7 w-7" />
           </div>
-          <div className="font-semibold text-[#1d1d1f]">{t("badges.empty")}</div>
-          <div className="mt-1 text-sm text-gray-500">{t("badges.emptyDesc")}</div>
+          <div className="font-semibold text-[#1d1d1f] dark:text-zinc-100">{t("badges.empty")}</div>
+          <div className="mt-1 text-sm text-gray-500 dark:text-zinc-400">{t("badges.emptyDesc")}</div>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -155,7 +155,7 @@ export function PilotBadges() {
                 <div>
                   {t("badges.earnedAt")}: {formatDateTime(badge.awardedAt)}
                 </div>
-                <Badge variant="outline" className="bg-white">
+                <Badge variant="outline" className="bg-white dark:border-white/10 dark:bg-zinc-800 dark:text-zinc-300">
                   {badge.source === "operations" ? "vAMSYS" : "Nordwind"}
                 </Badge>
               </CardContent>

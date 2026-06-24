@@ -118,6 +118,7 @@ type MenuItem = {
   children?: Array<{
     view: string;
     label: string;
+    page?: string;
   }>;
 };
 
@@ -190,7 +191,7 @@ export function AdminLayout() {
         label: tr("Операции", "Operations"),
         items: [
           { page: "pilots", icon: Users, label: t("admin.nav.pilots") },
-          { page: "bookings", icon: ClipboardList, label: tr("Бронирования", "Bookings") },
+          { page: "bookings", icon: ClipboardList, label: tr("Букинги", "Bookings") },
           { page: "hubs", icon: MapPinned, label: tr("Хабы", "Hubs") },
           { page: "airports", icon: Building2, label: tr("Аэропорты", "Airports") },
           { page: "fleet", icon: Plane, label: t("admin.nav.fleet") },
@@ -206,9 +207,9 @@ export function AdminLayout() {
               { view: "rosters", label: tr("Ростеры", "Rosters") },
               { view: "curated-rosters", label: tr("Кураторские ростеры", "Curated Rosters") },
               { view: "community", label: tr("Цели и челленджи сообщества", "Community Goals & Challenges") },
+              { view: "slotted-events", label: tr("Слотовые ивенты", "Slotted Events"), page: "slotted-events" },
             ],
           },
-          { page: "slotted-events", icon: CalendarDays, label: tr("Слотовые ивенты", "Slotted Events") },
           { page: "documents", icon: FileText, label: t("admin.nav.documents") },
         ],
       },
@@ -397,12 +398,13 @@ export function AdminLayout() {
                             {isItemOpen ? (
                               <div className="ml-2 space-y-1 border-l border-gray-800/80 pl-3">
                                 {item.children?.map((child) => {
-                                  const isChildActive = activePage === item.page && currentView === child.view;
+                                  const childPage = child.page || item.page;
+                                  const isChildActive = activePage === childPage && (child.page ? true : currentView === child.view);
                                   return (
                                     <button
                                       key={child.view}
                                       type="button"
-                                      onClick={() => { setActivePage(item.page); setActiveId(0); navigate(`/admin?page=${item.page}&view=${child.view}`); }}
+                                      onClick={() => { setActivePage(childPage); setActiveId(0); navigate(child.page ? `/admin?page=${child.page}` : `/admin?page=${item.page}&view=${child.view}`); }}
                                       style={isChildActive ? { backgroundColor: primaryColor } : undefined}
                                       className={`flex w-full items-center gap-3 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                                         isChildActive ? "text-white shadow-md" : "text-gray-400 hover:bg-gray-800 hover:text-white"

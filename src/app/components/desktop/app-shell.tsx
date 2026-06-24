@@ -232,12 +232,24 @@ export function AppShell() {
     };
   }, [isAuthenticated]);
 
-  const dark = isDark ? "dark" : "";
+  // Sync dark class on <html> so dark: Tailwind variants work everywhere,
+  // including portals (dialogs, dropdowns) rendered outside this div.
+  useEffect(() => {
+    if (isDark) {
+      document.documentElement.classList.add("dark");
+    } else {
+      document.documentElement.classList.remove("dark");
+    }
+    return () => {
+      document.documentElement.classList.remove("dark");
+    };
+  }, [isDark]);
+
   const ctrlBtn =
     "rounded-md p-1.5 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/5 dark:hover:text-zinc-100";
 
   return (
-    <div className={`${dark} flex h-screen flex-col overflow-hidden bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100`}>
+    <div className="flex h-screen flex-col overflow-hidden bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
       {/* Кастомный заголовок окна (drag-зона). relative z-50 — чтобы выпадающее меню профиля
           было поверх баннера NOTAM и контента (хедер с backdrop-blur — отдельный stacking-контекст). */}
       <header

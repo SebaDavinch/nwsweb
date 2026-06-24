@@ -67,7 +67,7 @@ export function AdminBookingsPage() {
       const payload = response.ok ? await response.json() : { bookings: [] };
       setBookings(Array.isArray(payload?.bookings) ? payload.bookings : []);
     } catch (error) {
-      console.error("Не удалось загрузить бронирования админки", error);
+      console.error("Не удалось загрузить букинги админки", error);
       setBookings([]);
     } finally {
       setIsLoading(false);
@@ -124,8 +124,8 @@ export function AdminBookingsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900">{tr("Бронирования", "Bookings")}</h2>
-        <p className="text-sm text-gray-500">{tr("Проверяйте поток бронирований и отмечайте операционные приоритеты.", "Review booking flow and mark operational priorities.")}</p>
+        <h2 className="text-2xl font-bold text-gray-900">{tr("Букинги", "Bookings")}</h2>
+        <p className="text-sm text-gray-500">{tr("Проверяйте поток букингов и отмечайте операционные приоритеты.", "Review booking flow and mark operational priorities.")}</p>
       </div>
 
       <Card className="border-none shadow-sm">
@@ -133,7 +133,7 @@ export function AdminBookingsPage() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
             <div className="relative w-full xl:max-w-sm">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <Input className="pl-9" placeholder={tr("Поиск бронирований...", "Search bookings...")} value={search} onChange={(event) => setSearch(event.target.value)} />
+              <Input className="pl-9" placeholder={tr("Поиск букингов...", "Search bookings...")} value={search} onChange={(event) => setSearch(event.target.value)} />
             </div>
             <div className="flex flex-col gap-3 sm:flex-row">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -166,7 +166,7 @@ export function AdminBookingsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>{tr("Пилот", "Pilot")}</TableHead>
-                  <TableHead>{tr("Бронирование", "Booking")}</TableHead>
+                  <TableHead>{tr("Букинг", "Booking")}</TableHead>
                   <TableHead>{tr("Рейс", "Flight")}</TableHead>
                   <TableHead>{tr("Метаданные", "Metadata")}</TableHead>
                   <TableHead className="text-right">{tr("Действия", "Actions")}</TableHead>
@@ -175,11 +175,11 @@ export function AdminBookingsPage() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">{tr("Загрузка бронирований...", "Loading bookings...")}</TableCell>
+                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">{tr("Загрузка букингов...", "Loading bookings...")}</TableCell>
                   </TableRow>
                 ) : filteredBookings.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">{tr("Бронирования не найдены.", "No bookings found.")}</TableCell>
+                    <TableCell colSpan={5} className="py-10 text-center text-gray-500">{tr("Букинги не найдены.", "No bookings found.")}</TableCell>
                   </TableRow>
                 ) : (
                   filteredBookings.map((booking) => (
@@ -223,7 +223,7 @@ export function AdminBookingsPage() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>{tr("Изменение метаданных бронирования", "Edit booking metadata")}</DialogTitle>
+            <DialogTitle>{tr("Изменение метаданных букинга", "Edit booking metadata")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-4 py-2 md:grid-cols-2">
             <div className="space-y-2">

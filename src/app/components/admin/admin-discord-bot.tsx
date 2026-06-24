@@ -167,7 +167,7 @@ export function AdminDiscordBot() {
   ];
 
   const NOTIFICATION_FIELDS: Array<{ key: keyof DiscordBotSettings["notifications"]; label: string; description: string }> = [
-    { key: "bookingCreated", label: tr("Бронь создана", "Booking created"), description: tr("Пилот создал бронирование.", "A pilot created a booking.") },
+    { key: "bookingCreated", label: tr("Букинг создан", "Booking created"), description: tr("Пилот создал букинг.", "A pilot created a booking.") },
     { key: "flightTakeoff", label: tr("Рейс взлетел", "Flight departed"), description: tr("Уведомление о вылете.", "Departure notification.") },
     { key: "flightLanding", label: tr("Рейс приземлился", "Flight landed"), description: tr("Уведомление о прибытии.", "Arrival notification.") },
     { key: "pirepReview", label: tr("Проверка PIREP", "PIREP review"), description: tr("Новый элемент в очереди проверки.", "New item in the review queue.") },

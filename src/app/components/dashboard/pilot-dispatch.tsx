@@ -404,10 +404,10 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
       if (!res.ok) throw new Error(p?.error || tr("Не удалось создать бронь", "Booking failed"));
       addNotification({
         category: "booking",
-        title: tr("Бронь создана", "Booking created"),
+        title: tr("Букинг создан", "Booking created"),
         description: `${selectedRoute.flightNumber || selectedRoute.callsign} · ${selectedRoute.fromCode} → ${selectedRoute.toCode}`,
       });
-      toast.success(tr("Рейс забронирован", "Flight booked"));
+      toast.success(tr("Букинг создан", "Flight booked"));
       navigate(bookingsTo);
     } catch (e) {
       toast.error(String(e instanceof Error ? e.message : e));
@@ -693,7 +693,7 @@ export function PilotDispatch({ variant = "site" }: { variant?: "site" | "app" }
                   onClick={() => void dispatchBooking()}
                 >
                   {submitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlaneTakeoff className="mr-2 h-4 w-4" />}
-                  {tr("Подтвердить и забронировать", "Confirm & book")}
+                  {tr("Подтвердить и создать букинг", "Confirm & book")}
                 </Button>
               </div>
             ) : (

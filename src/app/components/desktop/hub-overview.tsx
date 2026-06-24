@@ -186,7 +186,7 @@ export function HubOverview({
   };
 
   return (
-    <div className={`${isDark ? "dark text-zinc-100" : "text-zinc-900"} relative min-h-full`}>
+    <div className="relative min-h-full text-zinc-900 dark:text-zinc-100">
       {/* Фон Главной: ротация фото бортов Nordwind (затемнённое в тёмной теме, осветлённое в светлой) */}
       <div className="pointer-events-none absolute inset-0">
         <div className={`absolute inset-0 ${isDark ? "bg-zinc-950" : "bg-zinc-100"}`} />

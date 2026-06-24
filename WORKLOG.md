@@ -5,6 +5,69 @@
 
 ---
 
+## 2026-06-24 (сессия 10)
+
+### Аудит и фикс тёмной темы NordwindHub
+
+Проверены все компоненты десктоп-приложения и переиспользуемые dashboard-компоненты на отсутствие `dark:` вариантов. Зафиксировано:
+
+- **`app-ofp.tsx`** — iframe и raw-HTML OFP viewer: `bg-white` → `dark:bg-zinc-900`, текст `dark:text-zinc-200`.
+- **`pilot-balance.tsx`** — заголовок, описание, карточки «Как зарабатывать», «Начислено», иконки транзакций, тизер магазина — добавлены `dark:` классы по всему компоненту.
+- **`pilot-badges.tsx`** — состояния загрузки/пусто, Badge-чип источника — добавлены `dark:` классы.
+- **`notification-center.tsx`** — карточки уведомлений (прочитанные/новые) и staff-тикетов — `dark:bg-zinc-900/dark:border-*`.
+- **`my-flights.tsx`** — состояния загрузки/пусто и карточки бронирований — `dark:bg-zinc-900/dark:border-*`.
+
+Не требуют правок (намеренно светлые): admin-панель (`admin-layout.tsx` — light-only by design), `pilot-achievements.tsx` (website-only, не используется в хабе).
+
+---
+
+## 2026-06-22 (сессия 9)
+
+### Фиксы UI: тема NordwindHub, PIREPs, быстрый доступ, UTC+AIRAC
+
+**Тема десктоп-приложения (NordwindHub):**
+- `app-shell.tsx` — класс `dark` теперь вешается на `document.documentElement`, а не на внутренний `<div>`. Исправляет: все вкладки хаба не реагировали на переключатель темы; Radix-порталы (диалоги, дропдауны) не получали тёмную тему. `cleanup` убирает `.dark` при размонтировании.
+- `hub-overview.tsx` — удалён ручной `${isDark ? "dark ..." : "..."}` костыль, заменён стандартными `dark:` классами Tailwind.
+
+**Быстрый доступ (admin-quick-access.tsx):**
+- Убраны большие карточки с описанием, стрелками и подписью «ОТКРЫТЬ РАЗДЕЛ».
+- Режим по умолчанию — компактные пилюли (иконка + подпись); режим «Иконки» — квадратные кнопки 9×9 с `title`.
+- UTC-часы + AIRAC встроены в хедер панели как один чип с разделителем; убраны из отдельного блока в дашборде.
+- `CardHeader` с описанием удалён, заменён минималистичной строкой.
+- `admin-dashboard.tsx` — удалены `UtcClockValue`, `formatUtcClock`, `getAiracInfo`, `formatAiracDate`, state `utcNow`/`airac`, виджет UTC+AIRAC.
+
+**PIREPs — бесконечная загрузка (admin-pireps.tsx):**
+- `loadPireps`, `loadPirep`, `loadPositionReports`, `loadTouchdowns` — удалён `tr` из зависимостей `useCallback`. `tr` — новая функция при каждом рендере → `loadPireps` пересоздавался → `useEffect` срабатывал снова → `setIsLoading(true)` → бесконечный цикл.
+
+**Релизы:** `website-release-20260622-091813.zip`, `website-release-20260622-093624.zip`, `website-release-20260622-111731.zip`, `website-release-20260622-113907.zip`, `website-release-20260622-134953.zip`, `website-release-20260622-135445.zip`
+
+---
+
+## 2026-06-21 (сессия 8)
+
+### Публикационные слайдеры + VK-превью во всех формах создания/редактирования
+
+**Цель:** заменить чекбоксы на Switch-слайдеры Discord/Telegram/VK в формах Новость, NOTAM/Alert (через NewsForm) и Ивент; добавить live VK-превью при включённом ВКонтакте.
+
+**Фронт:**
+
+- `news-form.tsx` — удалены два `<Checkbox>`, добавлены Switch-слайдеры Discord/Telegram/VK в единый блок «Публикация»; добавлен `sendToTelegram` в state + `NewsFormData`; live VK-превью (псевдо-пост с аватаркой N) показывается при `sendToVK=true`.
+- `admin-news.tsx` — `sendToTelegram` пробрасывается в fetch для News, NOTAM и Alert.
+- `admin-notams.tsx` — добавлены `sendToTelegram`/`sendToVK` в форму и body; заменены оба чекбокса на Switch-слайдеры три канала + VK-превью.
+- `admin-activities.tsx` — добавлено поле `sendToTelegram` в список полей AdminContentManager.
+- `admin-events.tsx` — Switch-слайдеры Discord/Telegram/VK + VK-превью (парсит JSON name/description) добавлены в диалог создания/редактирования ивента vAMSYS.
+
+**Сервер (`server/index.js`):**
+
+- NOTAM POST/PUT: Telegram и VK теперь per-post (`sendToTelegram`/`sendToVK` из body обязательны плюс глобальные настройки).
+- Alert POST/PUT: то же самое для Telegram и VK.
+- Activities POST/PUT (`/api/admin/content/:collection`): Telegram теперь проверяет `sendToTelegram` per-post.
+- Activities vAMSYS POST/PUT (`/api/admin/activities/:section`): добавлены блоки Discord/Telegram/VK (поля стрипаются из vAMSYS body перед отправкой).
+
+**Релиз:** `artifacts/website-release-20260621-172537.zip` (менялся `server/index.js` — нужен рестарт API).
+
+---
+
 ## 2026-06-20 (сессия 6)
 
 ### AI-ассистент — Claude API + Telegram auto-reply + эскалация

@@ -132,10 +132,10 @@ const NotificationCard = ({
   const Icon = meta.icon;
 
   return (
-    <Card className={`border shadow-none transition-colors ${item.isRead ? "bg-white" : "border-red-100 bg-[#fff7f7]"}`}>
+    <Card className={`border shadow-none transition-colors ${item.isRead ? "bg-white dark:border-white/10 dark:bg-zinc-900" : "border-red-100 bg-[#fff7f7] dark:border-red-500/20 dark:bg-red-500/5"}`}>
       <CardContent className="p-4">
         <div className="flex items-start gap-3">
-          <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white ${meta.accentClass}`}>
+          <div className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white dark:bg-zinc-800 ${meta.accentClass}`}>
             <Icon className="h-5 w-5" />
           </div>
           <div className="min-w-0 flex-1">
@@ -486,10 +486,10 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
                   ) : (
                     <div className="space-y-3">
                       {staffTickets.map((item) => (
-                        <Card key={item.id} className={`border shadow-none ${item.unreadCount > 0 ? "border-sky-100 bg-sky-50/60" : "bg-white"}`}>
+                        <Card key={item.id} className={`border shadow-none ${item.unreadCount > 0 ? "border-sky-100 bg-sky-50/60 dark:border-sky-500/20 dark:bg-sky-500/5" : "bg-white dark:border-white/10 dark:bg-zinc-900"}`}>
                           <CardContent className="p-4">
                             <div className="flex items-start gap-3">
-                              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-sky-600">
+                              <div className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-sky-600 dark:bg-zinc-800">
                                 <MessageSquareWarning className="h-5 w-5" />
                               </div>
                               <div className="min-w-0 flex-1">

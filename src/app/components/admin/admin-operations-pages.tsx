@@ -2890,13 +2890,13 @@ export function AdminBookingsManagement() {
     try {
       const response = await fetch(`/api/admin/bookings/${bookingId}`, { credentials: "include" });
       if (!response.ok) {
-        throw new Error(tr("Не удалось загрузить детали бронирования", "Failed to load booking details"));
+        throw new Error(tr("Не удалось загрузить детали букинга", "Failed to load booking details"));
       }
       const payload = (await response.json().catch(() => null)) as AdminBookingDetailPayload | null;
       setBookingDetail(payload || null);
     } catch (error) {
       console.error("Failed to load booking details", error);
-      toast.error(tr("Не удалось загрузить детали бронирования", "Failed to load booking details"));
+      toast.error(tr("Не удалось загрузить детали букинга", "Failed to load booking details"));
       setBookingDetail(null);
     } finally {
       setIsBookingDetailLoading(false);
@@ -2906,8 +2906,8 @@ export function AdminBookingsManagement() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-800">{tr("Бронирования", "Bookings")}</h2>
-        <p className="text-sm text-gray-500">{tr("Проверка текущих бронирований, admin-тегов и приоритетных рейсов.", "Review current bookings, admin tags and priority flights.")}</p>
+        <h2 className="text-2xl font-bold text-gray-800">{tr("Букинги", "Bookings")}</h2>
+        <p className="text-sm text-gray-500">{tr("Проверка текущих букингов, admin-тегов и приоритетных рейсов.", "Review current bookings, admin tags and priority flights.")}</p>
       </div>
 
       <Card className="border-none shadow-sm">
@@ -2915,7 +2915,7 @@ export function AdminBookingsManagement() {
           <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
             <div className="relative w-full xl:max-w-md">
               <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr("Поиск бронирований...", "Search bookings...")} className="pl-9" />
+              <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr("Поиск букингов...", "Search bookings...")} className="pl-9" />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full xl:w-48"><SelectValue placeholder={tr("Статус", "Status")} /></SelectTrigger>
@@ -2952,7 +2952,7 @@ export function AdminBookingsManagement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {isLoading ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Загрузка бронирований...</td></tr> : null}
+                {isLoading ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Загрузка букингов...</td></tr> : null}
                 {!isLoading ? filteredBookings.map((booking) => (
                   <tr key={booking.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3"><div className="font-medium text-gray-900">{booking.pilotName}</div><div className="text-xs text-gray-500">{booking.pilotUsername}</div></td>
@@ -2973,7 +2973,7 @@ export function AdminBookingsManagement() {
                     </td>
                   </tr>
                 )) : null}
-                {!isLoading && filteredBookings.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Бронирования не найдены.</td></tr> : null}
+                {!isLoading && filteredBookings.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Букинги не найдены.</td></tr> : null}
               </tbody>
             </table>
           </div>
@@ -2983,7 +2983,7 @@ export function AdminBookingsManagement() {
       <Dialog open={Boolean(editingBooking)} onOpenChange={(open) => !open && setEditingBooking(null)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
-            <DialogTitle>Изменение метаданных бронирования</DialogTitle>
+            <DialogTitle>Изменение метаданных букинга</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -3016,16 +3016,16 @@ export function AdminBookingsManagement() {
       <Dialog open={Boolean(viewingBookingId)} onOpenChange={(open) => !open && setViewingBookingId(null)}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Детали бронирования</DialogTitle>
+            <DialogTitle>Детали букинга</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {isBookingDetailLoading ? (
               <div className="flex items-center gap-2 text-sm text-gray-500">
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Загрузка деталей бронирования...
+                Загрузка деталей букинга...
               </div>
             ) : !bookingDetail ? (
-              <div className="text-sm text-gray-500">Детали бронирования недоступны.</div>
+              <div className="text-sm text-gray-500">Детали букинга недоступны.</div>
             ) : (
               <>
                 <div className="grid gap-3 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm md:grid-cols-3">

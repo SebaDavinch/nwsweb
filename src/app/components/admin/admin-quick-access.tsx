@@ -22,7 +22,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -100,6 +100,29 @@ interface AdminQuickAccessConfig {
   items: AdminQuickAccessItem[];
 }
 
+// ── UTC clock + AIRAC ──────────────────────────────────────────────────────
+const AIRAC_EPOCH_MS = Date.UTC(2024, 0, 18);
+const AIRAC_CYCLE_MS = 28 * 24 * 60 * 60 * 1000;
+
+function getAiracInfo(now = new Date()) {
+  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  const n = Math.floor((todayMs - AIRAC_EPOCH_MS) / AIRAC_CYCLE_MS);
+  const startMs = AIRAC_EPOCH_MS + n * AIRAC_CYCLE_MS;
+  const start = new Date(startMs);
+  const end = new Date(startMs + AIRAC_CYCLE_MS - 86400000);
+  const yr = start.getUTCFullYear();
+  const n0 = Math.ceil((Date.UTC(yr, 0, 1) - AIRAC_EPOCH_MS) / AIRAC_CYCLE_MS);
+  const ident = `${String(yr).slice(-2)}${String(n - n0 + 1).padStart(2, "0")}`;
+  const fmt = (d: Date) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+  return { ident, label: `${fmt(start)} – ${fmt(end)}` };
+}
+
+function utcHHMM() {
+  const d = new Date();
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+// ── Storage keys ───────────────────────────────────────────────────────────
 const ADMIN_QUICK_ACCESS_STORAGE_KEY = "admin_dashboard_quick_access_v2";
 const ADMIN_QUICK_ACCESS_LEGACY_STORAGE_KEY = "admin_dashboard_quick_access_v1";
 const ADMIN_QUICK_ACCESS_EVENT = "admin-quick-access-updated";
@@ -138,9 +161,9 @@ const ADMIN_QUICK_LINK_PRESETS: QuickLinkPreset[] = [
   },
   {
     id: "bookings",
-    label: "Бронирования",
+    label: "Букинги",
     labelEn: "Bookings",
-    description: "Проверить и скорректировать метаданные бронирований.",
+    description: "Проверить и скорректировать метаданные букингов.",
     descriptionEn: "Review and adjust booking metadata.",
     icon: ClipboardList,
     colorClass: "bg-orange-50 text-orange-700",
@@ -530,22 +553,24 @@ function useAdminQuickAccess() {
 function QuickAccessLinkWrapper({
   item,
   className,
+  title,
   children,
 }: {
   item: ResolvedQuickAccessItem;
   className?: string;
+  title?: string;
   children: React.ReactNode;
 }) {
   if (item.isExternal) {
     return (
-      <a href={item.url} target="_blank" rel="noreferrer" className={className}>
+      <a href={item.url} target="_blank" rel="noreferrer" className={className} title={title}>
         {children}
       </a>
     );
   }
 
   return (
-    <Link to={item.url} className={className}>
+    <Link to={item.url} className={className} title={title}>
       {children}
     </Link>
   );
@@ -714,13 +739,17 @@ export function AdminQuickAccessPanel() {
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [compactMode, setCompactMode] = useState(false);
+  const [utcTime, setUtcTime] = useState(utcHHMM);
+  const airac = useMemo(() => getAiracInfo(), []);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
-    const raw = window.localStorage.getItem(ADMIN_QUICK_ACCESS_COMPACT_KEY);
-    setCompactMode(raw === "1");
+    if (typeof window === "undefined") return;
+    setCompactMode(window.localStorage.getItem(ADMIN_QUICK_ACCESS_COMPACT_KEY) === "1");
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setUtcTime(utcHHMM()), 15000);
+    return () => window.clearInterval(id);
   }, []);
 
   const handleToggleCompactMode = () => {
@@ -736,87 +765,87 @@ export function AdminQuickAccessPanel() {
   return (
     <>
       <Card className="shadow-sm">
-        <CardHeader className="gap-4">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <CardTitle className="text-lg font-semibold text-gray-800">{tr("Быстрый доступ", "Quick Access")}</CardTitle>
-              <p className="mt-1 text-sm text-gray-500">{tr("Закрепите часто используемые разделы админки и добавьте свои внутренние или внешние ссылки.", "Pin frequently used admin sections and add your own internal or external links.")}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs text-gray-600">{quickAccess.resolvedItems.length} {tr("активных ссылок", "active links")}</span>
-              <Button variant="outline" onClick={handleToggleCompactMode}>
-                <Grip className="mr-2 h-4 w-4" />
-                {compactMode ? tr("Развёрнуто", "Expanded") : tr("Компактно", "Compact")}
-              </Button>
-              <Button variant="outline" onClick={() => setDialogOpen(true)}>
-                <Pin className="mr-2 h-4 w-4" />
-                {tr("Настроить", "Customize")}
-              </Button>
-            </div>
+        <div className="flex items-center justify-between px-4 pt-3 pb-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-gray-800">{tr("Быстрый доступ", "Quick Access")}</span>
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-500">
+              {quickAccess.resolvedItems.length}
+            </span>
           </div>
-        </CardHeader>
-        <CardContent className="px-4 pb-4">
+          <div className="flex items-center gap-1.5">
+            {/* UTC + AIRAC — компактный чип */}
+            <div className="flex items-center divide-x divide-gray-200 overflow-hidden rounded-lg border border-gray-200 bg-white text-[11px]">
+              <div className="px-2.5 py-1.5 text-center">
+                <div className="font-bold tabular-nums leading-none text-gray-800">{utcTime}</div>
+                <div className="mt-0.5 font-medium uppercase tracking-widest leading-none text-gray-400">UTC</div>
+              </div>
+              <div className="px-2.5 py-1.5">
+                <div className="font-semibold leading-none text-gray-700">AIRAC {airac.ident}</div>
+                <div className="mt-0.5 leading-none text-gray-400">{airac.label}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleCompactMode}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <Grip className="h-3.5 w-3.5" />
+              {compactMode ? tr("Подписи", "Labels") : tr("Иконки", "Icons")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setDialogOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-2.5 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50"
+            >
+              <Pin className="h-3.5 w-3.5" />
+              {tr("Настроить", "Customize")}
+            </button>
+          </div>
+        </div>
+        <div className="px-4 pb-3">
           {quickAccess.resolvedItems.length > 0 ? (
-            <div className="flex gap-2.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-200">
-                {quickAccess.resolvedItems.map((item, index) => {
+            <div className="flex gap-1.5 overflow-x-auto scrollbar-thin scrollbar-thumb-gray-200">
+              {quickAccess.resolvedItems.map((item) => {
                 const Icon = item.icon;
-                return (
-                  <div
-                    key={item.id}
-                    className={`flex shrink-0 w-44 flex-col rounded-xl border border-gray-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-md ${compactMode ? "p-2.5" : "p-3"}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className={`rounded-lg p-1.5 ${item.colorClass}`}>
-                        <Icon className="h-3.5 w-3.5" />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          onClick={() => quickAccess.moveItem(item.id, "left")}
-                          disabled={index === 0}
-                          aria-label={`Move ${item.label} left`}
-                        >
-                          <ArrowLeft className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-7 w-7 shrink-0"
-                          onClick={() => quickAccess.moveItem(item.id, "right")}
-                          disabled={index === quickAccess.resolvedItems.length - 1}
-                          aria-label={`Move ${item.label} right`}
-                        >
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </Button>
-                        <ExternalLink className="h-3.5 w-3.5 text-gray-300" />
-                      </div>
-                    </div>
-                    <QuickAccessLinkWrapper item={item} className="mt-3 flex min-h-0 flex-1 flex-col">
-                      <div className="text-sm font-semibold leading-snug text-gray-900">{language === "ru" ? item.label : item.labelEn}</div>
-                      {!compactMode ? <div className="mt-1.5 text-xs leading-4 text-gray-500">{language === "ru" ? item.description : item.descriptionEn}</div> : null}
-                      <div className="mt-auto pt-3 text-[10px] font-medium uppercase tracking-[0.18em] text-gray-400">
-                        {item.isExternal ? tr("Внешний инструмент", "External tool") : tr("Открыть раздел", "Open section")}
+                const label = language === "ru" ? item.label : item.labelEn;
+                if (compactMode) {
+                  return (
+                    <QuickAccessLinkWrapper
+                      key={item.id}
+                      item={item}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-gray-100 bg-white shadow-sm transition-all hover:border-gray-200 hover:shadow-md"
+                      title={label}
+                    >
+                      <div className={`flex items-center justify-center rounded-lg p-1.5 ${item.colorClass}`}>
+                        <Icon className="h-4 w-4" />
                       </div>
                     </QuickAccessLinkWrapper>
-                  </div>
+                  );
+                }
+                return (
+                  <QuickAccessLinkWrapper
+                    key={item.id}
+                    item={item}
+                    className="flex shrink-0 items-center gap-2 rounded-xl border border-gray-100 bg-white px-3 py-2 shadow-sm transition-all hover:border-gray-200 hover:shadow-md"
+                  >
+                    <div className={`rounded-lg p-1.5 ${item.colorClass}`}>
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <span className="whitespace-nowrap text-sm font-semibold text-gray-800">{label}</span>
+                    {item.isExternal && <ExternalLink className="h-3 w-3 shrink-0 text-gray-400" />}
+                  </QuickAccessLinkWrapper>
                 );
               })}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-6 py-8 text-center">
-              <div className="text-base font-medium text-gray-800">{tr("Быстрый доступ пуст", "Quick access is empty")}</div>
-              <div className="mt-1 text-sm text-gray-500">{tr("Закрепите нужные разделы админки или добавьте свои ссылки для личной панели управления.", "Pin the admin sections you need or add custom links for your personal dashboard.")}</div>
-              <Button className="mt-4" onClick={() => setDialogOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                {tr("Настроить быстрый доступ", "Customize quick access")}
-              </Button>
+            <div className="rounded-xl border border-dashed border-gray-200 px-4 py-5 text-center">
+              <div className="text-sm text-gray-500">{tr("Быстрый доступ пуст", "Quick access is empty")}</div>
+              <button type="button" onClick={() => setDialogOpen(true)} className="mt-1.5 text-xs font-medium text-red-500 hover:text-red-600">
+                {tr("Настроить", "Customize")}
+              </button>
             </div>
           )}
-        </CardContent>
+        </div>
       </Card>
       <QuickAccessManageDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </>

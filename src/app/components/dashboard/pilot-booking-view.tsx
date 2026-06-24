@@ -587,7 +587,7 @@ export function PilotBookingView() {
 
       const cancelledCount = Number(payload?.cancelledCount || 0) || 1;
       if (cancelledCount > 1) {
-        toast.success(`Бронирование отменено вместе с цепочкой (${cancelledCount} шт.)`);
+        toast.success(`Букинг отменён вместе с цепочкой (${cancelledCount} шт.)`);
       } else {
         toast.success(t("bookings.toast.cancelSuccess"));
       }
@@ -748,7 +748,7 @@ export function PilotBookingView() {
       <div className="sticky top-0 z-20 flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
         <Button variant="ghost" size="sm" onClick={() => navigate("/dashboard?tab=my-flights")}>
           <ArrowLeft className="mr-2 h-4 w-4" />
-          К бронированиям
+          К букингам
         </Button>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => window.location.reload()}>
@@ -1017,7 +1017,7 @@ export function PilotBookingView() {
 
                 {/* Booking actions */}
                 <div className="rounded-2xl border border-gray-200 bg-white shadow-sm px-5 py-4">
-                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">Действия с бронированием</div>
+                  <div className="text-[11px] uppercase tracking-widest text-gray-400 mb-3">Действия с букингом</div>
                   <div className="space-y-2">
                     {/* Phoenix dispatch — opens vAMSYS dispatch which pre-files to VATSIM */}
                     <Button
@@ -1085,19 +1085,19 @@ export function PilotBookingView() {
                       <AlertDialogTrigger asChild>
                         <Button variant="destructive" className="w-full justify-start" disabled={isCancelling}>
                           {isCancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash2 className="mr-2 h-4 w-4" />}
-                          Отменить бронирование
+                          Отменить букинг
                         </Button>
                       </AlertDialogTrigger>
                       <AlertDialogContent>
                         <AlertDialogHeader>
-                          <AlertDialogTitle>Отменить текущее бронирование?</AlertDialogTitle>
+                          <AlertDialogTitle>Отменить текущий букинг?</AlertDialogTitle>
                           <AlertDialogDescription>Это действие необратимо.</AlertDialogDescription>
                         </AlertDialogHeader>
                         {cascadeCancellationCount > 1 && (
                           <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
                             <div className="flex items-center gap-2 font-medium">
                               <AlertTriangle className="h-4 w-4" />
-                              Будет отменена цепочка бронирований
+                              Будет отменена цепочка букингов
                             </div>
                             <div className="mt-1 text-xs text-amber-700">
                               Вместе с текущим отменится ещё {cascadeCancellationCount - 1} по маршруту.
@@ -1124,9 +1124,9 @@ export function PilotBookingView() {
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Отменить и забронировать снова?</AlertDialogTitle>
+                            <AlertDialogTitle>Отменить и создать новый букинг?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Текущее бронирование будет отменено, и вы попадёте сразу к форме нового бронирования на этот же маршрут.
+                              Текущий букинг будет отменён, и вы попадёте сразу к форме нового букинга на этот же маршрут.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
@@ -1211,7 +1211,7 @@ export function PilotBookingView() {
                     ) : (
                       <>
                         <p className="text-xs text-gray-400 mb-2">
-                          Создайте план в SimBrief для этого рейса, затем нажмите «Связать» — vAMSYS привяжет последний OFP к бронированию.
+                          Создайте план в SimBrief для этого рейса, затем нажмите «Связать» — vAMSYS привяжет последний OFP к букингу.
                         </p>
                         <Button
                           className="w-full justify-start bg-[#E31E24] text-white hover:bg-[#c21920]"

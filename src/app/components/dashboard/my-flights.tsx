@@ -113,7 +113,7 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
       });
       const p = await res.json().catch(() => null);
       if (!res.ok) {
-        setConnectionMsg(String(p?.error || tr("Не удалось загрузить бронирования", "Failed to load bookings")));
+        setConnectionMsg(String(p?.error || tr("Не удалось загрузить букинги", "Failed to load bookings")));
         setBookings([]);
         return;
       }
@@ -155,7 +155,7 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
       const res = await fetch(`/api/pilot/bookings/${cancelId}`, { method: "DELETE", credentials: "include" });
       const p = await res.json().catch(() => null);
       if (!res.ok) throw new Error(p?.error || "cancel error");
-      toast.success(tr("Бронирование отменено", "Booking cancelled"));
+      toast.success(tr("Букинг отменён", "Booking cancelled"));
       setCancelId(null);
       await loadBookings(true);
     } catch (err) {
@@ -170,7 +170,7 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold text-[#1d1d1f]">{tr("Предстоящие рейсы", "Upcoming flights")}</h2>
-            <p className="mt-0.5 text-sm text-zinc-500">{tr("Активные бронирования и ближайшие вылеты", "Active bookings and scheduled departures")}</p>
+            <p className="mt-0.5 text-sm text-zinc-500">{tr("Активные букинги и ближайшие вылеты", "Active bookings and scheduled departures")}</p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={() => void loadBookings(true)} disabled={isRefreshing}>
@@ -188,23 +188,23 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
         {connectionMsg ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">{connectionMsg}</div>
         ) : isLoadingBookings ? (
-          <div className="flex items-center gap-3 rounded-xl border border-zinc-100 bg-white px-5 py-8 text-sm text-zinc-400 shadow-sm">
+          <div className="flex items-center gap-3 rounded-xl border border-zinc-100 bg-white px-5 py-8 text-sm text-zinc-400 shadow-sm dark:border-white/5 dark:bg-zinc-900">
             <Loader2 className="h-4 w-4 animate-spin" />
-            {tr("Загрузка бронирований…", "Loading bookings…")}
+            {tr("Загрузка букингов…", "Loading bookings…")}
           </div>
         ) : bookings.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-12 text-center shadow-sm">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-zinc-200 bg-white px-6 py-12 text-center shadow-sm dark:border-white/10 dark:bg-zinc-900">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-zinc-100 text-zinc-400">
               <Plane className="h-6 w-6" />
             </div>
             <div>
-              <div className="font-semibold text-zinc-800">{tr("Нет активных бронирований", "No active bookings")}</div>
-              <div className="mt-0.5 text-sm text-zinc-500">{tr("Выберите маршрут и забронируйте рейс", "Choose a route and book a flight")}</div>
+              <div className="font-semibold text-zinc-800">{tr("Нет активных букингов", "No active bookings")}</div>
+              <div className="mt-0.5 text-sm text-zinc-500">{tr("Выберите маршрут и создайте букинг", "Choose a route and book a flight")}</div>
             </div>
             <Button asChild className="mt-1 bg-[#E31E24] text-white hover:bg-[#c21920]">
               <Link to="/dashboard/dispatch">
                 <CalendarPlus className="mr-2 h-4 w-4" />
-                {tr("Забронировать рейс", "Book a flight")}
+                {tr("Создать букинг", "Book a flight")}
               </Link>
             </Button>
           </div>
@@ -213,7 +213,7 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
             {bookings.map((b) => (
               <div
                 key={b.id}
-                className="group flex flex-col gap-3 rounded-2xl border border-zinc-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                className="group flex flex-col gap-3 rounded-2xl border border-zinc-100 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:border-white/5 dark:bg-zinc-900"
               >
                 {/* Row 1: flight + status */}
                 <div className="flex items-center justify-between gap-2">
@@ -311,9 +311,9 @@ export function MyFlights({ onOpenPirep }: MyFlightsProps) {
       <AlertDialog open={cancelId !== null} onOpenChange={(open) => !open && setCancelId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{tr("Отменить бронирование?", "Cancel booking?")}</AlertDialogTitle>
+            <AlertDialogTitle>{tr("Отменить букинг?", "Cancel booking?")}</AlertDialogTitle>
             <AlertDialogDescription>
-              {tr("Это действие нельзя отменить. Бронирование будет удалено.", "This action cannot be undone. The booking will be deleted.")}
+              {tr("Это действие нельзя отменить. Букинг будет удалён.", "This action cannot be undone. The booking will be deleted.")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

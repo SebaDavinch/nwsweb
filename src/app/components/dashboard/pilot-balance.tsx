@@ -47,7 +47,7 @@ export function PilotBalance() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[30vh] items-center justify-center text-sm text-gray-500">
+      <div className="flex min-h-[30vh] items-center justify-center text-sm text-gray-500 dark:text-zinc-400">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
         {tr("Загружаем баланс...", "Loading balance...")}
       </div>
@@ -60,8 +60,8 @@ export function PilotBalance() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-[#1d1d1f]">{tr("Баланс", "Balance")}</h1>
-        <p className="text-sm text-gray-500">{tr("Монетки считаются только по принятым PIREP: отдельно за каждый рейс, по качеству посадки, суточному бонусу, лайкам и участию в ивентах.", "Coins are counted only from accepted PIREPs: per flight, by landing quality, daily bonus, likes and event participation.")}</p>
+        <h1 className="text-2xl font-bold text-[#1d1d1f] dark:text-zinc-100">{tr("Баланс", "Balance")}</h1>
+        <p className="text-sm text-gray-500 dark:text-zinc-400">{tr("Монетки считаются только по принятым PIREP: отдельно за каждый рейс, по качеству посадки, суточному бонусу, лайкам и участию в ивентах.", "Coins are counted only from accepted PIREPs: per flight, by landing quality, daily bonus, likes and event participation.")}</p>
       </div>
 
       {/* Main balance card */}
@@ -82,8 +82,8 @@ export function PilotBalance() {
       </div>
 
       {/* How to earn */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="mb-4 text-base font-semibold text-gray-900">{tr("Как зарабатывать", "How to earn")}</h2>
+      <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-zinc-900">
+        <h2 className="mb-4 text-base font-semibold text-gray-900 dark:text-zinc-100">{tr("Как зарабатывать", "How to earn")}</h2>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {[
             { icon: Plane, label: tr("За мили", "For miles"), amount: "+0.5 / 5 NM", desc: tr("0.1 монеты за каждую морскую милю, только по принятому отдельному PIREP", "0.1 coin for each nautical mile, only for each accepted PIREP") },
@@ -92,13 +92,13 @@ export function PilotBalance() {
             { icon: Heart, label: tr("За лайки", "For likes"), amount: "+1", desc: tr("за каждый лайк под фото, максимум 5 в сутки", "per screenshot like, capped at 5 per day") },
             { icon: TrendingUp, label: tr("За ивенты", "For events"), amount: tr("фикс / xN", "fixed / xN"), desc: tr("для каждого ивента можно задать фикс, множитель, лимит и требование регистрации", "each event can define fixed reward, multiplier, limit and registration dependency") },
           ].map(({ icon: Icon, label, amount, desc }) => (
-            <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-4">
+            <div key={label} className="rounded-xl border border-gray-100 bg-gray-50 p-4 dark:border-white/5 dark:bg-white/5">
               <div className="flex items-center justify-between">
                 <Icon className="h-5 w-5 text-[#E31E24]" />
                 <span className="text-lg font-bold text-emerald-600">{amount}</span>
               </div>
-              <div className="mt-2 text-sm font-medium text-gray-900">{label}</div>
-              <div className="mt-0.5 text-xs text-gray-500">{desc}</div>
+              <div className="mt-2 text-sm font-medium text-gray-900 dark:text-zinc-100">{label}</div>
+              <div className="mt-0.5 text-xs text-gray-500 dark:text-zinc-400">{desc}</div>
             </div>
           ))}
         </div>
@@ -106,21 +106,21 @@ export function PilotBalance() {
 
       {/* Breakdown */}
       {breakdown.length > 0 && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-base font-semibold text-gray-900">{tr("Начислено", "Earned")}</h2>
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-white/10 dark:bg-zinc-900">
+          <h2 className="mb-4 text-base font-semibold text-gray-900 dark:text-zinc-100">{tr("Начислено", "Earned")}</h2>
           <div className="space-y-3">
             {breakdown.map((tx) => {
               const Icon = ICON_MAP[tx.icon] || Coins;
               const isPositive = tx.amount >= 0;
               return (
-                <div key={tx.id} className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-4 py-3">
+                <div key={tx.id} className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 dark:border-white/5 dark:bg-white/5">
                   <div className="flex items-center gap-3">
-                    <div className="rounded-xl bg-white p-2 shadow-sm">
+                    <div className="rounded-xl bg-white p-2 shadow-sm dark:bg-zinc-800">
                       <Icon className="h-4 w-4 text-[#E31E24]" />
                     </div>
                     <div>
-                      <div className="text-sm font-medium text-gray-900">{tx.label}</div>
-                      {tx.detail && <div className="text-xs text-gray-500">{tx.detail}</div>}
+                      <div className="text-sm font-medium text-gray-900 dark:text-zinc-100">{tx.label}</div>
+                      {tx.detail && <div className="text-xs text-gray-500 dark:text-zinc-400">{tx.detail}</div>}
                     </div>
                   </div>
                   <span className={`text-sm font-bold ${isPositive ? "text-emerald-600" : "text-red-600"}`}>
@@ -134,10 +134,10 @@ export function PilotBalance() {
       )}
 
       {/* Shop teaser */}
-      <div className="overflow-hidden rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center">
-        <ShoppingBag className="mx-auto mb-3 h-10 w-10 text-gray-300" />
-        <div className="text-base font-semibold text-gray-500">{tr("Магазин — скоро", "Shop — coming soon")}</div>
-        <p className="mt-2 text-sm text-gray-400">
+      <div className="overflow-hidden rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-8 text-center dark:border-white/10 dark:bg-white/5">
+        <ShoppingBag className="mx-auto mb-3 h-10 w-10 text-gray-300 dark:text-zinc-600" />
+        <div className="text-base font-semibold text-gray-500 dark:text-zinc-400">{tr("Магазин — скоро", "Shop — coming soon")}</div>
+        <p className="mt-2 text-sm text-gray-400 dark:text-zinc-500">
           {tr("Здесь вы сможете обменять монетки на скидки на аддоны, ливреи и другие бонусы.", "Here you'll be able to exchange coins for addon discounts, liveries and other bonuses.")}
         </p>
       </div>

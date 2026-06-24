@@ -31,7 +31,7 @@ export function AppAssistantBubble() {
   }, [open]);
 
   const suggestions = [
-    tr("Как забронировать рейс?", "How do I book a flight?"),
+    tr("Как создать букинг?", "How do I book a flight?"),
     tr("Как завершить полёт в Pegasus?", "How to complete a flight in Pegasus?"),
     tr("Где посмотреть мою статистику?", "Where can I see my stats?"),
   ];

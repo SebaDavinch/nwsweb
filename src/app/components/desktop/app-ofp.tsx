@@ -138,10 +138,10 @@ export function AppOfp({ bookingId, route }: { bookingId: number; route?: string
             {tr("Загрузка OFP…", "Loading OFP…")}
           </div>
         ) : viewerUrl ? (
-          <iframe ref={iframeRef} title="OFP" src={viewerUrl} className="h-full w-full bg-white" />
+          <iframe ref={iframeRef} title="OFP" src={viewerUrl} className="h-full w-full bg-white dark:bg-zinc-900" />
         ) : safeHtml ? (
           <div
-            className="nws-scroll h-full overflow-y-auto bg-white p-5 font-mono text-sm text-zinc-800"
+            className="nws-scroll h-full overflow-y-auto bg-white p-5 font-mono text-sm text-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
             // eslint-disable-next-line react/no-danger
             dangerouslySetInnerHTML={{ __html: safeHtml }}
           />
