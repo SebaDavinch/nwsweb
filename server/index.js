@@ -769,6 +769,15 @@ const DEFAULT_DISCORD_BOT_SETTINGS = {
     runtime: DEFAULT_DISCORD_AUTOMATION_RUNTIME,
   },
   templates: DEFAULT_DISCORD_BOT_TEMPLATES,
+  ticketPanel: {
+    enabled: false,
+    threadChannelId: "",
+    panelChannelId: "",
+    panelMessageId: "",
+    title: "Поддержка Nordwind Virtual Airlines",
+    description: "Нажмите на кнопку нужной категории чтобы открыть обращение.",
+    color: 14692974,
+  },
   updatedAt: null,
 };
 
@@ -1297,6 +1306,14 @@ const buildDefaultAdminContent = () => {
         name: "General",
         description: "General support requests",
         color: "#E31E24",
+        emoji: "🎫",
+        buttonStyle: 1,
+        threadChannelId: "",
+        roleIds: [],
+        modalFields: [
+          { id: "subject", label: "Тема обращения", required: true, style: 1, placeholder: "" },
+          { id: "description", label: "Описание", required: true, style: 2, placeholder: "" },
+        ],
         enabled: true,
         order: 10,
       },
@@ -1305,6 +1322,15 @@ const buildDefaultAdminContent = () => {
         name: "Operations",
         description: "Bookings, routes, dispatch, and flight operations",
         color: "#2563EB",
+        emoji: "✈️",
+        buttonStyle: 1,
+        threadChannelId: "",
+        roleIds: [],
+        modalFields: [
+          { id: "subject", label: "Тема обращения", required: true, style: 1, placeholder: "" },
+          { id: "flight", label: "Номер рейса (если применимо)", required: false, style: 1, placeholder: "NW1234" },
+          { id: "description", label: "Описание", required: true, style: 2, placeholder: "" },
+        ],
         enabled: true,
         order: 20,
       },
@@ -1313,6 +1339,15 @@ const buildDefaultAdminContent = () => {
         name: "Website",
         description: "Portal and UI issues",
         color: "#0F766E",
+        emoji: "🌐",
+        buttonStyle: 2,
+        threadChannelId: "",
+        roleIds: [],
+        modalFields: [
+          { id: "subject", label: "Тема обращения", required: true, style: 1, placeholder: "" },
+          { id: "url", label: "URL страницы (если применимо)", required: false, style: 1, placeholder: "https://..." },
+          { id: "description", label: "Описание проблемы", required: true, style: 2, placeholder: "" },
+        ],
         enabled: true,
         order: 30,
       },
@@ -1321,6 +1356,14 @@ const buildDefaultAdminContent = () => {
         name: "Discord",
         description: "Discord bot and role sync",
         color: "#7C3AED",
+        emoji: "💬",
+        buttonStyle: 2,
+        threadChannelId: "",
+        roleIds: [],
+        modalFields: [
+          { id: "subject", label: "Тема обращения", required: true, style: 1, placeholder: "" },
+          { id: "description", label: "Описание", required: true, style: 2, placeholder: "" },
+        ],
         enabled: true,
         order: 40,
       },
@@ -5324,6 +5367,10 @@ const getDiscordBotSettingsStore = () => {
       ...defaults.templates,
       ...(existing?.templates && typeof existing.templates === "object" ? existing.templates : {}),
     },
+    ticketPanel: {
+      ...defaults.ticketPanel,
+      ...(existing?.ticketPanel && typeof existing.ticketPanel === "object" ? existing.ticketPanel : {}),
+    },
   };
 };
 
@@ -5376,6 +5423,10 @@ const upsertDiscordBotSettingsStore = (payload = {}) => {
       templates: {
         ...current.templates,
         ...(payload?.templates && typeof payload.templates === "object" ? payload.templates : {}),
+      },
+      ticketPanel: {
+        ...current.ticketPanel,
+        ...(payload?.ticketPanel && typeof payload.ticketPanel === "object" ? payload.ticketPanel : {}),
       },
       updatedAt: new Date().toISOString(),
     };
@@ -10264,7 +10315,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.use(express.json());
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf.toString(); } }));
 
 const VAMSYS_LOG_PREFIX = "[vamsys]";
 const VK_LOG_PREFIX = "[vk-bot]";
@@ -12721,6 +12772,26 @@ const resolveLinkedVamsysPilotForDiscordUser = async (discordUser) => {
     isStaff: isPilotStaff(pilot),
   };
 };
+
+// Public status endpoint — used by MSFS hub panel to show connectivity indicators
+app.get("/api/status", async (req, res) => {
+  const now = Date.now();
+  const vamsysTokenOk =
+    Boolean(API_TOKEN) ||
+    (Boolean(tokenCache.accessToken) && now < tokenCache.expiresAt - 60_000);
+
+  let vamsys = vamsysTokenOk;
+  if (!vamsysTokenOk) {
+    try {
+      await getAccessToken();
+      vamsys = true;
+    } catch {
+      vamsys = false;
+    }
+  }
+
+  res.json({ site: true, vamsys });
+});
 
 app.get("/api/auth/discord/login", (req, res) => {
   if (!checkAuthRateLimit(req)) {
@@ -28057,6 +28128,14 @@ app.post("/api/tickets/:id/status", express.json(), async (req, res) => {
     return;
   }
 
+  if (updatedTicket.status === "closed" && updatedTicket.discordThreadId) {
+    void discordApiRequest(`/channels/${updatedTicket.discordThreadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true, locked: true }),
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => {});
+  }
+
   res.json({ ok: true, ticket: sanitizeTicketForViewer(updatedTicket, actor) });
 });
 
@@ -28098,6 +28177,380 @@ const resolveDiscordBotTicketCategory = (rawValue, config = getTicketConfigStore
     return Boolean(normalized && (normalized === id || normalized === name));
   }) || null;
 };
+
+const DISCORD_PUBLIC_KEY = process.env.DISCORD_PUBLIC_KEY || "";
+
+const verifyDiscordInteraction = async (req, res, next) => {
+  const signature = req.headers["x-signature-ed25519"];
+  const timestamp = req.headers["x-signature-timestamp"];
+  if (!signature || !timestamp || !DISCORD_PUBLIC_KEY) {
+    res.status(401).end();
+    return;
+  }
+  try {
+    const { webcrypto } = await import("crypto");
+    const key = await webcrypto.subtle.importKey(
+      "raw",
+      Buffer.from(DISCORD_PUBLIC_KEY, "hex"),
+      { name: "Ed25519" },
+      false,
+      ["verify"]
+    );
+    const body = req.rawBody || "";
+    const valid = await webcrypto.subtle.verify(
+      "Ed25519",
+      key,
+      Buffer.from(signature, "hex"),
+      Buffer.from(timestamp + body)
+    );
+    if (!valid) {
+      res.status(401).end();
+      return;
+    }
+    next();
+  } catch {
+    res.status(401).end();
+  }
+};
+
+const buildDiscordTicketPanelPayload = (settings, categories) => {
+  const panelCats = categories.filter((c) => c.enabled !== false).slice(0, 25);
+  const buttons = panelCats.map((cat) => {
+    const btn = {
+      type: 2,
+      style: Number(cat.buttonStyle) || 1,
+      label: String(cat.name || cat.id).slice(0, 80),
+      custom_id: `ticket_cat_${cat.id}`,
+    };
+    const emojiStr = String(cat.emoji || "").trim();
+    if (emojiStr) {
+      btn.emoji = { name: emojiStr };
+    }
+    return btn;
+  });
+  const rows = [];
+  for (let i = 0; i < buttons.length; i += 5) {
+    rows.push({ type: 1, components: buttons.slice(i, i + 5) });
+  }
+  return {
+    embeds: [
+      {
+        title: String(settings?.title || "Поддержка").slice(0, 256),
+        description: String(settings?.description || "Выберите категорию обращения.").slice(0, 4096),
+        color: Number(settings?.color) || 14692974,
+      },
+    ],
+    components: rows,
+  };
+};
+
+app.post("/api/discord-interactions", verifyDiscordInteraction, async (req, res) => {
+  const interaction = req.body;
+  const interactionType = Number(interaction?.type);
+
+  if (interactionType === 1) {
+    res.json({ type: 1 });
+    return;
+  }
+
+  if (interactionType === 3) {
+    const customId = String(interaction?.data?.custom_id || "");
+    if (customId.startsWith("ticket_cat_")) {
+      const categoryId = customId.slice("ticket_cat_".length);
+      const config = getTicketConfigStore();
+      const category = config.categories.find((c) => c.id === categoryId && c.enabled !== false);
+      if (!category) {
+        res.json({ type: 4, data: { content: "❌ Категория не найдена или отключена.", flags: 64 } });
+        return;
+      }
+      const fields = Array.isArray(category.modalFields) && category.modalFields.length > 0
+        ? category.modalFields.slice(0, 5)
+        : [
+            { id: "subject", label: "Тема обращения", required: true, style: 1 },
+            { id: "description", label: "Описание", required: true, style: 2 },
+          ];
+      const modalComponents = fields.map((f) => ({
+        type: 1,
+        components: [
+          {
+            type: 4,
+            custom_id: String(f.id || "field"),
+            label: String(f.label || f.id || "Поле").slice(0, 45),
+            style: Number(f.style) === 2 ? 2 : 1,
+            required: f.required !== false,
+            placeholder: String(f.placeholder || "").slice(0, 100) || undefined,
+            min_length: 1,
+            max_length: f.style === 2 ? 4000 : 200,
+          },
+        ],
+      }));
+      res.json({
+        type: 9,
+        data: {
+          custom_id: `ticket_submit_${categoryId}`,
+          title: String(category.name || "Обращение").slice(0, 45),
+          components: modalComponents,
+        },
+      });
+      return;
+    }
+    res.json({ type: 4, data: { content: "Неизвестное действие.", flags: 64 } });
+    return;
+  }
+
+  if (interactionType === 5) {
+    const customId = String(interaction?.data?.custom_id || "");
+    if (customId.startsWith("ticket_submit_")) {
+      const categoryId = customId.slice("ticket_submit_".length);
+      const config = getTicketConfigStore();
+      const category = config.categories.find((c) => c.id === categoryId);
+      if (!category) {
+        res.json({ type: 4, data: { content: "❌ Категория не найдена.", flags: 64 } });
+        return;
+      }
+
+      const componentValues = {};
+      const modalComponents = Array.isArray(interaction?.data?.components) ? interaction.data.components : [];
+      for (const row of modalComponents) {
+        const comp = Array.isArray(row?.components) ? row.components[0] : null;
+        if (comp?.custom_id) {
+          componentValues[comp.custom_id] = String(comp.value || "");
+        }
+      }
+
+      const subject = normalizeAdminText(componentValues.subject || componentValues[Object.keys(componentValues)[0]] || "");
+      const descriptionKeys = ["description", "desc", "content", "text"];
+      const descKey = descriptionKeys.find((k) => componentValues[k]) || Object.keys(componentValues)[1] || "";
+      const content = normalizeAdminMultilineText(componentValues[descKey] || Object.values(componentValues).join("\n\n"));
+
+      const discordUser = interaction?.member?.user || interaction?.user || {};
+      const discordId = normalizeAdminText(discordUser?.id || "") || null;
+      const discordUsername = normalizeAdminText(discordUser?.username || discordUser?.global_name || "") || "discord-user";
+      const discordName = normalizeAdminText(discordUser?.global_name || discordUser?.username || "") || "Discord User";
+
+      if (!subject || !content) {
+        res.json({ type: 4, data: { content: "❌ Заполните все обязательные поля.", flags: 64 } });
+        return;
+      }
+
+      const botSettings = getDiscordBotSettingsStore();
+      const panelSettings = botSettings?.ticketPanel || {};
+      const threadChannelId = normalizeAdminText(category.threadChannelId || panelSettings.threadChannelId || botSettings?.channels?.tickets || "");
+
+      const now = new Date().toISOString();
+      const ticket = {
+        id: randomUUID(),
+        number: getNextTicketNumber(),
+        subject,
+        categoryId: category.id,
+        categoryName: category.name,
+        status: "open",
+        priority: "normal",
+        tags: [],
+        assigneeId: null,
+        assigneeName: null,
+        owner: {
+          pilotId: null,
+          discordId,
+          username: discordUsername,
+          name: discordName,
+          provider: "discord",
+        },
+        messages: [
+          {
+            id: randomUUID(),
+            authorRole: "pilot",
+            authorName: discordName,
+            authorUsername: discordUsername,
+            content,
+            createdAt: now,
+          },
+        ],
+        unreadByOwner: 0,
+        unreadByStaff: 1,
+        createdAt: now,
+        updatedAt: now,
+        closedAt: null,
+        language: null,
+        source: "discord",
+        discordGuildId: normalizeAdminText(interaction?.guild_id || "") || null,
+        discordChannelId: normalizeAdminText(interaction?.channel_id || "") || null,
+        discordThreadId: null,
+      };
+
+      withAdminContentUpdate((draft) => {
+        const items = Array.isArray(draft?.tickets) ? [...draft.tickets] : [];
+        items.push(ticket);
+        draft.tickets = items;
+        return draft;
+      });
+
+      res.json({
+        type: 4,
+        data: {
+          content: `✅ Тикет **#${ticket.number}** создан! Мы ответим в ближайшее время.`,
+          flags: 64,
+        },
+      });
+
+      if (threadChannelId) {
+        (async () => {
+          try {
+            const threadName = `Ticket #${ticket.number} — ${subject.slice(0, 80)}`;
+            const thread = await discordApiRequest(`/channels/${threadChannelId}/threads`, {
+              method: "POST",
+              body: JSON.stringify({
+                name: threadName,
+                type: 12,
+                auto_archive_duration: 10080,
+                invitable: false,
+              }),
+              headers: { "Content-Type": "application/json" },
+            });
+
+            const threadId = thread?.id;
+            if (!threadId) return;
+
+            withAdminContentUpdate((draft) => {
+              const items = Array.isArray(draft?.tickets) ? draft.tickets : [];
+              const idx = items.findIndex((t) => t.id === ticket.id);
+              if (idx >= 0) {
+                items[idx] = { ...items[idx], discordThreadId: threadId, discordChannelId: threadChannelId };
+              }
+              return draft;
+            });
+
+            const roleIds = Array.isArray(category.roleIds) ? category.roleIds.filter(Boolean) : [];
+            const rolePings = roleIds.map((r) => `<@&${r}>`).join(" ");
+            const userPing = discordId ? `<@${discordId}>` : discordName;
+
+            const hexColor = String(category.color || "#E31E24").replace("#", "");
+            const colorInt = parseInt(hexColor, 16) || 14692974;
+
+            const extraFields = Object.entries(componentValues)
+              .filter(([k]) => k !== "subject" && k !== descKey)
+              .map(([k, v]) => ({ name: k, value: String(v).slice(0, 1024), inline: false }));
+
+            await discordApiRequest(`/channels/${threadId}/messages`, {
+              method: "POST",
+              body: JSON.stringify({
+                content: [rolePings, userPing].filter(Boolean).join(" "),
+                embeds: [
+                  {
+                    title: `Ticket #${ticket.number}: ${subject}`,
+                    description: content.slice(0, 4000),
+                    color: colorInt,
+                    fields: [
+                      { name: "Категория", value: category.name, inline: true },
+                      { name: "Автор", value: discordName, inline: true },
+                      ...extraFields,
+                    ],
+                    footer: { text: `ID: ${ticket.id}` },
+                    timestamp: now,
+                  },
+                ],
+              }),
+              headers: { "Content-Type": "application/json" },
+            });
+
+            if (discordId) {
+              await discordApiRequest(`/channels/${threadId}/thread-members/${discordId}`, {
+                method: "PUT",
+              }).catch(() => {});
+            }
+          } catch (err) {
+            logger.warn("[discord-interactions] thread_create_failed", String(err?.message || err));
+          }
+        })();
+      }
+
+      void sendDiscordBotNotification({
+        eventKey: "ticketCreated",
+        title: `Ticket #${ticket.number}: ${subject}`,
+        description: content.slice(0, 500),
+        category: category.name,
+        author: discordName,
+        color: 0xe31e24,
+        content: discordId ? `Новый тикет #${ticket.number} от <@${discordId}>` : "",
+        variables: {
+          ticketNumber: ticket.number,
+          subject,
+          content: content.slice(0, 500),
+          status: ticket.status,
+          priority: ticket.priority,
+          pilotName: discordName,
+          reporter: discordName,
+          authorRole: "pilot",
+          route: category.name,
+          aircraft: "",
+        },
+        fields: [
+          { name: "Category", value: category.name, inline: true },
+          { name: "Priority", value: ticket.priority, inline: true },
+          { name: "Source", value: "Discord Interaction", inline: true },
+        ],
+      }).catch(() => {});
+
+      return;
+    }
+    res.json({ type: 4, data: { content: "Неизвестное действие.", flags: 64 } });
+    return;
+  }
+
+  res.json({ type: 1 });
+});
+
+app.post("/api/admin/discord-bot/ticket-panel/post", requireAdmin, async (req, res) => {
+  const botSettings = getDiscordBotSettingsStore();
+  const panelSettings = botSettings?.ticketPanel || {};
+  const config = getTicketConfigStore();
+
+  const panelChannelId = normalizeAdminText(req.body?.panelChannelId || panelSettings.panelChannelId || "");
+  if (!panelChannelId) {
+    res.status(400).json({ error: "panelChannelId is required" });
+    return;
+  }
+
+  const categories = Array.isArray(config.categories) ? config.categories : [];
+  const payload = buildDiscordTicketPanelPayload(panelSettings, categories);
+
+  try {
+    const existingMessageId = normalizeAdminText(req.body?.panelMessageId || panelSettings.panelMessageId || "");
+    let message;
+    if (existingMessageId) {
+      try {
+        message = await discordApiRequest(`/channels/${panelChannelId}/messages/${existingMessageId}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch {
+        message = null;
+      }
+    }
+    if (!message?.id) {
+      message = await discordApiRequest(`/channels/${panelChannelId}/messages`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const newMessageId = message?.id || existingMessageId;
+    upsertDiscordBotSettingsStore({
+      ticketPanel: {
+        ...panelSettings,
+        panelChannelId,
+        panelMessageId: newMessageId,
+      },
+    });
+
+    res.json({ ok: true, messageId: newMessageId, channelId: panelChannelId });
+  } catch (err) {
+    logger.warn("[ticket-panel] post_failed", String(err?.message || err));
+    res.status(500).json({ error: "Failed to post ticket panel", details: String(err?.message || err) });
+  }
+});
 
 app.get("/api/discord-bot/config", (req, res) => {
 
@@ -28871,7 +29324,35 @@ app.post("/api/discord-bot/tickets/:id/status", express.json({ limit: "1mb" }), 
     ],
   }).catch(() => {});
 
+  if (requestedStatus === "closed" && updatedTicket.discordThreadId) {
+    void discordApiRequest(`/channels/${updatedTicket.discordThreadId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ archived: true, locked: true }),
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => {});
+  }
+
   res.json({ ok: true, ticket: updatedTicket });
+});
+
+app.post("/api/discord-bot/tickets/:id/thread", express.json({ limit: "64kb" }), (req, res) => {
+  if (!isAuthorizedDiscordBotRequest(req)) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const ticketId = normalizeAdminText(req.params.id);
+  const threadId = normalizeAdminText(req.body?.threadId || "");
+  if (!threadId) {
+    res.status(400).json({ error: "threadId required" });
+    return;
+  }
+  withAdminContentUpdate((draft) => {
+    const items = Array.isArray(draft?.tickets) ? draft.tickets : [];
+    const idx = items.findIndex((t) => String(t?.id || "") === ticketId || String(t?.number || "") === ticketId);
+    if (idx >= 0) items[idx] = { ...items[idx], discordThreadId: threadId };
+    return draft;
+  });
+  res.json({ ok: true });
 });
 
 app.post("/api/telegram-bot/tickets/:id/status", express.json({ limit: "1mb" }), (req, res) => {
@@ -31371,60 +31852,6 @@ app.get("/api/admin/pilots/:id", async (req, res) => {
 
   try {
     const rosterPayload = await loadPilotsRoster();
-    const pilot = (Array.isArray(rosterPayload?.pilots) ? rosterPayload.pilots : []).find(
-      (item) => Number(item?.id || 0) === pilotId
-    );
-
-    if (!pilot) {
-      res.status(404).json({ error: "Pilot not found" });
-      return;
-    }
-
-    const [recentFlightsPayload, rawBookings] = await Promise.all([
-      loadRecentFlights({ pilotId, limit: 8 }).catch(() => ({ flights: [] })),
-      fetchAllPages(`/bookings?page[size]=20&filter[pilot_id]=${encodeURIComponent(String(pilotId))}&sort=-created_at`).catch(() => []),
-    ]);
-
-    const recentFlights = Array.isArray(recentFlightsPayload?.flights) ? recentFlightsPayload.flights : [];
-    const bookings = (Array.isArray(rawBookings) ? rawBookings : []).map((booking) => ({
-      id: Number(booking?.id || 0) || 0,
-      callsign: normalizeAdminText(booking?.callsign || booking?.flight_number || "Booking"),
-      route: `${normalizeAdminText(booking?.departure_airport?.icao || booking?.departure_id || "----")} → ${normalizeAdminText(booking?.arrival_airport?.icao || booking?.arrival_id || "----")}`,
-      aircraft: normalizeAdminText(booking?.aircraft?.name || booking?.aircraft?.type || booking?.aircraft_id || "—"),
-      status: inferAdminBookingStatus(booking),
-      departureTime: normalizeAdminText(booking?.departure_time),
-      createdAt: normalizeAdminText(booking?.created_at),
-    }));
-
-    res.json({
-      pilot,
-      stats: {
-        totalHours: Number(pilot?.hours || 0) || 0,
-        totalFlights: Number(pilot?.flights || 0) || 0,
-        recentFlights: recentFlights.length,
-        activeBookings: bookings.filter((item) => item.status === "active" || item.status === "pending").length,
-      },
-      recentFlights,
-      bookings,
-    });
-  } catch {
-    res.status(502).json({ error: "Failed to load pilot detail" });
-  }
-});
-
-app.get("/api/admin/pilots/:id", async (req, res) => {
-  if (!requireCredentials(res)) {
-    return;
-  }
-
-  const pilotId = Number(req.params.id || 0) || 0;
-  if (pilotId <= 0) {
-    res.status(400).json({ error: "Pilot ID is required" });
-    return;
-  }
-
-  try {
-    const rosterPayload = await loadPilotsRoster();
     const rosterPilot = (Array.isArray(rosterPayload?.pilots) ? rosterPayload.pilots : []).find(
       (item) => Number(item?.id || 0) === pilotId
     ) || null;
@@ -33548,6 +33975,58 @@ app.delete("/api/admin/activities/:section/:id", async (req, res) => {
     res.json({ ok: true });
   } catch (error) {
     res.status(400).json({ ok: false, error: String(error?.message || "Failed to delete activity") });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Publish vAMSYS activity announcement to Discord
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post("/api/admin/activities/:section/:id/discord", requireAdmin, express.json({ limit: "64kb" }), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const sectionPath = resolveAdminActivitySectionPath(req.params.section);
+  const itemId = Number(req.params.id || 0) || 0;
+  if (!sectionPath || itemId <= 0) {
+    res.status(400).json({ ok: false, error: "Invalid section or ID" });
+    return;
+  }
+  try {
+    const data = await apiFetch(`${sectionPath}/${itemId}`);
+    const activity = data?.data ?? data?.activity ?? data;
+    const name = String(activity?.name || req.body?.name || "Activity").trim();
+    const description = String(activity?.description || req.body?.description || "").trim();
+    const type = String(activity?.type || req.params.section || "").trim();
+    const start = activity?.start_date ?? activity?.start ?? req.body?.start ?? null;
+    const end = activity?.end_date ?? activity?.end ?? req.body?.end ?? null;
+    const points = Number(activity?.points ?? req.body?.points ?? 0) || null;
+    const registrationCount = Number(activity?.registration_count ?? activity?.registrationCount ?? 0) || null;
+    const completionCount = Number(activity?.completion_count ?? activity?.completionCount ?? 0) || null;
+
+    const fields = [];
+    if (type) fields.push({ name: "Тип", value: type, inline: true });
+    if (start) {
+      const period = end
+        ? `<t:${Math.floor(new Date(start).getTime() / 1000)}:f> — <t:${Math.floor(new Date(end).getTime() / 1000)}:f>`
+        : `С <t:${Math.floor(new Date(start).getTime() / 1000)}:f>`;
+      fields.push({ name: "Период", value: period, inline: false });
+    }
+    if (registrationCount) fields.push({ name: "Регистрации", value: String(registrationCount), inline: true });
+    if (completionCount) fields.push({ name: "Завершили", value: String(completionCount), inline: true });
+    if (points) fields.push({ name: "Очки", value: String(points), inline: true });
+
+    await sendDiscordBotNotification({
+      eventKey: "activityAnnounced",
+      title: `✈️ Событие: ${name}`,
+      description: description || null,
+      category: "Activity",
+      color: 0x7c3aed,
+      fields,
+      variables: { name, type, start: start || "", end: end || "", points: String(points || 0) },
+      force: true,
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || "Discord publish failed") });
   }
 });
 
@@ -35994,6 +36473,555 @@ const runSlotReminderTick = async () => {
 // Check every 5 minutes
 setInterval(() => { runSlotReminderTick().catch(() => {}); }, 5 * 60 * 1000).unref();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Ranks (Operations API — ops:config:write)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/ranks", requireAdmin, async (_req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const ranks = await fetchAllPages("/ranks?page[size]=100&sort=order");
+    res.json({ ok: true, ranks: Array.isArray(ranks) ? ranks : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.get("/api/admin/ranks/:id", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const rank = await apiFetch(`/ranks/${id}`);
+    res.json({ ok: true, rank });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.post("/api/admin/ranks", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const rank = await apiRequest("/ranks", { method: "POST", body: req.body || {} });
+    res.status(201).json({ ok: true, rank });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.put("/api/admin/ranks/:id", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const rank = await apiRequest(`/ranks/${id}`, { method: "PUT", body: req.body || {} });
+    res.json({ ok: true, rank });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.delete("/api/admin/ranks/:id", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    await apiRequest(`/ranks/${id}`, { method: "DELETE" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Scoring Groups + Rules (Operations API — ops:config:write)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/scoring-groups", requireAdmin, async (_req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const groups = await fetchAllPages("/scoring-groups?page[size]=100");
+    res.json({ ok: true, groups: Array.isArray(groups) ? groups : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.get("/api/admin/scoring-groups/:id", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const group = await apiFetch(`/scoring-groups/${id}`);
+    res.json({ ok: true, group });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.post("/api/admin/scoring-groups", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const group = await apiRequest("/scoring-groups", { method: "POST", body: req.body || {} });
+    res.status(201).json({ ok: true, group });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.put("/api/admin/scoring-groups/:id", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const group = await apiRequest(`/scoring-groups/${id}`, { method: "PUT", body: req.body || {} });
+    res.json({ ok: true, group });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.delete("/api/admin/scoring-groups/:id", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    await apiRequest(`/scoring-groups/${id}`, { method: "DELETE" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.get("/api/admin/scoring-groups/:id/rules", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const rules = await fetchAllPages(`/scoring-groups/${id}/rules?page[size]=100`);
+    res.json({ ok: true, rules: Array.isArray(rules) ? rules : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.post("/api/admin/scoring-groups/:id/rules", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const rule = await apiRequest(`/scoring-groups/${id}/rules`, { method: "POST", body: req.body || {} });
+    res.status(201).json({ ok: true, rule });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.put("/api/admin/scoring-groups/:groupId/rules/:ruleId", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const groupId = encodeURIComponent(String(req.params.groupId || ""));
+  const ruleId = encodeURIComponent(String(req.params.ruleId || ""));
+  try {
+    const rule = await apiRequest(`/scoring-groups/${groupId}/rules/${ruleId}`, { method: "PUT", body: req.body || {} });
+    res.json({ ok: true, rule });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.delete("/api/admin/scoring-groups/:groupId/rules/:ruleId", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const groupId = encodeURIComponent(String(req.params.groupId || ""));
+  const ruleId = encodeURIComponent(String(req.params.ruleId || ""));
+  try {
+    await apiRequest(`/scoring-groups/${groupId}/rules/${ruleId}`, { method: "DELETE" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Pilot moderation — ban / unban / hub change (ops:moderation:write)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.post("/api/admin/pilots/:id/ban", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const pilotId = Number(req.params.id || 0) || 0;
+  if (pilotId <= 0) { res.status(400).json({ ok: false, error: "Pilot ID required" }); return; }
+  try {
+    const result = await apiRequest(`/pilots/${pilotId}/ban`, { method: "POST", body: req.body || {} });
+    logAdminAction(req, "pilot_ban", { pilotId });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.delete("/api/admin/pilots/:id/ban", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const pilotId = Number(req.params.id || 0) || 0;
+  if (pilotId <= 0) { res.status(400).json({ ok: false, error: "Pilot ID required" }); return; }
+  try {
+    await apiRequest(`/pilots/${pilotId}/ban`, { method: "DELETE" });
+    logAdminAction(req, "pilot_unban", { pilotId });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.patch("/api/admin/pilots/:id/hub", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const pilotId = Number(req.params.id || 0) || 0;
+  if (pilotId <= 0) { res.status(400).json({ ok: false, error: "Pilot ID required" }); return; }
+  const hubId = Number(req.body?.hub_id || req.body?.hubId || 0) || 0;
+  if (hubId <= 0) { res.status(400).json({ ok: false, error: "hub_id required" }); return; }
+  try {
+    const result = await apiRequest(`/pilots/${pilotId}/hub`, { method: "PATCH", body: { hub_id: hubId } });
+    logAdminAction(req, "pilot_hub_change", { pilotId, hubId });
+    requestUnifiedCatalogResync();
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Pilot registration management (ops:moderation:write)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/registrations", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const qs = req.url.split("?")[1] || "";
+    const path = qs ? `/registrations?${qs}` : "/registrations?page[size]=50&sort=-created_at";
+    const registrations = await fetchAllPages(path);
+    res.json({ ok: true, registrations: Array.isArray(registrations) ? registrations : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.post("/api/admin/registrations/:id/approve", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const result = await apiRequest(`/registrations/${id}/approve`, { method: "POST", body: req.body || {} });
+    logAdminAction(req, "registration_approve", { registrationId: req.params.id });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.post("/api/admin/registrations/:id/reject", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const result = await apiRequest(`/registrations/${id}/reject`, { method: "POST", body: req.body || {} });
+    logAdminAction(req, "registration_reject", { registrationId: req.params.id });
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PILOT API: Holidays (Pilot API — pilot:holidays scope)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/pilot/holidays", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  try {
+    const payload = await pilotApiRequest({ pilotId: context.pilotId, sessionUser: context, path: "/holidays" });
+    res.json({ ok: true, holidays: payload?.data ?? payload ?? [] });
+  } catch (err) {
+    const code = err?.status || 502;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "holidays_error" });
+  }
+});
+
+app.post("/api/pilot/holidays", express.json({ limit: "64kb" }), async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  try {
+    const payload = await pilotApiRequest({
+      pilotId: context.pilotId,
+      sessionUser: context,
+      path: "/holidays",
+      method: "POST",
+      body: req.body || {},
+    });
+    res.status(201).json({ ok: true, holiday: payload });
+  } catch (err) {
+    const code = err?.status || 400;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "holiday_create_error" });
+  }
+});
+
+app.delete("/api/pilot/holidays/:id", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    await pilotApiRequest({
+      pilotId: context.pilotId,
+      sessionUser: context,
+      path: `/holidays/${id}`,
+      method: "DELETE",
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    const code = err?.status || 400;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "holiday_delete_error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PILOT API: Hub (get current hub + request hub change)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/pilot/hub", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  try {
+    const payload = await pilotApiRequest({ pilotId: context.pilotId, sessionUser: context, path: "/hub" });
+    res.json({ ok: true, hub: payload?.data ?? payload });
+  } catch (err) {
+    const code = err?.status || 502;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "hub_error" });
+  }
+});
+
+app.patch("/api/pilot/hub", express.json({ limit: "64kb" }), async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  const hubId = Number(req.body?.hub_id || req.body?.hubId || 0) || 0;
+  if (hubId <= 0) {
+    res.status(400).json({ ok: false, error: "hub_id required", code: "hub_id_required" });
+    return;
+  }
+  try {
+    const payload = await pilotApiRequest({
+      pilotId: context.pilotId,
+      sessionUser: context,
+      path: "/hub",
+      method: "PATCH",
+      body: { hub_id: hubId },
+    });
+    res.json({ ok: true, hub: payload?.data ?? payload });
+  } catch (err) {
+    const code = err?.status || 400;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "hub_change_error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PILOT API: vAMSYS Notifications
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/pilot/vamsys-notifications", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  try {
+    const payload = await pilotApiRequest({ pilotId: context.pilotId, sessionUser: context, path: "/notifications" });
+    res.json({ ok: true, notifications: payload?.data ?? payload ?? [] });
+  } catch (err) {
+    const code = err?.status || 502;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "notifications_error" });
+  }
+});
+
+app.post("/api/pilot/vamsys-notifications/:id/read", express.json({ limit: "16kb" }), async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    await pilotApiRequest({
+      pilotId: context.pilotId,
+      sessionUser: context,
+      path: `/notifications/${id}/read`,
+      method: "POST",
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    const code = err?.status || 400;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "notification_read_error" });
+  }
+});
+
+app.post("/api/pilot/vamsys-notifications/read-all", express.json({ limit: "16kb" }), async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  try {
+    await pilotApiRequest({
+      pilotId: context.pilotId,
+      sessionUser: context,
+      path: "/notifications/read-all",
+      method: "POST",
+    });
+    res.json({ ok: true });
+  } catch (err) {
+    const code = err?.status || 400;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "notifications_read_all_error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PILOT API: Rank details (Pilot API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/pilot/rank", async (req, res) => {
+  const context = await resolveCurrentPilotContext(req).catch(() => null);
+  if (!context?.pilotId) {
+    res.status(401).json({ ok: false, error: "Authentication required", code: "auth_required" });
+    return;
+  }
+  try {
+    const payload = await pilotApiRequest({ pilotId: context.pilotId, sessionUser: context, path: "/rank" });
+    res.json({ ok: true, rank: payload?.data ?? payload });
+  } catch (err) {
+    const code = err?.status || 502;
+    res.status(code).json({ ok: false, error: String(err?.message || err), code: err?.code || "rank_error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Statistics (per-pilot + aggregate via Operations API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/statistics", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const qs = req.url.split("?")[1] || "";
+    const path = qs ? `/statistics?${qs}` : "/statistics";
+    const data = await apiFetch(path);
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.get("/api/admin/pilots/:id/statistics", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const pilotId = Number(req.params.id || 0) || 0;
+  if (pilotId <= 0) { res.status(400).json({ ok: false, error: "Pilot ID required" }); return; }
+  try {
+    const data = await apiFetch(`/pilots/${pilotId}/statistics`);
+    res.json({ ok: true, data });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Pilot holidays (admin view via Operations API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/pilots/:id/holidays", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const pilotId = Number(req.params.id || 0) || 0;
+  if (pilotId <= 0) { res.status(400).json({ ok: false, error: "Pilot ID required" }); return; }
+  try {
+    const data = await fetchAllPages(`/pilots/${pilotId}/holidays?page[size]=100`);
+    res.json({ ok: true, holidays: Array.isArray(data) ? data : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: AutoReject Rules (Operations API — ops:config:write)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/auto-reject-rules", requireAdmin, async (_req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const rules = await fetchAllPages("/auto-reject-rules?page[size]=100");
+    res.json({ ok: true, rules: Array.isArray(rules) ? rules : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.post("/api/admin/auto-reject-rules", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const rule = await apiRequest("/auto-reject-rules", { method: "POST", body: req.body || {} });
+    res.status(201).json({ ok: true, rule });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.put("/api/admin/auto-reject-rules/:id", requireAdmin, express.json(), async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const rule = await apiRequest(`/auto-reject-rules/${id}`, { method: "PUT", body: req.body || {} });
+    res.json({ ok: true, rule });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.delete("/api/admin/auto-reject-rules/:id", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    await apiRequest(`/auto-reject-rules/${id}`, { method: "DELETE" });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADMIN: Leaderboards (Operations API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+app.get("/api/admin/leaderboards", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  try {
+    const qs = req.url.split("?")[1] || "";
+    const path = qs ? `/leaderboards?${qs}` : "/leaderboards?page[size]=100";
+    const data = await fetchAllPages(path);
+    res.json({ ok: true, leaderboards: Array.isArray(data) ? data : [] });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+app.get("/api/admin/leaderboards/:id", requireAdmin, async (req, res) => {
+  if (!requireCredentials(res)) return;
+  const id = encodeURIComponent(String(req.params.id || ""));
+  try {
+    const data = await apiFetch(`/leaderboards/${id}`);
+    res.json({ ok: true, leaderboard: data });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Email-рассылки (маркетинг) — монтируем до static/catch-all.
 mountEmailCampaigns(app, {
   requireAdmin,
