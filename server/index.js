@@ -29612,6 +29612,72 @@ app.post("/api/telegram-bot/profile", express.json({ limit: "256kb" }), async (r
   }
 });
 
+// AI response for standalone Telegram bot
+// POST /api/telegram-bot/ai  { chatId, telegramId, username, firstName, text }
+// → { ok, reply, escalate, ticketNumber? }
+app.post("/api/telegram-bot/ai", express.json({ limit: "16kb" }), async (req, res) => {
+  if (!isAuthorizedTelegramBotRequest(req)) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if (!ANTHROPIC_API_KEY) {
+    return res.status(503).json({ error: "AI not configured" });
+  }
+
+  const chatId    = normalizeAdminText(req.body?.chatId    || "") || null;
+  const telegramId = normalizeAdminText(req.body?.telegramId || "") || null;
+  const username  = normalizeAdminText(req.body?.username  || "");
+  const firstName = normalizeAdminText(req.body?.firstName || "");
+  const text      = String(req.body?.text || "").trim().slice(0, 4000);
+
+  if (!chatId || !text) {
+    return res.status(400).json({ error: "chatId and text required" });
+  }
+
+  try {
+    const tgMessages = [{ role: "user", content: text }];
+    const tgCacheKey = buildAiCacheKey(tgMessages);
+    const tgCached   = getAiCached(tgCacheKey);
+
+    let reply, escalate;
+    if (tgCached && !tgCached.escalate) {
+      ({ reply, escalate } = { reply: tgCached.reply, escalate: false });
+    } else {
+      ({ reply, escalate } = await callClaudeAI(tgMessages));
+      if (!escalate && reply) setAiCached(tgCacheKey, reply, false);
+    }
+
+    if (escalate) {
+      const ticket = createAiEscalationTicket({
+        subject: text.slice(0, 100),
+        content: `Telegram-пользователь @${username || telegramId} запросил оператора.\n\nСообщение: ${text}`,
+        owner: {
+          telegramId,
+          telegramChatId: chatId,
+          username: username || telegramId,
+          name: firstName || username || "Telegram User",
+          provider: "telegram",
+        },
+        lang: "ru",
+      });
+
+      if (ticket) {
+        await notifyAiEscalation({ ticket, conversationSummary: text }).catch(() => {});
+      }
+
+      return res.json({
+        ok: true,
+        escalate: true,
+        ticketNumber: ticket?.number || null,
+        reply: reply || null,
+      });
+    }
+
+    return res.json({ ok: true, escalate: false, reply: reply || null });
+  } catch (err) {
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
 app.get("/api/discord-bot/balance", async (req, res) => {
   if (!isAuthorizedDiscordBotRequest(req)) {
     res.status(403).json({ error: "Forbidden" });
@@ -37433,7 +37499,7 @@ const server = app.listen(PORT, () => {
   startUnifiedCatalogSyncScheduler();
   startDashboardCatalogNightlyRefreshScheduler();
   startDiscordWebhookAutomationScheduler();
-  startTelegramPollingLoop();
+  if (process.env.TELEGRAM_BOT_EXTERNAL !== "true") startTelegramPollingLoop();
   startPilotChallengesScheduler();
   startPilotLocationSyncScheduler();
   // Pre-warm admin bootstrap and overview so first navigation to admin panel is instant
