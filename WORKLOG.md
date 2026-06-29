@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-06-29 (сессия 15)
+
+### Security audit + fixes
+
+**Аудит безопасности `server/index.js` — 7 уязвимостей закрыто:**
+
+- **CRITICAL** — `/api/ai/chat` теперь защищён per-IP rate-limit 4s (сжигал Anthropic-бюджет без ограничений)
+- **HIGH** — `ADMIN_BOOTSTRAP_TOKEN` теперь одноразовый: после первого использования `bootstrapTokenConsumed = true`
+- **HIGH** — `/api/pilot/roster` теперь требует vAMSYS-сессию (`requirePilotApiSession`) — раньше был публично доступен
+- **HIGH** — IP rate-limiting: новая функция `resolveClientIp()` берёт крайний правый IP из `x-forwarded-for` (не первый, который клиент мог подделать)
+- **HIGH** — `PRESEEDED_STAFF_DISCORD_IDS` убрано из кода — теперь env `ADMIN_DISCORD_STAFF_IDS`; добавлена в `.env`
+- **MEDIUM** — `helmet` установлен и подключён (security headers: X-Frame-Options, X-Content-Type-Options, Referrer-Policy и др.; CSP отключён из-за Tailwind inline-стилей)
+- **MEDIUM** — `express.json()` глобальный лимит `1mb` (раньше default 100kb без явного указания)
+
+**Деплой:**
+- При следующем деплое: `npm ci` (новая зависимость `helmet`)
+- На production `.env` добавить: `ADMIN_DISCORD_STAFF_IDS=<discord_id>`
+- Сборка: `website-release-20260629-201423.zip`
+
+---
+
 ## 2026-06-29 (сессия 14)
 
 ### X-Plane плагин NWSHub + RAG интеграция завершена + ливреи

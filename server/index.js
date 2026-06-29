@@ -1,4 +1,5 @@
 import express from "express";
+import helmet from "helmet";
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -112,7 +113,10 @@ const ADMIN_VAMSYS_HONORARY_RANK_NAMES = String(
   .split(",")
   .map((value) => String(value || "").trim().toUpperCase())
   .filter(Boolean);
-const PRESEEDED_STAFF_DISCORD_IDS = ["1397529397665333318"];
+const PRESEEDED_STAFF_DISCORD_IDS = String(process.env.ADMIN_DISCORD_STAFF_IDS || "")
+  .split(",")
+  .map((v) => v.trim())
+  .filter(Boolean);
 const DIST_DIR = path.resolve(__dirname, "../dist");
 const DISCORD_DAILY_STATS_CARD_SCRIPT = path.resolve(__dirname, "discord-daily-stats-card.py");
 const DISCORD_DAILY_STATS_CARD_BACKGROUND = path.resolve(
@@ -10270,6 +10274,10 @@ applyManualVamsysMappings();
 
 const app = express();
 
+// Security headers — removes X-Powered-By, sets X-Content-Type-Options, X-Frame-Options,
+// Referrer-Policy, etc. CSP disabled here because the SPA inlines styles via Tailwind/Vite.
+app.use(helmet({ contentSecurityPolicy: false }));
+
 // CORS для упакованного десктоп-приложения (Tauri webview origin).
 // В вебе фронтенд на одном origin с API, CORS не нужен; для .exe origin —
 // http(s)://tauri.localhost. Разрешаем только эти origin + credentials (куки сессии).
@@ -10318,7 +10326,7 @@ app.use((req, _res, next) => {
   next();
 });
 
-app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf.toString(); } }));
+app.use(express.json({ limit: "1mb", verify: (req, _res, buf) => { req.rawBody = buf.toString(); } }));
 
 const VAMSYS_LOG_PREFIX = "[vamsys]";
 const VK_LOG_PREFIX = "[vk-bot]";
@@ -10658,9 +10666,18 @@ const AUTH_RATE_MAX_BURST = 8;          // max attempts in sliding window
 const AUTH_RATE_WINDOW_MS = 60_000;     // 1 minute window
 const authRateMap = new Map();          // ip → [timestamps]
 
+const resolveClientIp = (req) => {
+  const forwarded = String(req.headers["x-forwarded-for"] || "").trim();
+  if (forwarded) {
+    // Rightmost IP is set by the trusted reverse-proxy, cannot be forged by client
+    const parts = forwarded.split(",");
+    return parts[parts.length - 1].trim() || req.socket?.remoteAddress || "unknown";
+  }
+  return req.socket?.remoteAddress || "unknown";
+};
+
 const checkAuthRateLimit = (req) => {
-  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown")
-    .split(",")[0].trim();
+  const ip = resolveClientIp(req);
   const now = Date.now();
   const times = (authRateMap.get(ip) || []).filter((t) => now - t < AUTH_RATE_WINDOW_MS);
   if (times.length >= AUTH_RATE_MAX_BURST) return false;
@@ -16517,9 +16534,8 @@ app.patch("/api/pilot/preferences", express.json({ limit: "2mb" }), async (req, 
 });
 
 app.get("/api/pilot/roster", async (req, res) => {
-  if (!requireCredentials(res)) {
-    return;
-  }
+  const session = requirePilotApiSession(req, res);
+  if (!session) return;
 
   try {
     const filter = String(req.query.filter || "all").trim().toLowerCase();
@@ -17067,12 +17083,19 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
+let bootstrapTokenConsumed = false;
+
 const hasBootstrapAccess = (req) => {
-  if (!ADMIN_BOOTSTRAP_TOKEN) {
+  if (!ADMIN_BOOTSTRAP_TOKEN || bootstrapTokenConsumed) {
     return false;
   }
   const token = String(req.headers["x-admin-bootstrap-token"] || "");
-  return token && token === ADMIN_BOOTSTRAP_TOKEN;
+  if (token && token === ADMIN_BOOTSTRAP_TOKEN) {
+    bootstrapTokenConsumed = true;
+    logger.warn("[auth] bootstrap_token_consumed — remove ADMIN_BOOTSTRAP_TOKEN from env");
+    return true;
+  }
+  return false;
 };
 
 app.get("/api/auth/vamsys/debug-me", async (req, res) => {
@@ -19342,11 +19365,25 @@ app.get("/api/admin/ai/status", requireAdmin, (_req, res) => {
 });
 
 // ─── POST /api/ai/chat ───────────────────────────────────────────────────────
+const AI_KNOWLEDGE_CHAT_RATE_LIMIT_MS = 4000;
+const aiKnowledgeChatLastByIp = new Map();
 
 app.post("/api/ai/chat", express.json({ limit: "256kb" }), async (req, res) => {
   if (!ANTHROPIC_API_KEY) {
     res.status(503).json({ error: "AI assistant is not configured" });
     return;
+  }
+
+  const ip = resolveClientIp(req);
+  const now = Date.now();
+  const lastReq = aiKnowledgeChatLastByIp.get(ip) || 0;
+  if (now - lastReq < AI_KNOWLEDGE_CHAT_RATE_LIMIT_MS) {
+    res.status(429).json({ error: "Too many requests, please wait a moment" });
+    return;
+  }
+  aiKnowledgeChatLastByIp.set(ip, now);
+  if (aiKnowledgeChatLastByIp.size > 2000) {
+    aiKnowledgeChatLastByIp.delete(aiKnowledgeChatLastByIp.keys().next().value);
   }
 
   const rawMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
@@ -32806,7 +32843,7 @@ app.post("/api/public/ai-chat", async (req, res) => {
     return;
   }
 
-  const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "unknown").split(",")[0].trim();
+  const ip = resolveClientIp(req);
   const now = Date.now();
   const lastRequest = aiChatLastRequestByIp.get(ip) || 0;
   if (now - lastRequest < AI_CHAT_RATE_LIMIT_MS) {
