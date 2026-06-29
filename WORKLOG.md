@@ -5,6 +5,95 @@
 
 ---
 
+## 2026-06-29 (сессия 14)
+
+### X-Plane плагин NWSHub + RAG интеграция завершена + ливреи
+
+**X-Plane плагин — `C:\Users\grish\Documents\vnws-hub-xplane\PI_NWSHub.py`**
+- XPPython3 плагин (Python), работает на X-Plane 11 и 12
+- Поддержка vNWS и RAG — VA-переключатель в заголовке
+- Экраны: авторизация (ввод vAMSYS Pilot API токена, Ctrl+V вставка) → основной
+- Табы: Рейс (активное бронирование) | NOTAM | Стат (профиль, налёт) | PIREP
+- SimBar: ALT, GS (из datarefs X-Plane) + координаты в реальном времени
+- Автообновление данных каждые 60 с через flight loop
+- [R] — принудительное обновление
+- Меню Plugins → NWSHub → «Показать / Скрыть»
+- Токен хранится в `NWSHub_config.json` рядом с плагином
+- Упаковщик: `pack.ps1` → `NWSHub-XPlane-1.0.0.zip` (6.6 KB)
+
+**RAG интеграция (MSFS панель + vnws.org прокси)**
+- `vnws-hub-msfs/config.ts` — `rag.siteUrl` исправлен на `vamsys.io`
+- Добавлен `dashboardUrl` в `VAConfig` (разделили auth hint и ссылки на дашборд)
+- `server/index.js` — активные статусы бронирования RAG: добавлены `dispatched`, `flying`
+- RAGTest: `getSession()` принимает `Authorization: Bearer` + `X-Hub-Token`
+- RAGTest: созданы `/api/me/notams` и `/api/me/pireps`
+- Сборка: `website-release-20260629-123217.zip`
+
+**Ливреи (NordwindHub десктоп + admin)**
+- Исправлен TypeScript баг в `app-liveries.tsx` (narrowing `st === "removing"`)
+- Вкладка «Ливреи» в hub-mode работает корректно
+
+---
+
+## 2026-06-25 (сессия 13)
+
+### nwsbot: полная переработка системы тикетов на Private Threads
+
+Бот `nwsbot` (`C:\Users\grish\Documents\nwsbot`) обновлён и запушен на [github.com/SebaDavinch/nwsbot](https://github.com/SebaDavinch/nwsbot).
+
+**Что изменилось в `src/index.js`:**
+
+- Добавлен импорт `ThreadAutoArchiveDuration` из `discord.js`.
+- Новые константы: `TICKET_CATEGORY_BUTTON_PREFIX`, `TICKET_SUBMIT_MODAL_PREFIX`, `TICKET_CLOSE_THREAD_BUTTON_PREFIX`, `TICKET_CLOSE_THREAD_MODAL_PREFIX`.
+- Кэш-переменные `cachedTicketCategories` и `cachedTicketPanelSettings`.
+- `refreshRemoteBotConfig` теперь кэширует `ticketConfig.categories` и `botSettings.ticketPanel` из ответа сайтового API.
+- Helpers: `getCachedTicketCategories()`, `getCachedTicketPanelSettings()`, `getActiveTicketCategories()`, `getDefaultTicketCategories()`.
+- Новая API-функция `setWebsiteTicketThread(ticketId, threadId)` — вызывает `POST /api/discord-bot/tickets/:id/thread` чтобы сохранить ID треда на сайте.
+- **Кнопка `ticket:cat:{id}`** — показывает кастомную модалку с полями категории (из кэша, до 5 полей).
+- **Модал `ticket:submit:{id}`** — создаёт Private Thread (ChannelType.PrivateThread, autoArchiveDuration=OneWeek), добавляет пользователя, пингует роли категории, отправляет embed с кнопкой «Закрыть».
+- **Кнопка закрытия `ticket:close:thread:{ticketId}`** — показывает модал с причиной.
+- **Модал `ticket:close:modal:thread:{ticketId}`** — архивирует и блокирует тред, обновляет статус тикета на сайте.
+- **`/ticket-panel` команда** переписана: строит кнопки по активным категориям из кэша (с emoji, цветами ButtonStyle 1–4), до 5 кнопок в ряду; title/description/color берутся из `ticketPanel` настроек сайта.
+- Обратная совместимость сохранена: старый `ticket:open` кнопка и GuildText-каналы продолжают работать.
+
+Коммит: `1768d21` — запушен.
+
+---
+
+## 2026-06-25 (сессия 12)
+
+### Discord: полноценная система тикетов на приватных ветках
+
+Реализована интерактивная система тикетов через Discord Interactions API:
+
+**server/index.js:**
+- `express.json()` расширен с `verify` callback для сохранения `rawBody` (нужен для Ed25519).
+- `DEFAULT_DISCORD_BOT_SETTINGS` — добавлен блок `ticketPanel` (канал панели, канал веток, заголовок, описание, цвет, `panelMessageId`).
+- Дефолтные `ticketCategories` расширены полями: `emoji`, `buttonStyle` (1–4), `threadChannelId`, `roleIds`, `modalFields` (массив полей с label/placeholder/required/style).
+- `getDiscordBotSettingsStore` + `upsertDiscordBotSettingsStore` — deep-merge для `ticketPanel`.
+- `verifyDiscordInteraction` — middleware Ed25519 через `crypto.webcrypto.subtle` (без новых зависимостей).
+- `buildDiscordTicketPanelPayload` — строит embed + кнопки (до 5 кнопок per row, до 25 кнопок).
+- **`POST /api/discord-interactions`** — обрабатывает PING, кнопки (`ticket_cat_{id}`) → модалка с кастомными полями, и submit модалки (`ticket_submit_{id}`) → создаёт тикет + Private Thread (type 12) + пингует роли в первом сообщении.
+- **`POST /api/admin/discord-bot/ticket-panel/post`** — публикует или обновляет embed-панель в Discord (PATCH если `panelMessageId` уже есть).
+- Закрытие тикета (`POST /api/tickets/:id/status` + `POST /api/discord-bot/tickets/:id/status`) — автоматически архивирует и блокирует Discord-ветку.
+- Для работы нужна новая env переменная: **`DISCORD_PUBLIC_KEY`** (из Discord Developer Portal → Applications → General Information).
+- После деплоя в Discord Developer Portal → Bot → Interactions Endpoint URL указать: `https://ваш-домен/api/discord-interactions`.
+
+**admin-tickets.tsx:**
+- Новый расширенный редактор категорий с accordion (раскрываемые карточки).
+- Для каждой категории: emoji, стиль кнопки (с цветным превью), цвет embed, канал для веток (dropdown из guild или текстовое поле), роли для упоминания (клик-тэги из guild или текстовое поле с ID), поля модалки (inline CRUD, до 5 полей, каждое с label/placeholder/required/style).
+- Загружает guild snapshot для отображения реальных каналов и ролей.
+
+**admin-discord-bot.tsx:**
+- Новая 5-я вкладка «Панель» с иконкой `TicketCheck`.
+- Конфиг панели: enabled toggle, канал панели, канал веток, заголовок, описание, цвет.
+- Кнопка «Опубликовать» / «Обновить панель в Discord».
+- Инструкция по настройке Interactions Endpoint URL.
+
+TypeScript без ошибок. Собирается чисто.
+
+---
+
 ## 2026-06-24 (сессия 11)
 
 ### Удаление генератора баннеров из ВАК

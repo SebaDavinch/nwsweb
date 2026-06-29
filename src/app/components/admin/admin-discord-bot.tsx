@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bell, Bot, Loader2, Save, Search, Shield, UserCog } from "lucide-react";
+import { Bell, Bot, Loader2, Save, Search, Shield, TicketCheck, UserCog } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -148,6 +148,15 @@ interface DiscordBotSettings {
     };
   };
   templates?: Record<string, NotificationTemplate>;
+  ticketPanel?: {
+    enabled: boolean;
+    threadChannelId: string;
+    panelChannelId: string;
+    panelMessageId: string;
+    title: string;
+    description: string;
+    color: number;
+  };
 }
 
 const SYNC_KEYS: Array<keyof DiscordBotSettings["sync"]> = ["tickets", "news", "notams", "alerts"];
@@ -192,6 +201,7 @@ export function AdminDiscordBot() {
   const [isSearchingMembers, setIsSearchingMembers] = useState(false);
   const [isMutatingAccess, setIsMutatingAccess] = useState(false);
   const [isSendingTest, setIsSendingTest] = useState(false);
+  const [isPostingPanel, setIsPostingPanel] = useState(false);
   const [settings, setSettings] = useState<DiscordBotSettings | null>(null);
   const [guildSnapshot, setGuildSnapshot] = useState<DiscordGuildSnapshot | null>(null);
   const [memberQuery, setMemberQuery] = useState("");
@@ -415,6 +425,39 @@ export function AdminDiscordBot() {
     }
   };
 
+  const updateTicketPanel = (patch: Partial<NonNullable<DiscordBotSettings["ticketPanel"]>>) => {
+    setSettings((prev) => prev ? {
+      ...prev,
+      ticketPanel: { ...(prev.ticketPanel || { enabled: false, threadChannelId: "", panelChannelId: "", panelMessageId: "", title: "", description: "", color: 14692974 }), ...patch },
+    } : prev);
+  };
+
+  const postTicketPanel = async () => {
+    const panelChannelId = settings?.ticketPanel?.panelChannelId || "";
+    if (!panelChannelId) {
+      toast.error(tr("Укажите канал для панели.", "Specify a panel channel."));
+      return;
+    }
+    setIsPostingPanel(true);
+    try {
+      const response = await fetch("/api/admin/discord-bot/ticket-panel/post", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ panelChannelId, panelMessageId: settings?.ticketPanel?.panelMessageId || "" }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(String(payload?.error || "Ошибка"));
+      updateTicketPanel({ panelMessageId: payload?.messageId || "" });
+      toast.success(tr("Панель тикетов опубликована!", "Ticket panel posted!"));
+      await loadData();
+    } catch (error) {
+      toast.error(String(error instanceof Error ? error.message : tr("Ошибка публикации", "Post failed")));
+    } finally {
+      setIsPostingPanel(false);
+    }
+  };
+
   if (isLoading || !settings) {
     return (
       <div className="flex items-center rounded-lg border border-gray-200 bg-white p-6 text-sm text-gray-500">
@@ -445,11 +488,12 @@ export function AdminDiscordBot() {
       </div>
 
       <Tabs defaultValue="settings" className="w-full">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="settings">{tr("Настройки", "Settings")}</TabsTrigger>
           <TabsTrigger value="channels">{tr("Каналы", "Channels")}</TabsTrigger>
           <TabsTrigger value="access">{tr("Доступ", "Access")}</TabsTrigger>
           <TabsTrigger value="templates">{tr("Шаблоны", "Templates")}</TabsTrigger>
+          <TabsTrigger value="ticket-panel" className="flex items-center gap-1"><TicketCheck className="h-3.5 w-3.5" />{tr("Панель", "Panel")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="settings" className="space-y-6">
@@ -962,6 +1006,124 @@ export function AdminDiscordBot() {
                   </div>
                 );
               })}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ticket-panel" className="space-y-6">
+          <Card className="border-none shadow-sm">
+            <CardHeader>
+              <CardTitle className="text-base">{tr("Панель тикетов Discord", "Discord Ticket Panel")}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="text-xs text-gray-500 rounded-lg bg-blue-50 border border-blue-100 p-3">
+                {tr(
+                  "Панель тикетов — это embed-сообщение с кнопками категорий. Пользователь нажимает кнопку → заполняет модалку → автоматически создаётся приватная ветка (Private Thread) и тикет в системе.",
+                  "The ticket panel is an embed message with category buttons. User clicks a button → fills a modal → a private thread is automatically created along with a ticket in the system."
+                )}
+              </div>
+
+              <div className="text-xs font-semibold text-amber-700 bg-amber-50 border border-amber-100 rounded-lg p-3">
+                {tr(
+                  "Для работы интерактивных кнопок необходимо: 1) Добавить DISCORD_PUBLIC_KEY в env (из Discord Developer Portal → Applications → General Information). 2) Указать Interactions Endpoint URL в настройках приложения Discord: https://ваш-домен/api/discord-interactions",
+                  "For interactive buttons to work: 1) Add DISCORD_PUBLIC_KEY to env (from Discord Developer Portal → Applications → General Information). 2) Set Interactions Endpoint URL in your Discord app settings: https://your-domain/api/discord-interactions"
+                )}
+              </div>
+
+              <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                <div>
+                  <div className="font-medium text-gray-900">{tr("Панель тикетов включена", "Ticket panel enabled")}</div>
+                  <div className="text-xs text-gray-500">{tr("Разрешить создание тикетов через Discord-панель.", "Allow ticket creation via Discord panel.")}</div>
+                </div>
+                <Switch checked={Boolean(settings.ticketPanel?.enabled)} onCheckedChange={(v) => updateTicketPanel({ enabled: v })} />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-700 mb-1">{tr("Канал для публикации панели", "Panel channel")}</div>
+                  <div className="text-xs text-gray-500 mb-2">{tr("Канал где будет висеть embed с кнопками.", "Channel where the embed with buttons will be posted.")}</div>
+                  {availableTextChannels.length > 0 ? (
+                    <select
+                      className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm"
+                      value={settings.ticketPanel?.panelChannelId || ""}
+                      onChange={(e) => updateTicketPanel({ panelChannelId: e.target.value })}
+                    >
+                      <option value="">{tr("— выберите канал —", "— select channel —")}</option>
+                      {availableTextChannels.map((ch) => (
+                        <option key={ch.id} value={ch.id}>#{ch.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input value={settings.ticketPanel?.panelChannelId || ""} onChange={(e) => updateTicketPanel({ panelChannelId: e.target.value })} placeholder="ID канала" />
+                  )}
+                </div>
+
+                <div>
+                  <div className="text-sm font-medium text-gray-700 mb-1">{tr("Канал для веток (по умолчанию)", "Default thread channel")}</div>
+                  <div className="text-xs text-gray-500 mb-2">{tr("Здесь создаются Private Threads для тикетов (если не задан на уровне категории).", "Private threads for tickets are created here (if not overridden per category).")}</div>
+                  {availableTextChannels.length > 0 ? (
+                    <select
+                      className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 text-sm"
+                      value={settings.ticketPanel?.threadChannelId || ""}
+                      onChange={(e) => updateTicketPanel({ threadChannelId: e.target.value })}
+                    >
+                      <option value="">{tr("— выберите канал —", "— select channel —")}</option>
+                      {availableTextChannels.map((ch) => (
+                        <option key={ch.id} value={ch.id}>#{ch.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <Input value={settings.ticketPanel?.threadChannelId || ""} onChange={(e) => updateTicketPanel({ threadChannelId: e.target.value })} placeholder="ID канала" />
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm font-medium text-gray-700 mb-1">{tr("Заголовок embed", "Embed title")}</div>
+                  <Input value={settings.ticketPanel?.title || ""} onChange={(e) => updateTicketPanel({ title: e.target.value })} placeholder={tr("Поддержка Nordwind Virtual Airlines", "Support")} />
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-gray-700 mb-1">{tr("Цвет embed", "Embed color")}</div>
+                  <Input
+                    type="color"
+                    value={`#${((settings.ticketPanel?.color) || 14692974).toString(16).padStart(6, "0")}`}
+                    onChange={(e) => updateTicketPanel({ color: parseInt(e.target.value.replace("#", ""), 16) })}
+                    className="h-10 cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium text-gray-700 mb-1">{tr("Описание embed", "Embed description")}</div>
+                <Textarea
+                  value={settings.ticketPanel?.description || ""}
+                  onChange={(e) => updateTicketPanel({ description: e.target.value })}
+                  placeholder={tr("Нажмите на кнопку нужной категории чтобы открыть обращение.", "Click a category button to open a request.")}
+                  rows={3}
+                />
+              </div>
+
+              {settings.ticketPanel?.panelMessageId && (
+                <div className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg p-3 flex items-center gap-2">
+                  <span>✅</span>
+                  <span>{tr(`Панель активна. Message ID: ${settings.ticketPanel.panelMessageId}`, `Panel is active. Message ID: ${settings.ticketPanel.panelMessageId}`)}</span>
+                </div>
+              )}
+
+              <div className="flex gap-3 flex-wrap">
+                <Button onClick={save} disabled={isSaving} variant="outline">
+                  {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+                  {tr("Сохранить настройки", "Save settings")}
+                </Button>
+                <Button onClick={postTicketPanel} disabled={isPostingPanel || !settings.ticketPanel?.panelChannelId} className="bg-[#5865F2] hover:bg-[#4752C4]">
+                  {isPostingPanel ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <TicketCheck className="h-4 w-4 mr-2" />}
+                  {settings.ticketPanel?.panelMessageId
+                    ? tr("Обновить панель в Discord", "Update panel in Discord")
+                    : tr("Опубликовать панель в Discord", "Post panel to Discord")
+                  }
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

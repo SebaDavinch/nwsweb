@@ -20,6 +20,7 @@ import {
   CalendarDays,
   PanelLeftOpen,
   PanelLeftClose,
+  PaintBucket,
 } from "lucide-react";
 import { useLanguage } from "../../context/language-context";
 import { useAuth } from "../../context/auth-context";
@@ -45,6 +46,7 @@ import { HubMap } from "./hub-map";
 import { AppLogin } from "./app-login";
 import { AppSettings } from "./app-settings";
 import { AppActivities } from "./app-activities";
+import { AppLiveries } from "./app-liveries";
 import { useAppConfig } from "./use-app-config";
 
 type HubSection =
@@ -64,6 +66,7 @@ type HubSection =
   | "acars"
   | "chat"
   | "activities"
+  | "liveries"
   | "changelog"
   | "settings";
 
@@ -137,6 +140,7 @@ export function HubMode() {
     { id: "map", label: tr("Карта", "Map"), icon: <MapIcon className="h-4 w-4" /> },
     { id: "acars", label: tr("ACARS", "ACARS"), icon: <RadioTower className="h-4 w-4" /> },
     { id: "chat", label: tr("Чат", "Chat"), icon: <MessageSquare className="h-4 w-4" /> },
+    { id: "liveries", label: tr("Ливреи", "Liveries"), icon: <PaintBucket className="h-4 w-4" /> },
     { id: "changelog", label: tr("Что нового", "Changelog"), icon: <Package className="h-4 w-4" /> },
     { id: "settings", label: t("app.hub.settings"), icon: <Settings className="h-4 w-4" /> },
   ];
@@ -240,6 +244,7 @@ export function HubMode() {
         )}
         {section === "radio" && <RadioPlayer />}
         {section === "acars" && <AcarsPanel />}
+        {section === "liveries" && <AppLiveries />}
         {section === "changelog" && <AppChangelog />}
         {section === "settings" && (
           <div className="space-y-6">

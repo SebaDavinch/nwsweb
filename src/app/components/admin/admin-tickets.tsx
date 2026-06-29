@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, MessageSquare, RefreshCw, Save, Plus, Trash2 } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, Save, Plus, Trash2, ChevronDown, ChevronRight } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -9,12 +9,38 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Switch } from "../ui/switch";
 import { useLanguage } from "../../context/language-context";
 
+interface TicketModalField {
+  id: string;
+  label: string;
+  placeholder?: string;
+  required?: boolean;
+  style?: 1 | 2;
+}
+
 interface TicketConfigItem {
   id: string;
   name: string;
   description?: string;
+  color?: string;
+  emoji?: string;
+  buttonStyle?: 1 | 2 | 3 | 4;
+  threadChannelId?: string;
+  roleIds?: string[];
+  modalFields?: TicketModalField[];
   enabled?: boolean;
   order?: number;
+}
+
+interface GuildChannel {
+  id: string;
+  name: string;
+  type: number;
+}
+
+interface GuildRole {
+  id: string;
+  name: string;
+  color: number;
 }
 
 interface TicketConfig {
@@ -79,6 +105,13 @@ const formatDateTime = (value: string) => {
   return date.toLocaleString();
 };
 
+const BUTTON_STYLES = [
+  { value: 1, label: "Primary (синяя)", color: "#5865F2" },
+  { value: 2, label: "Secondary (серая)", color: "#4E5058" },
+  { value: 3, label: "Success (зелёная)", color: "#57F287" },
+  { value: 4, label: "Danger (красная)", color: "#ED4245" },
+];
+
 export function AdminTickets() {
   const { language } = useLanguage();
   const tr = (ru: string, en: string) => (language === "ru" ? ru : en);
@@ -92,6 +125,9 @@ export function AdminTickets() {
   const [config, setConfig] = useState<TicketConfig>({ enabled: true, categories: [], tags: [], assignees: [] });
   const [reply, setReply] = useState("");
   const [tagDraft, setTagDraft] = useState("");
+  const [expandedCategoryId, setExpandedCategoryId] = useState<string | null>(null);
+  const [guildChannels, setGuildChannels] = useState<GuildChannel[]>([]);
+  const [guildRoles, setGuildRoles] = useState<GuildRole[]>([]);
 
   // New item forms
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -107,11 +143,18 @@ export function AdminTickets() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [configRes, ticketsRes, reportSettingsRes] = await Promise.all([
+      const [configRes, ticketsRes, reportSettingsRes, guildRes] = await Promise.all([
         fetch("/api/admin/tickets/config", { credentials: "include" }),
         fetch("/api/admin/tickets", { credentials: "include" }),
         fetch("/api/admin/route-reports/settings", { credentials: "include" }),
+        fetch("/api/admin/discord-bot/guild", { credentials: "include" }),
       ]);
+      const guildPayload = guildRes.ok ? await guildRes.json() : null;
+      if (guildPayload) {
+        const textChannelTypes = [0, 5, 10, 11, 12, 15];
+        setGuildChannels((guildPayload.channels || []).filter((c: GuildChannel) => textChannelTypes.includes(c.type)));
+        setGuildRoles((guildPayload.roles || []).filter((r: GuildRole) => r.name !== "@everyone"));
+      }
 
       const configPayload = configRes.ok ? await configRes.json() : {};
       const ticketPayload = ticketsRes.ok ? await ticketsRes.json() : {};
@@ -174,15 +217,73 @@ export function AdminTickets() {
     }
   };
 
+  const updateCategory = (index: number, patch: Partial<TicketConfigItem>) => {
+    setConfig((prev) => {
+      const next = [...prev.categories];
+      next[index] = { ...next[index], ...patch };
+      return { ...prev, categories: next };
+    });
+  };
+
+  const updateCategoryModalField = (catIndex: number, fieldIndex: number, patch: Partial<TicketModalField>) => {
+    setConfig((prev) => {
+      const cats = [...prev.categories];
+      const fields = [...(cats[catIndex].modalFields || [])];
+      fields[fieldIndex] = { ...fields[fieldIndex], ...patch };
+      cats[catIndex] = { ...cats[catIndex], modalFields: fields };
+      return { ...prev, categories: cats };
+    });
+  };
+
+  const addCategoryModalField = (catIndex: number) => {
+    setConfig((prev) => {
+      const cats = [...prev.categories];
+      const fields = [...(cats[catIndex].modalFields || [])];
+      if (fields.length >= 5) return prev;
+      fields.push({ id: `field-${Date.now()}`, label: "Новое поле", required: false, style: 1 });
+      cats[catIndex] = { ...cats[catIndex], modalFields: fields };
+      return { ...prev, categories: cats };
+    });
+  };
+
+  const removeCategoryModalField = (catIndex: number, fieldIndex: number) => {
+    setConfig((prev) => {
+      const cats = [...prev.categories];
+      const fields = (cats[catIndex].modalFields || []).filter((_, i) => i !== fieldIndex);
+      cats[catIndex] = { ...cats[catIndex], modalFields: fields };
+      return { ...prev, categories: cats };
+    });
+  };
+
+  const toggleCategoryRole = (catIndex: number, roleId: string) => {
+    setConfig((prev) => {
+      const cats = [...prev.categories];
+      const roles = new Set(cats[catIndex].roleIds || []);
+      if (roles.has(roleId)) roles.delete(roleId); else roles.add(roleId);
+      cats[catIndex] = { ...cats[catIndex], roleIds: Array.from(roles) };
+      return { ...prev, categories: cats };
+    });
+  };
+
   const addNewCategory = () => {
     if (!newCategoryName.trim()) return;
     const newItem: TicketConfigItem = {
       id: `cat-${Date.now()}`,
       name: newCategoryName.trim(),
+      emoji: "🎫",
+      buttonStyle: 1,
+      color: "#E31E24",
+      threadChannelId: "",
+      roleIds: [],
+      modalFields: [
+        { id: "subject", label: "Тема обращения", required: true, style: 1 },
+        { id: "description", label: "Описание", required: true, style: 2 },
+      ],
       enabled: true,
     };
     setConfig((prev) => ({ ...prev, categories: [...prev.categories, newItem] }));
     setNewCategoryName("");
+    setExpandedCategoryId(newItem.id);
   };
 
   const addNewTag = () => {
@@ -324,52 +425,182 @@ export function AdminTickets() {
             <Switch checked={config.enabled} onCheckedChange={(checked) => setConfig((prev) => ({ ...prev, enabled: Boolean(checked) }))} />
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+          <div className="space-y-4">
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
-              <div className="text-sm font-semibold text-gray-700">{tr("Категории", "Categories")}</div>
+              <div className="text-sm font-semibold text-gray-700">{tr("Категории тикетов", "Ticket Categories")}</div>
+              <div className="text-xs text-gray-500">{tr("Настройте внешний вид кнопок Discord и поля модальных форм для каждой категории.", "Configure Discord button appearance and modal fields per category.")}</div>
               {config.categories.map((item, index) => (
-                <div key={item.id} className="flex items-center gap-2">
-                  <Input
-                    value={item.name}
-                    onChange={(e) => {
-                      const next = [...config.categories];
-                      next[index] = { ...item, name: e.target.value };
-                      setConfig((prev) => ({ ...prev, categories: next }));
-                    }}
-                  />
-                  <Switch
-                    checked={Boolean(item.enabled)}
-                    onCheckedChange={(checked) => {
-                      const next = [...config.categories];
-                      next[index] = { ...item, enabled: Boolean(checked) };
-                      setConfig((prev) => ({ ...prev, categories: next }));
-                    }}
-                  />
+                <div key={item.id} className="rounded-lg border border-gray-200 overflow-hidden">
                   <button
-                    className="text-red-400 hover:text-red-600"
-                    onClick={() => deleteConfigItem("categories", item.id)}
+                    className="w-full flex items-center justify-between gap-3 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
+                    onClick={() => setExpandedCategoryId(expandedCategoryId === item.id ? null : item.id)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <div className="flex items-center gap-2 min-w-0">
+                      {item.emoji && <span className="text-base">{item.emoji}</span>}
+                      <span className="font-medium text-sm text-gray-900 truncate">{item.name}</span>
+                      {!item.enabled && <Badge variant="outline" className="text-xs text-gray-400">off</Badge>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="w-3 h-3 rounded-full border" style={{ backgroundColor: BUTTON_STYLES.find(s => s.value === (item.buttonStyle || 1))?.color || "#5865F2" }} />
+                      <button className="text-red-400 hover:text-red-600" onClick={(e) => { e.stopPropagation(); deleteConfigItem("categories", item.id); }}>
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                      {expandedCategoryId === item.id ? <ChevronDown className="h-4 w-4 text-gray-400" /> : <ChevronRight className="h-4 w-4 text-gray-400" />}
+                    </div>
                   </button>
+
+                  {expandedCategoryId === item.id && (
+                    <div className="p-3 space-y-3 border-t border-gray-100">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("Название", "Name")}</div>
+                          <Input value={item.name} onChange={(e) => updateCategory(index, { name: e.target.value })} />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("Emoji кнопки", "Button emoji")}</div>
+                          <Input value={item.emoji || ""} onChange={(e) => updateCategory(index, { emoji: e.target.value })} placeholder="🎫" maxLength={4} />
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("Стиль кнопки Discord", "Discord button style")}</div>
+                          <Select value={String(item.buttonStyle || 1)} onValueChange={(v) => updateCategory(index, { buttonStyle: Number(v) as TicketConfigItem["buttonStyle"] })}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {BUTTON_STYLES.map((s) => (
+                                <SelectItem key={s.value} value={String(s.value)}>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: s.color }} />
+                                    {s.label}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("Цвет (embed)", "Color (embed)")}</div>
+                          <Input type="color" value={item.color || "#E31E24"} onChange={(e) => updateCategory(index, { color: e.target.value })} className="h-10 cursor-pointer" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("Канал для веток (ID)", "Thread channel (ID)")}</div>
+                          {guildChannels.length > 0 ? (
+                            <Select value={item.threadChannelId || "__default"} onValueChange={(v) => updateCategory(index, { threadChannelId: v === "__default" ? "" : v })}>
+                              <SelectTrigger><SelectValue placeholder={tr("По умолчанию", "Default")} /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__default">{tr("По умолчанию (из настроек панели)", "Default (from panel settings)")}</SelectItem>
+                                {guildChannels.map((ch) => <SelectItem key={ch.id} value={ch.id}>#{ch.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Input value={item.threadChannelId || ""} onChange={(e) => updateCategory(index, { threadChannelId: e.target.value })} placeholder={tr("ID канала (опционально)", "Channel ID (optional)")} />
+                          )}
+                        </div>
+                        <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                          <div className="text-sm text-gray-700">{tr("Активна", "Enabled")}</div>
+                          <Switch checked={Boolean(item.enabled)} onCheckedChange={(checked) => updateCategory(index, { enabled: Boolean(checked) })} />
+                        </div>
+                      </div>
+
+                      {guildRoles.length > 0 && (
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("Роли для уведомления в ветке", "Roles to mention in thread")}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {guildRoles.map((role) => {
+                              const isSelected = (item.roleIds || []).includes(role.id);
+                              const hexColor = role.color ? `#${role.color.toString(16).padStart(6, "0")}` : "#6b7280";
+                              return (
+                                <button
+                                  key={role.id}
+                                  onClick={() => toggleCategoryRole(index, role.id)}
+                                  className={`text-xs px-2 py-1 rounded-full border transition-colors ${isSelected ? "border-transparent text-white" : "border-gray-200 text-gray-600 hover:border-gray-400"}`}
+                                  style={isSelected ? { backgroundColor: hexColor } : {}}
+                                >
+                                  @{role.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {!guildRoles.length && (
+                        <div>
+                          <div className="text-xs text-gray-500 mb-1">{tr("ID ролей для уведомления (через запятую)", "Role IDs to mention (comma-separated)")}</div>
+                          <Input
+                            value={(item.roleIds || []).join(", ")}
+                            onChange={(e) => updateCategory(index, { roleIds: e.target.value.split(",").map(s => s.trim()).filter(Boolean) })}
+                            placeholder="123456789, 987654321"
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="text-xs text-gray-500">{tr("Поля модалки (макс. 5)", "Modal fields (max 5)")}</div>
+                          {(item.modalFields || []).length < 5 && (
+                            <button className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1" onClick={() => addCategoryModalField(index)}>
+                              <Plus className="h-3 w-3" /> {tr("Добавить поле", "Add field")}
+                            </button>
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          {(item.modalFields || []).map((field, fi) => (
+                            <div key={field.id} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto_auto_auto] gap-2 items-center rounded border border-gray-100 p-2 bg-gray-50">
+                              <Input
+                                value={field.label}
+                                onChange={(e) => updateCategoryModalField(index, fi, { label: e.target.value })}
+                                placeholder={tr("Название поля", "Field label")}
+                                className="text-sm"
+                              />
+                              <Input
+                                value={field.placeholder || ""}
+                                onChange={(e) => updateCategoryModalField(index, fi, { placeholder: e.target.value })}
+                                placeholder={tr("Подсказка (placeholder)", "Placeholder")}
+                                className="text-sm"
+                              />
+                              <Select value={String(field.style || 1)} onValueChange={(v) => updateCategoryModalField(index, fi, { style: Number(v) as 1 | 2 })}>
+                                <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="1">{tr("Строка", "Short")}</SelectItem>
+                                  <SelectItem value="2">{tr("Абзац", "Paragraph")}</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <div className="flex items-center gap-1 text-xs text-gray-500">
+                                <Switch checked={field.required !== false} onCheckedChange={(v) => updateCategoryModalField(index, fi, { required: v })} />
+                                <span>{tr("Обяз.", "Req.")}</span>
+                              </div>
+                              <button className="text-red-400 hover:text-red-600" onClick={() => removeCategoryModalField(index, fi)}>
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </div>
+                          ))}
+                          {(item.modalFields || []).length === 0 && (
+                            <div className="text-xs text-gray-400 text-center py-2">{tr("Нет полей — добавьте хотя бы одно.", "No fields — add at least one.")}</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
-              <div className="flex gap-2">
+              <div className="flex gap-2 pt-1">
                 <Input
                   value={newCategoryName}
                   onChange={(e) => setNewCategoryName(e.target.value)}
                   placeholder={tr("Новая категория...", "New category...")}
                   onKeyDown={(e) => e.key === "Enter" && addNewCategory()}
                 />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={addNewCategory}
-                  disabled={!newCategoryName.trim()}
-                >
+                <Button variant="outline" size="sm" onClick={addNewCategory} disabled={!newCategoryName.trim()}>
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
             </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
 
             <div className="rounded-lg border border-gray-200 p-3 space-y-2">
               <div className="text-sm font-semibold text-gray-700">{tr("Теги", "Tags")}</div>
@@ -466,6 +697,7 @@ export function AdminTickets() {
                 </Button>
               </div>
             </div>
+          </div>
           </div>
 
           <div className="flex justify-end">

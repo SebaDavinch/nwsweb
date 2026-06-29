@@ -36,6 +36,7 @@ import {
   XCircle,
   AlertCircle,
   HelpCircle,
+  Download,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -64,6 +65,7 @@ import { PilotLeaderboard } from "./pilot-leaderboard";
 import { PilotStreamWidgets } from "./pilot-stream-widgets";
 import { PilotAchievements } from "./pilot-achievements";
 import { ActivityFeed } from "./activity-feed";
+import { PilotDownloads } from "./pilot-downloads";
 
 const normalizeDashboardTab = (value: string) => {
   if (value === "claims") {
@@ -378,7 +380,7 @@ export function PilotDashboard() {
     const discordState = String(params.get("discord") || "").trim();
 
     const normalizedRequestedTab = normalizeDashboardTab(requestedTab);
-    const allowedTabs = new Set(["home", "feed", "my-flights", "bookings", "all-flights", "manual-pirep", "notams", "badges", "achievements", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "gallery", "pirep", "passport", "balance", "stats", "leaderboard", "settings"]);
+    const allowedTabs = new Set(["home", "feed", "my-flights", "bookings", "all-flights", "manual-pirep", "notams", "badges", "achievements", "simbrief", "where2fly", "recent", "fleet", "liveries", "airports", "gallery", "pirep", "passport", "balance", "stats", "leaderboard", "downloads", "settings"]);
     // redirect legacy tabs to merged page
     if (normalizedRequestedTab === "bookings" || normalizedRequestedTab === "recent") {
       setActiveTab("my-flights");
@@ -495,6 +497,7 @@ export function PilotDashboard() {
     { id: "balance", label: t("dashboard.tabs.balance"), icon: Coins },
     { id: "documents", label: t("nav.documents"), icon: FileText },
     { id: "stream-widgets", label: tr("Виджеты", "Widgets"), icon: MonitorPlay },
+    { id: "downloads", label: tr("Загрузки", "Downloads"), icon: Download },
     { id: "settings", label: t("dashboard.settings"), icon: Settings },
   ];
 
@@ -1291,6 +1294,12 @@ export function PilotDashboard() {
             {activeTab === "stream-widgets" && (
               <div className="animate-in fade-in duration-500">
                 <PilotStreamWidgets />
+              </div>
+            )}
+
+            {activeTab === "downloads" && (
+              <div className="animate-in fade-in duration-500">
+                <PilotDownloads />
               </div>
             )}
 

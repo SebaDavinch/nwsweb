@@ -276,7 +276,9 @@ export function AdminNews() {
           tag: data.tag || null,
           linkUrl: data.linkUrl || null,
           sendToDiscord: Boolean(data.sendToDiscord),
+          sendToTelegram: Boolean(data.sendToTelegram),
           sendToVK: Boolean(data.sendToVK),
+          bannerUrl: data.bannerUrl || null,
         };
         const response = await fetch(
           editingItem?.category === "News"
@@ -321,7 +323,9 @@ export function AdminNews() {
           tag: data.tag || null,
           url: data.linkUrl || null,
           sendToDiscord: Boolean(data.sendToDiscord),
+          sendToTelegram: Boolean(data.sendToTelegram),
           sendToVK: Boolean(data.sendToVK),
+          bannerUrl: data.bannerUrl || null,
         };
         const response = await fetch(editingItem?.externalId ? `/api/admin/notams/${editingItem.externalId}` : "/api/admin/notams", {
           method: editingItem?.externalId ? "PUT" : "POST",
@@ -343,7 +347,9 @@ export function AdminNews() {
           start_showing: data.alertStartShowing || null,
           stop_showing: data.alertStopShowing || null,
           sendToDiscord: Boolean(data.sendToDiscord),
+          sendToTelegram: Boolean(data.sendToTelegram),
           sendToVK: Boolean(data.sendToVK),
+          bannerUrl: data.bannerUrl || null,
         };
         const response = await fetch(editingItem?.externalId ? `/api/admin/alerts/${editingItem.externalId}` : "/api/admin/alerts", {
           method: editingItem?.externalId ? "PUT" : "POST",

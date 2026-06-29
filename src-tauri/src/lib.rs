@@ -90,6 +90,92 @@ fn discord_clear(state: State<DiscordState>) -> Result<(), String> {
   Ok(())
 }
 
+// ── Livery installer ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+async fn install_livery(
+  download_url: String,
+  community_path: String,
+  package_name: String,
+) -> Result<u32, String> {
+  // Sanitise package_name — must not escape the community folder
+  if package_name.is_empty()
+    || package_name.contains('/')
+    || package_name.contains('\\')
+    || package_name.contains("..")
+  {
+    return Err("Invalid package name".to_string());
+  }
+
+  let target_dir = std::path::Path::new(&community_path).join(&package_name);
+
+  // Download ZIP
+  let client = reqwest::Client::builder()
+    .user_agent("NordwindHub/1.0")
+    .build()
+    .map_err(|e| e.to_string())?;
+
+  let resp = client
+    .get(&download_url)
+    .send()
+    .await
+    .map_err(|e| format!("Download: {e}"))?;
+
+  if !resp.status().is_success() {
+    return Err(format!("HTTP {}", resp.status().as_u16()));
+  }
+
+  let bytes = resp.bytes().await.map_err(|e| format!("Read: {e}"))?;
+
+  // Extract ZIP into target_dir
+  let cursor = std::io::Cursor::new(bytes.as_ref());
+  let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP: {e}"))?;
+
+  std::fs::create_dir_all(&target_dir).map_err(|e| format!("mkdir: {e}"))?;
+
+  let mut extracted = 0u32;
+  for i in 0..archive.len() {
+    let mut entry = archive.by_index(i).map_err(|e| e.to_string())?;
+    let out_path = match entry.enclosed_name() {
+      Some(name) => target_dir.join(name),
+      None => continue, // skip path-traversal entries
+    };
+    // Double-check the output is still within target_dir
+    if !out_path.starts_with(&target_dir) {
+      continue;
+    }
+    if entry.is_dir() {
+      std::fs::create_dir_all(&out_path).map_err(|e| e.to_string())?;
+    } else {
+      if let Some(p) = out_path.parent() {
+        std::fs::create_dir_all(p).map_err(|e| e.to_string())?;
+      }
+      let mut f = std::fs::File::create(&out_path)
+        .map_err(|e| format!("{}: {e}", out_path.display()))?;
+      std::io::copy(&mut entry, &mut f).map_err(|e| e.to_string())?;
+      extracted += 1;
+    }
+  }
+
+  Ok(extracted)
+}
+
+#[tauri::command]
+async fn remove_livery(community_path: String, package_name: String) -> Result<(), String> {
+  if package_name.is_empty()
+    || package_name.contains('/')
+    || package_name.contains('\\')
+    || package_name.contains("..")
+  {
+    return Err("Invalid package name".to_string());
+  }
+  let target = std::path::Path::new(&community_path).join(&package_name);
+  if target.exists() {
+    std::fs::remove_dir_all(&target).map_err(|e| e.to_string())?;
+  }
+  Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let mut builder = tauri::Builder::default();
@@ -118,7 +204,9 @@ pub fn run() {
       discord_set_activity,
       discord_clear,
       sim::sim_read,
-      sim::sim_status
+      sim::sim_status,
+      install_livery,
+      remove_livery,
     ])
     .setup(|app| {
       // Регистрация кастом-схемы nordwind:// в рантайме (для dev и Linux).

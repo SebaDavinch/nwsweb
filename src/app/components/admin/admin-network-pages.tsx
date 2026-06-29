@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Edit, PlaneTakeoff, RefreshCw, Search, Trash2, Users, Wand2, X } from "lucide-react";
+import { Building2, Edit, MessageSquare, PlaneTakeoff, RefreshCw, Search, Trash2, Users, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -230,6 +230,7 @@ export function AdminActivitiesManagement() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [subtypeFilter, setSubtypeFilter] = useState("all");
+  const [publishingId, setPublishingId] = useState<string | null>(null);
 
   const loadActivities = async ({ silent = false } = {}) => {
     if (silent) {
@@ -311,6 +312,44 @@ export function AdminActivitiesManagement() {
     }
   }, [subtypeFilter, subtypeOptions]);
 
+  const typeToSection = (type: string) => {
+    const map: Record<string, string> = {
+      Event: "events",
+      FocusAirport: "focus-airports",
+      Tour: "tours",
+      Roster: "rosters",
+      CommunityGoal: "community-goals",
+      CommunityChallenge: "community-challenges",
+    };
+    return map[type] ?? "events";
+  };
+
+  const publishToDiscord = async (activity: AdminActivityItem) => {
+    const section = typeToSection(activity.type);
+    setPublishingId(activity.id);
+    try {
+      const res = await fetch(`/api/admin/activities/${section}/${activity.originalId}/discord`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: activity.name,
+          description: activity.description,
+          start: activity.start,
+          end: activity.end,
+          points: activity.points,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      toast.success(tr("Опубликовано в Discord", "Published to Discord"));
+    } catch (err) {
+      toast.error(String((err as Error).message));
+    } finally {
+      setPublishingId(null);
+    }
+  };
+
   const filteredActivities = useMemo(() => {
     const query = search.trim().toLowerCase();
     return scopedActivities.filter((activity) => {
@@ -344,14 +383,14 @@ export function AdminActivitiesManagement() {
       <div className="grid gap-4 md:grid-cols-4">
         <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{tr("Всего", "Total")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{scopedSummary.total}</div></CardContent></Card>
         <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{tr("Активные", "Active")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{scopedSummary.byStatus.active || 0}</div></CardContent></Card>
-        <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{tr("Скоро старт", "Soon starting")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{summary.byStatus.upcoming || 0}</div></CardContent></Card>
+        <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{tr("Ближайшие", "Upcoming")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{summary.byStatus.upcoming || 0}</div></CardContent></Card>
         <Card className="border-none shadow-sm"><CardContent className="p-5"><div className="text-sm text-gray-500">{tr("Завершенные", "Ended")}</div><div className="mt-2 text-2xl font-semibold text-gray-900">{scopedSummary.byStatus.ended || 0}</div></CardContent></Card>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
         <TabsList className="w-full justify-start gap-2 bg-transparent p-0">
           <TabsTrigger value="all" className="border border-gray-200 bg-white px-4 data-[state=active]:border-red-200 data-[state=active]:bg-red-50 data-[state=active]:text-red-700">{tr("Все активности", "All activities")} ({summary.total})</TabsTrigger>
-          <TabsTrigger value="soon-starting" className="border border-gray-200 bg-white px-4 data-[state=active]:border-red-200 data-[state=active]:bg-red-50 data-[state=active]:text-red-700">{tr("Скоро старт", "Soon starting")} ({summary.byStatus.upcoming || 0})</TabsTrigger>
+          <TabsTrigger value="soon-starting" className="border border-gray-200 bg-white px-4 data-[state=active]:border-red-200 data-[state=active]:bg-red-50 data-[state=active]:text-red-700">{tr("Ближайшие мероприятия", "Upcoming events")} ({summary.byStatus.upcoming || 0})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="all">
@@ -394,11 +433,12 @@ export function AdminActivitiesManagement() {
                       <th className="px-4 py-3 font-medium">{tr("Цель", "Target")}</th>
                       <th className="px-4 py-3 font-medium">{tr("Прогресс", "Progress")}</th>
                       <th className="px-4 py-3 font-medium">{tr("Статус", "Status")}</th>
+                      <th className="px-4 py-3 font-medium text-right">{tr("Действия", "Actions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {isLoading ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">{tr("Загрузка активностей...", "Loading activities...")}</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">{tr("Загрузка активностей...", "Loading activities...")}</td></tr>
                     ) : filteredActivities.length > 0 ? (
                       filteredActivities.map((activity) => (
                         <tr key={activity.id} className="hover:bg-gray-50">
@@ -424,10 +464,17 @@ export function AdminActivitiesManagement() {
                             <Badge variant="outline" className="border-gray-200 bg-gray-50 text-gray-700">{activity.status}</Badge>
                             <div className="mt-2 text-xs text-gray-500">{tr("Обновлено", "Updated")} {formatDateTime(activity.updatedAt)}</div>
                           </td>
+                          <td className="px-4 py-3 align-top text-right">
+                            <Button variant="outline" size="sm" disabled={publishingId === activity.id} onClick={() => void publishToDiscord(activity)}>
+                              {publishingId === activity.id
+                                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                : <MessageSquare className="h-3.5 w-3.5" />}
+                            </Button>
+                          </td>
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">{tr("Активности не найдены.", "No activities found.")}</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">{tr("Активности не найдены.", "No activities found.")}</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -442,7 +489,7 @@ export function AdminActivitiesManagement() {
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
                 <div className="relative w-full xl:max-w-md">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
-                  <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr("Поиск активностей со скорым стартом...", "Search soon starting activities...")} className="pl-9" />
+                  <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={tr("Поиск ближайших мероприятий...", "Search upcoming events...")} className="pl-9" />
                 </div>
                 <Select value={typeFilter} onValueChange={setTypeFilter}>
                   <SelectTrigger className="w-full xl:w-56"><SelectValue placeholder={tr("Тип", "Type")} /></SelectTrigger>
@@ -469,11 +516,12 @@ export function AdminActivitiesManagement() {
                       <th className="px-4 py-3 font-medium">{tr("Цель", "Target")}</th>
                       <th className="px-4 py-3 font-medium">{tr("Прогресс", "Progress")}</th>
                       <th className="px-4 py-3 font-medium">{tr("Статус", "Status")}</th>
+                      <th className="px-4 py-3 font-medium text-right">{tr("Действия", "Actions")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {isLoading ? (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">{tr("Загрузка активностей...", "Loading activities...")}</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">{tr("Загрузка активностей...", "Loading activities...")}</td></tr>
                     ) : filteredActivities.length > 0 ? (
                       filteredActivities.map((activity) => (
                         <tr key={activity.id} className="hover:bg-gray-50">
@@ -495,13 +543,20 @@ export function AdminActivitiesManagement() {
                             <div className="text-xs text-gray-500">{activity.completionCount} {tr("завершений", "completions")} · {activity.points} {tr("очков", "pts")}</div>
                           </td>
                           <td className="px-4 py-3 align-top">
-                            <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">{tr("скоро старт", "soon starting")}</Badge>
+                            <Badge variant="outline" className="border-red-200 bg-red-50 text-red-700">{tr("ближайшее", "upcoming")}</Badge>
                             <div className="mt-2 text-xs text-gray-500">{tr("Старт", "Starts")} {formatCompactDate(activity.start)}</div>
+                          </td>
+                          <td className="px-4 py-3 align-top text-right">
+                            <Button variant="outline" size="sm" disabled={publishingId === activity.id} onClick={() => void publishToDiscord(activity)}>
+                              {publishingId === activity.id
+                                ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                : <MessageSquare className="h-3.5 w-3.5" />}
+                            </Button>
                           </td>
                         </tr>
                       ))
                     ) : (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-500">{tr("Активности со скорым стартом не найдены.", "No upcoming activities found.")}</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">{tr("Ближайшие мероприятия не найдены.", "No upcoming events found.")}</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -28,6 +28,11 @@ import { AdminGallery } from "./admin-gallery";
 import { AdminCallsignChecker } from "./admin-callsign-checker";
 import { AdminAchievements } from "./admin-achievements";
 import { AdminSlottedEvents } from "./admin-slotted-events";
+import { AdminRanks } from "./admin-ranks";
+import { AdminRegistrations } from "./admin-registrations";
+import { AdminScoring } from "./admin-scoring";
+import { AdminLeaderboards } from "./admin-leaderboards";
+import { AdminStatistics } from "./admin-statistics";
 import {
   Award,
   Bell,
@@ -41,7 +46,6 @@ import {
   FileText,
   Images,
   Mail,
-
   LayoutDashboard,
   LogOut,
   MapPinned,
@@ -53,7 +57,11 @@ import {
   Settings,
   Smartphone,
   ShieldCheck,
+  SlidersHorizontal,
+  Star,
+  TrendingUp,
   Trophy,
+  UserPlus,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -72,7 +80,7 @@ const ADMIN_PAGES = new Set([
   "events", "slotted-events", "staff", "badges", "achievements", "bookings", "routes", "pireps", "pirep-detail",
   "airports", "hubs", "tickets", "discord-bot", "telegram-bot", "vk-bot",
   "acars", "settings", "audit-logs", "auth-logs", "gallery",
-  "callsign-checker",
+  "callsign-checker", "ranks", "registrations", "scoring", "leaderboards", "statistics",
 ]);
 
 function AdminPageContent({ page, pageId, view }: { page: string; pageId: number; view: string }) {
@@ -101,6 +109,11 @@ function AdminPageContent({ page, pageId, view }: { page: string; pageId: number
 
   if (page === "gallery") return <AdminGallery />;
   if (page === "callsign-checker") return <AdminCallsignChecker />;
+  if (page === "ranks") return <AdminRanks />;
+  if (page === "registrations") return <AdminRegistrations />;
+  if (page === "scoring") return <AdminScoring />;
+  if (page === "leaderboards") return <AdminLeaderboards />;
+  if (page === "statistics") return <AdminStatistics />;
   if (page === "acars") return <AdminAcars />;
   if (page === "settings") return <AdminSettings />;
   if (page === "app-config") return <AdminAppConfig />;
@@ -191,12 +204,17 @@ export function AdminLayout() {
         label: tr("Операции", "Operations"),
         items: [
           { page: "pilots", icon: Users, label: t("admin.nav.pilots") },
+          { page: "registrations", icon: UserPlus, label: tr("Заявки", "Registrations") },
           { page: "bookings", icon: ClipboardList, label: tr("Букинги", "Bookings") },
           { page: "hubs", icon: MapPinned, label: tr("Хабы", "Hubs") },
           { page: "airports", icon: Building2, label: tr("Аэропорты", "Airports") },
           { page: "fleet", icon: Plane, label: t("admin.nav.fleet") },
           { page: "routes", icon: Route, label: tr("Маршруты", "Routes") },
           { page: "pireps", icon: FileSearch2, label: "PIREPs" },
+          { page: "ranks", icon: Star, label: tr("Ранги", "Ranks") },
+          { page: "scoring", icon: SlidersHorizontal, label: tr("Скоринг", "Scoring") },
+          { page: "leaderboards", icon: Trophy, label: tr("Лидерборды", "Leaderboards") },
+          { page: "statistics", icon: TrendingUp, label: tr("Статистика", "Statistics") },
           {
             page: "events",
             icon: CalendarDays,

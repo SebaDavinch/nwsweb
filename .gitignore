@@ -49,3 +49,15 @@ NordwindWebsite-main6/
 # Sensitive local files
 temp_vamsys.env
 data/auth-store.json
+data/pilots-roster.json
+data/fleet-snapshot.json
+data/vamsys-pilots.json
+data/vamsys-raw-response.json
+data/tmp_*.json
+data/admin-audit-log.json
+data/event-coins.json
+data/pilot-tokens.json
+data/social-gallery.json
+data/social-gallery-assets/
+data/liveries/
+artifacts/

@@ -68,6 +68,8 @@ interface PirepListItem {
   on_blocks_time?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+  _departure_info?: { icao?: string | null; city?: string | null; countryIso2?: string | null } | null;
+  _arrival_info?: { icao?: string | null; city?: string | null; countryIso2?: string | null } | null;
 }
 
 interface PirepComment {
@@ -160,6 +162,20 @@ interface PirepDetail extends PirepListItem {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+function countryFlag(iso2?: string | null): string {
+  if (!iso2 || iso2.length !== 2) return "";
+  return String.fromCodePoint(...[...iso2.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) + " ";
+}
+
+function AirportLabel({ info, fallbackId }: { info?: { icao?: string | null; city?: string | null; countryIso2?: string | null } | null; fallbackId?: number | null }) {
+  if (!info && !fallbackId) return <span>—</span>;
+  if (!info) return <span className="font-mono">{fallbackId}</span>;
+  const flag = countryFlag(info.countryIso2);
+  const city = info.city || "";
+  const icao = info.icao || "";
+  return <span>{flag}{city}{city && icao ? " " : ""}{icao ? <span className="font-mono">({icao})</span> : null}</span>;
+}
+
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   accepted: "default",
   auto_accepted: "default",
@@ -236,11 +252,11 @@ export function AdminPireps() {
       setPireps(data.pireps || []);
       setNextCursor(data.meta?.next_cursor || null);
     } catch {
-      toast.error(tr("Не удалось загрузить PIREP", "Failed to load PIREPs"));
+      toast.error("Не удалось загрузить PIREP");
     } finally {
       setIsLoading(false);
     }
-  }, [filterStatus, filterNeedReply, filterType, filterSearch, tr]);
+  }, [filterStatus, filterNeedReply, filterType, filterSearch]);
 
   useEffect(() => {
     setCurrentCursor("");
@@ -368,9 +384,13 @@ export function AdminPireps() {
                 </td>
                 <td className="px-3 py-2 font-mono text-xs">{p.flight_number || "—"}</td>
                 <td className="px-3 py-2 text-xs">
-                  {p.departure_airport_id && p.arrival_airport_id
-                    ? `${p.departure_airport_id} → ${p.arrival_airport_id}`
-                    : "—"}
+                  {(p._departure_info || p.departure_airport_id) && (p._arrival_info || p.arrival_airport_id) ? (
+                    <span className="flex items-center gap-1 flex-wrap">
+                      <AirportLabel info={p._departure_info} fallbackId={p.departure_airport_id} />
+                      <span className="text-gray-400">→</span>
+                      <AirportLabel info={p._arrival_info} fallbackId={p.arrival_airport_id} />
+                    </span>
+                  ) : "—"}
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-1">
@@ -484,7 +504,7 @@ export function AdminPirepDetail({ pirepId: pirepIdProp }: { pirepId?: number })
     } finally {
       setIsLoading(false);
     }
-  }, [pirepId, tr]);
+  }, [pirepId]);
 
   const loadPositionReports = useCallback(async () => {
     setIsPosLoading(true);
@@ -493,11 +513,11 @@ export function AdminPirepDetail({ pirepId: pirepIdProp }: { pirepId?: number })
       const data = await resp.json() as { positionReports?: PirepPositionReport[] };
       setPositionReports(data.positionReports || []);
     } catch {
-      toast.error(tr("Не удалось загрузить position reports", "Failed to load position reports"));
+      toast.error("Не удалось загрузить position reports");
     } finally {
       setIsPosLoading(false);
     }
-  }, [pirepId, tr]);
+  }, [pirepId]);
 
   const loadTouchdowns = useCallback(async () => {
     setIsTdLoading(true);
@@ -506,11 +526,11 @@ export function AdminPirepDetail({ pirepId: pirepIdProp }: { pirepId?: number })
       const data = await resp.json() as { touchdowns?: PirepTouchdown[] };
       setTouchdowns(data.touchdowns || []);
     } catch {
-      toast.error(tr("Не удалось загрузить touchdowns", "Failed to load touchdowns"));
+      toast.error("Не удалось загрузить touchdowns");
     } finally {
       setIsTdLoading(false);
     }
-  }, [pirepId, tr]);
+  }, [pirepId]);
 
   useEffect(() => {
     if (pirepId > 0) {

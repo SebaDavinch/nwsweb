@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useAdminNav } from "./admin-nav-context";
-import { ArrowLeft, Award, Building2, Clock3, Edit, Loader2, Plane, Route, Send, ShieldCheck, Trash2, UserRound, Wifi, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Award, Building2, CalendarOff, Clock3, Edit, Loader2, Plane, Route, Send, ShieldCheck, ShieldOff, Trash2, UserRound, Wifi, X } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, XAxis, YAxis } from "recharts";
 import { toast } from "sonner";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "../ui/accordion";
@@ -497,6 +497,67 @@ const BreakdownCard = ({
   );
 };
 
+interface HolidayEntry {
+  id: number | string;
+  start_date?: string | null;
+  end_date?: string | null;
+  reason?: string | null;
+}
+
+function PilotHolidaysSection({ pilotId }: { pilotId: number }) {
+  const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (pilotId <= 0) return;
+    setLoading(true);
+    fetch(`/api/admin/pilots/${pilotId}/holidays`, { credentials: "include" })
+      .then((r) => r.ok ? r.json() : { holidays: [] })
+      .then((d) => setHolidays(Array.isArray(d.holidays) ? d.holidays : []))
+      .catch(() => setHolidays([]))
+      .finally(() => setLoading(false));
+  }, [pilotId]);
+
+  const fmt = (d: string | null | undefined) =>
+    d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+  if (!loading && holidays.length === 0) return null;
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg"><CalendarOff className="h-5 w-5 text-[#E31E24]" /> Holidays</CardTitle>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <div className="flex items-center gap-2 text-sm text-gray-400"><Loader2 className="h-4 w-4 animate-spin" /> Loading…</div>
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-gray-100">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-4 py-2.5 font-medium">Start</th>
+                  <th className="px-4 py-2.5 font-medium">End</th>
+                  <th className="px-4 py-2.5 font-medium">Reason</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {holidays.map((h) => (
+                  <tr key={h.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5 font-medium text-gray-900">{fmt(h.start_date)}</td>
+                    <td className="px-4 py-2.5 text-gray-700">{fmt(h.end_date)}</td>
+                    <td className="px-4 py-2.5 text-gray-500">{h.reason || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AdminPilotProfile() {
   const { navigateTo } = useAdminNav();
   const navigate = useNavigate();
@@ -515,6 +576,7 @@ export function AdminPilotProfile() {
   const [isSendingReview, setIsSendingReview] = useState(false);
   const [hubs, setHubs] = useState<Array<{ id: number; name: string }>>([]);
   const [isChangingHub, setIsChangingHub] = useState(false);
+  const [isBanning, setIsBanning] = useState(false);
 
   const loadProfile = async ({ silent = false } = {}) => {
     if (!silent) {
@@ -738,6 +800,31 @@ export function AdminPilotProfile() {
     }
   };
 
+  const handleBan = async () => {
+    if (!payload) return;
+    const isBanned = payload.profile.banned;
+    const action = isBanned ? "unban" : "ban";
+    if (!confirm(isBanned ? `Разбанить пилота ${payload.profile.name}?` : `Заблокировать пилота ${payload.profile.name} в vAMSYS?`)) return;
+    setIsBanning(true);
+    try {
+      const res = await fetch(`/api/admin/pilots/${pilotId}/ban`, {
+        method: isBanned ? "DELETE" : "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || res.statusText);
+      }
+      toast.success(isBanned ? "Пилот разбанен" : "Пилот заблокирован");
+      setPayload((prev) => prev ? { ...prev, profile: { ...prev.profile, banned: !isBanned } } : prev);
+    } catch (err) {
+      toast.error(`Failed to ${action} pilot: ${(err as Error).message}`);
+    } finally {
+      setIsBanning(false);
+    }
+  };
+
   const summaryCards = useMemo(() => {
     if (!payload) {
       return [];
@@ -797,6 +884,15 @@ export function AdminPilotProfile() {
 
   return (
     <div className="space-y-6">
+      {(payload.profile.frozen || payload.profile.banned) && (
+        <div className={`flex items-start gap-3 rounded-xl border px-4 py-3 ${payload.profile.banned ? "border-red-200 bg-red-50 text-red-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
+          <div>
+            <div className="font-semibold">{payload.profile.banned ? "Пилот заблокирован (Banned)" : "Пилот заморожен (Frozen)"}</div>
+            <div className="mt-0.5 text-sm opacity-80">{payload.profile.banned ? "Этот пилот заблокирован в vAMSYS. Он не может входить в систему или подавать рейсы." : "Этот пилот временно заморожен. Полёты заморожены до разблокировки."}</div>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
           <Button variant="outline" onClick={() => navigateTo("pilots")} className="mb-3">
@@ -806,11 +902,27 @@ export function AdminPilotProfile() {
           <h1 className="text-3xl font-bold text-gray-900">{payload.profile.name}</h1>
           <p className="mt-1 text-sm text-gray-500">{payload.profile.username} · VA ID {payload.profile.id} · admin profile view</p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">{payload.profile.rank}</Badge>
           <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">{payload.profile.status}</Badge>
           {payload.rank.honorary ? <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">Honorary display rank</Badge> : null}
           {payload.profile.useImperialUnits ? <Badge variant="outline" className="border-gray-200 bg-white text-gray-700">Imperial units</Badge> : null}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void handleBan()}
+            disabled={isBanning}
+            className={payload.profile.banned
+              ? "border-green-200 text-green-700 hover:bg-green-50"
+              : "border-red-200 text-red-600 hover:bg-red-50"}
+          >
+            {isBanning
+              ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              : payload.profile.banned
+                ? <ShieldOff className="mr-1 h-3.5 w-3.5" />
+                : <ShieldOff className="mr-1 h-3.5 w-3.5" />}
+            {payload.profile.banned ? "Unban" : "Ban"}
+          </Button>
         </div>
       </div>
 
@@ -1063,6 +1175,8 @@ export function AdminPilotProfile() {
           </CardContent>
         </Card>
       </div>
+
+      <PilotHolidaysSection pilotId={pilotId} />
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <Card className="border-none shadow-sm">

@@ -1,5 +1,5 @@
-import { ChangeEvent, useEffect, useRef, useState } from "react";
-import { Bell, ImageUp, Lock, MapPinned, MessageSquare, Plane, RefreshCw, RotateCcw, Send, Shield } from "lucide-react";
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Bell, CalendarOff, ImageUp, Lock, MapPinned, MessageSquare, Plane, Plus, RefreshCw, RotateCcw, Send, Shield, Trash2 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router";
 import { toast } from "sonner";
 import { useLanguage } from "../../context/language-context";
@@ -184,6 +184,280 @@ const resizeAvatarToDataUrl = async (file: File) => {
   const webp = canvas.toDataURL("image/webp", 0.9);
   return webp.length > 420000 ? canvas.toDataURL("image/jpeg", 0.86) : webp;
 };
+
+interface HubInfo {
+  id?: number | string | null;
+  name?: string | null;
+  icao?: string | null;
+}
+
+interface HubOption {
+  id: number;
+  name: string;
+  airportsText?: string;
+}
+
+function HubChangeCard() {
+  const { language } = useLanguage();
+  const tr = useCallback((ru: string, en: string) => (language === "ru" ? ru : en), [language]);
+
+  const [currentHub, setCurrentHub] = useState<HubInfo | null>(null);
+  const [hubs, setHubs] = useState<HubOption[]>([]);
+  const [selectedHubId, setSelectedHubId] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setIsLoading(true);
+      try {
+        const [hubRes, bootstrapRes] = await Promise.all([
+          fetch("/api/pilot/hub", { credentials: "include" }),
+          fetch("/api/vamsys/dashboard/bootstrap", { credentials: "include" }),
+        ]);
+        if (!active) return;
+        if (hubRes.ok) {
+          const d = await hubRes.json().catch(() => ({}));
+          const hub = d.hub?.data ?? d.hub ?? d;
+          setCurrentHub(hub);
+          const id = String(hub?.id || "");
+          if (id) setSelectedHubId(id);
+        }
+        if (bootstrapRes.ok) {
+          const d = await bootstrapRes.json().catch(() => ({}));
+          const rawHubs = Array.isArray(d.hubs) ? d.hubs : [];
+          setHubs(rawHubs.map((h: any) => ({
+            id: Number(h.id || 0),
+            name: String(h.name || ""),
+            airportsText: String(h.airportsText || h.airports_text || ""),
+          })).filter((h: HubOption) => h.id > 0));
+        }
+      } catch {
+        // Pilot API not connected — silently hide
+      } finally {
+        if (active) setIsLoading(false);
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
+
+  const handleSave = async () => {
+    const hubId = Number(selectedHubId) || 0;
+    if (hubId <= 0) return;
+    setIsSaving(true);
+    try {
+      const res = await fetch("/api/pilot/hub", {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hub_id: hubId }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || res.statusText);
+      }
+      const chosen = hubs.find((h) => h.id === hubId);
+      if (chosen) setCurrentHub({ id: hubId, name: chosen.name });
+      import("sonner").then(({ toast }) => toast.success(tr("Хаб обновлён", "Hub updated")));
+    } catch (err) {
+      import("sonner").then(({ toast }) => toast.error(String((err as Error).message)));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading || hubs.length === 0) return null;
+
+  const currentHubId = String(currentHub?.id || "");
+  const hasChanged = selectedHubId && selectedHubId !== currentHubId;
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <MapPinned className="w-5 h-5 text-[#E31E24]" />
+          <CardTitle>{tr("Домашний хаб", "Home hub")}</CardTitle>
+        </div>
+        <CardDescription>
+          {tr("Базовый аэропорт приписки. Смена доступна через Pilot API.", "Your home base airport. Change requires Pilot API connection.")}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {currentHub?.name && (
+          <p className="text-sm text-gray-600">
+            {tr("Текущий хаб:", "Current hub:")} <span className="font-medium text-gray-900">{currentHub.name}</span>
+          </p>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Select value={selectedHubId} onValueChange={setSelectedHubId}>
+            <SelectTrigger className="w-full sm:w-72">
+              <SelectValue placeholder={tr("Выберите хаб", "Select hub")} />
+            </SelectTrigger>
+            <SelectContent>
+              {hubs.map((h) => (
+                <SelectItem key={h.id} value={String(h.id)}>
+                  {h.name}{h.airportsText ? ` · ${h.airportsText}` : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            onClick={handleSave}
+            disabled={!hasChanged || isSaving}
+            className="bg-[#E31E24] hover:bg-[#c21920] text-white"
+          >
+            {isSaving && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+            {tr("Сменить хаб", "Change hub")}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+interface HolidayItem {
+  id: number | string;
+  start_date?: string | null;
+  end_date?: string | null;
+  reason?: string | null;
+}
+
+function HolidaysCard() {
+  const { language } = useLanguage();
+  const tr = useCallback((ru: string, en: string) => (language === "ru" ? ru : en), [language]);
+
+  const [holidays, setHolidays] = useState<HolidayItem[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | string | null>(null);
+
+  const load = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch("/api/pilot/holidays", { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setHolidays(Array.isArray(data.holidays) ? data.holidays : []);
+    } catch {
+      // silently ignore if Pilot API not connected
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!startDate || !endDate) { return; }
+    setSaving(true);
+    try {
+      const res = await fetch("/api/pilot/holidays", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_date: startDate, end_date: endDate, reason: reason || undefined }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || res.statusText);
+      }
+      setShowForm(false);
+      setStartDate(""); setEndDate(""); setReason("");
+      void load();
+    } catch (err) {
+      import("sonner").then(({ toast }) => toast.error(String((err as Error).message)));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: number | string) => {
+    setDeletingId(id);
+    try {
+      await fetch(`/api/pilot/holidays/${id}`, { method: "DELETE", credentials: "include" });
+      void load();
+    } catch {
+      // ignore
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const fmt = (d: string | null | undefined) =>
+    d ? new Date(d).toLocaleDateString(language === "ru" ? "ru-RU" : "en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CalendarOff className="w-5 h-5 text-[#E31E24]" />
+            <CardTitle>{tr("Отпуска (Holidays)", "Holidays")}</CardTitle>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowForm((v) => !v)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />{tr("Добавить", "Add")}
+          </Button>
+        </div>
+        <CardDescription>{tr("Периоды неактивности — не учитываются в требованиях активности vAMSYS.", "Inactive periods — excluded from vAMSYS activity requirements.")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {showForm && (
+          <div className="rounded-lg border border-dashed border-gray-300 p-4 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">{tr("Начало", "Start date")}</Label>
+                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs text-gray-500">{tr("Конец", "End date")}</Label>
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-gray-500">{tr("Причина (необязательно)", "Reason (optional)")}</Label>
+              <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={tr("Отпуск, командировка...", "Vacation, trip...")} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={handleAdd} disabled={saving || !startDate || !endDate} className="bg-[#E31E24] hover:bg-[#c21920] text-white">
+                {saving && <RefreshCw className="mr-1 h-3.5 w-3.5 animate-spin" />}{tr("Сохранить", "Save")}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setShowForm(false)}>{tr("Отмена", "Cancel")}</Button>
+            </div>
+          </div>
+        )}
+
+        {isLoading ? (
+          <div className="py-4 text-center text-sm text-gray-400"><RefreshCw className="mx-auto h-4 w-4 animate-spin" /></div>
+        ) : holidays.length === 0 ? (
+          <p className="py-4 text-center text-sm text-gray-400">{tr("Отпусков нет", "No holidays recorded")}</p>
+        ) : (
+          <div className="space-y-2">
+            {holidays.map((h) => (
+              <div key={h.id} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-3 py-2.5">
+                <div>
+                  <div className="text-sm font-medium text-gray-900">{fmt(h.start_date)} — {fmt(h.end_date)}</div>
+                  {h.reason && <div className="text-xs text-gray-400">{h.reason}</div>}
+                </div>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-gray-400 hover:text-red-500"
+                  onClick={() => void handleDelete(h.id)} disabled={deletingId === h.id}>
+                  {deletingId === h.id
+                    ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    : <Trash2 className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function PilotSettings() {
   const { t, language } = useLanguage();
@@ -951,6 +1225,8 @@ export function PilotSettings() {
           </CardContent>
         </Card>
 
+        <HubChangeCard />
+
         <Card className="border-none shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -1253,6 +1529,8 @@ export function PilotSettings() {
             )}
           </CardContent>
         </Card>
+
+        <HolidaysCard />
 
         <Card className="border-none shadow-sm">
           <CardHeader>

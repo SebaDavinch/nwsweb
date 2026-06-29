@@ -407,6 +407,9 @@ const makeDiskBackedCache = ({ cacheFile, ttlMs, fetcher }) => {
 
 const DATA_DIR = path.dirname(AUTH_STORE_FILE);
 
+// RAGTest proxy configuration
+const RAG_API_URL = (process.env.RAG_API_URL || "http://localhost:3000").replace(/\/$/, "");
+
 const notamsCache = makeDiskBackedCache({
   cacheFile: path.join(DATA_DIR, "cache-notams.json"),
   ttlMs: 10 * 60 * 1000, // 10 min
@@ -34609,6 +34612,17 @@ app.get("/api/admin/system-status", async (_req, res) => {
     }
   }
 
+  let ragReachable = false;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 3000);
+    const r = await fetch(`${RAG_API_URL}/api/status`, { signal: ctrl.signal });
+    clearTimeout(t);
+    ragReachable = r.ok || r.status === 401;
+  } catch {
+    ragReachable = false;
+  }
+
   res.json({
     vamsys: {
       configured: credentialsConfigured,
@@ -34620,6 +34634,10 @@ app.get("/api/admin/system-status", async (_req, res) => {
     },
     server: {
       port: Number(PORT) || 8787,
+    },
+    ragProxy: {
+      url: RAG_API_URL,
+      reachable: ragReachable,
     },
   });
 });
@@ -35551,6 +35569,377 @@ app.get("/api/app/download/:version", (req, res) => {
   const release = readAppReleases().find((r) => r.version === version);
   if (!release) return res.status(404).json({ error: "Release not found" });
   streamReleaseDownload(res, release);
+});
+
+// MSFS Hub panel — директория и файл истории релизов.
+const MSFS_HUB_DIR = path.join(path.dirname(AUTH_STORE_FILE), "msfs-hub");
+const MSFS_HUB_RELEASES_FILE = path.join(MSFS_HUB_DIR, "releases.json");
+
+function readMsfsHubReleases() {
+  try {
+    if (fs.existsSync(MSFS_HUB_RELEASES_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(MSFS_HUB_RELEASES_FILE, "utf8"));
+      return Array.isArray(raw) ? raw : [];
+    }
+    // Migrate legacy single-entry manifest.json
+    const legacyFile = path.join(MSFS_HUB_DIR, "manifest.json");
+    if (fs.existsSync(legacyFile)) {
+      const legacy = JSON.parse(fs.readFileSync(legacyFile, "utf8"));
+      if (legacy && legacy.version) {
+        const migrated = [{ version: legacy.version, notes: legacy.notes || "", fileName: legacy.fileName || "", uploadedAt: legacy.updatedAt || new Date().toISOString(), downloads: 0 }];
+        writeMsfsHubReleases(migrated);
+        return migrated;
+      }
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function writeMsfsHubReleases(releases) {
+  if (!fs.existsSync(MSFS_HUB_DIR)) fs.mkdirSync(MSFS_HUB_DIR, { recursive: true });
+  fs.writeFileSync(MSFS_HUB_RELEASES_FILE, JSON.stringify(releases, null, 2));
+}
+
+function msfsHubLatest(releases) {
+  return releases.slice().sort((a, b) => compareVersionsDesc(a.version, b.version))[0] || null;
+}
+
+function msfsHubPublicView(r, withSize = false) {
+  const view = { version: r.version, notes: r.notes || "", uploadedAt: r.uploadedAt || null, downloads: r.downloads || 0 };
+  if (withSize) {
+    const fp = path.join(MSFS_HUB_DIR, r.fileName || "");
+    view.fileSizeBytes = r.fileName && fs.existsSync(fp) ? fs.statSync(fp).size : null;
+  }
+  return view;
+}
+
+// Публичная версия — используется панелью для проверки обновлений.
+app.get("/api/app/msfs-hub/version", (_req, res) => {
+  const latest = msfsHubLatest(readMsfsHubReleases());
+  if (!latest) return res.json({ version: null, notes: null, uploadedAt: null });
+  res.json({ version: latest.version, notes: latest.notes || null, uploadedAt: latest.uploadedAt || null });
+});
+
+// Публичная история — для страницы загрузок в дашборде.
+app.get("/api/app/msfs-hub/releases", (_req, res) => {
+  const releases = readMsfsHubReleases().sort((a, b) => compareVersionsDesc(a.version, b.version));
+  res.json({ latest: releases[0] ? msfsHubPublicView(releases[0]) : null, releases: releases.map((r) => msfsHubPublicView(r)) });
+});
+
+// Публичное скачивание latest.
+app.get("/api/app/msfs-hub/download", (_req, res) => {
+  const releases = readMsfsHubReleases();
+  const latest = msfsHubLatest(releases);
+  if (!latest?.fileName) return res.status(404).json({ error: "MSFS hub package not available yet" });
+  const filePath = path.join(MSFS_HUB_DIR, latest.fileName);
+  if (!filePath.startsWith(MSFS_HUB_DIR) || !fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+  try { latest.downloads = (latest.downloads || 0) + 1; writeMsfsHubReleases(releases); } catch { /* ignore */ }
+  res.download(filePath, `VNWSHub-${latest.version}.zip`);
+});
+
+// Публичное скачивание конкретной версии.
+app.get("/api/app/msfs-hub/download/:version", (req, res) => {
+  const releases = readMsfsHubReleases();
+  const ver = String(req.params.version || "").replace(/^v/, "").trim();
+  const release = releases.find((r) => r.version === ver);
+  if (!release?.fileName) return res.status(404).json({ error: "Version not found" });
+  const filePath = path.join(MSFS_HUB_DIR, release.fileName);
+  if (!filePath.startsWith(MSFS_HUB_DIR) || !fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+  try { release.downloads = (release.downloads || 0) + 1; writeMsfsHubReleases(releases); } catch { /* ignore */ }
+  res.download(filePath, `VNWSHub-${release.version}.zip`);
+});
+
+// Админ: полный список релизов с размерами файлов.
+app.get("/api/admin/msfs-hub", requireAdmin, (_req, res) => {
+  const releases = readMsfsHubReleases().sort((a, b) => compareVersionsDesc(a.version, b.version));
+  res.json({ releases: releases.map((r) => msfsHubPublicView(r, true)) });
+});
+
+// Админ: загрузка нового пакета MSFS Hub.
+const msfsHubUploadBody = express.raw({ type: () => true, limit: "50mb" });
+app.post("/api/admin/msfs-hub", requireAdmin, msfsHubUploadBody, (req, res) => {
+  try {
+    const version = String(req.query?.version || "").trim();
+    if (!version) return res.status(400).json({ error: "Query param ?version= required" });
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) return res.status(400).json({ error: "Empty upload body" });
+    if (!fs.existsSync(MSFS_HUB_DIR)) fs.mkdirSync(MSFS_HUB_DIR, { recursive: true });
+    const notes = String(req.headers["x-release-notes"] || req.query?.notes || "").trim().slice(0, 1000);
+    const fileName = `VNWSHub-${version.replace(/[^a-zA-Z0-9.-]/g, "_")}.zip`;
+    fs.writeFileSync(path.join(MSFS_HUB_DIR, fileName), buffer);
+    const releases = readMsfsHubReleases().filter((r) => r.version !== version);
+    releases.unshift({ version, notes, fileName, uploadedAt: new Date().toISOString(), downloads: 0 });
+    writeMsfsHubReleases(releases);
+    res.json({ ok: true, version, fileName });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
+// Админ: удаление версии.
+app.delete("/api/admin/msfs-hub/:version", requireAdmin, (req, res) => {
+  try {
+    const ver = String(req.params.version || "").replace(/^v/, "").trim();
+    const releases = readMsfsHubReleases();
+    const target = releases.find((r) => r.version === ver);
+    if (!target) return res.status(404).json({ error: "Version not found" });
+    const next = releases.filter((r) => r.version !== ver);
+    writeMsfsHubReleases(next);
+    if (target.fileName) {
+      const fp = path.join(MSFS_HUB_DIR, target.fileName);
+      if (fp.startsWith(MSFS_HUB_DIR) && fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RAG PROXY — forwards requests to the RAGTest Next.js backend.
+// The MSFS panel and desktop app send X-Hub-Token (vAMSYS Pilot API access
+// token for RAG org). We forward it as "Authorization: Bearer <token>" so that
+// RAGTest's getSession() can verify it directly with vAMSYS.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function ragFetch(token, ragPath, opts = {}) {
+  const url = `${RAG_API_URL}${ragPath}`;
+  const res = await fetch(url, {
+    ...opts,
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/json",
+      "Content-Type": "application/json",
+      ...(opts.headers || {}),
+    },
+  });
+  return res;
+}
+
+function requireRagToken(req, res, next) {
+  const token = (req.headers["x-hub-token"] || "").trim();
+  if (!token) return res.status(401).json({ error: "X-Hub-Token required" });
+  req.ragToken = token;
+  next();
+}
+
+// Pilot profile
+app.get("/api/rag/pilot/me", requireRagToken, async (req, res) => {
+  try {
+    const r = await ragFetch(req.ragToken, "/api/me");
+    const data = await r.json().catch(() => null);
+    if (!r.ok) return res.status(r.status).json(data);
+    // Normalise: panel expects profile fields at top level or under .user
+    const user = data?.user || data;
+    res.json(user);
+  } catch (err) {
+    res.status(502).json({ error: String(err?.message || err) });
+  }
+});
+
+// Active booking
+app.get("/api/rag/pilot/booking", requireRagToken, async (req, res) => {
+  try {
+    const r = await ragFetch(req.ragToken, "/api/me/bookings");
+    const data = await r.json().catch(() => null);
+    if (!r.ok) return res.status(r.status).json(data);
+    const bookings = Array.isArray(data?.bookings) ? data.bookings : [];
+    const active = bookings.find((b) => ["active", "booked", "inflight", "dispatched", "flying"].includes(String(b?.status || "").toLowerCase())) || null;
+    res.json({ booking: active });
+  } catch (err) {
+    res.status(502).json({ error: String(err?.message || err) });
+  }
+});
+
+// Statistics
+app.get("/api/rag/pilot/stats", requireRagToken, async (req, res) => {
+  try {
+    const r = await ragFetch(req.ragToken, "/api/me/statistics");
+    const data = await r.json().catch(() => null);
+    if (!r.ok) return res.status(r.status).json(data);
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: String(err?.message || err) });
+  }
+});
+
+// NOTAMs
+app.get("/api/rag/pilot/notams", requireRagToken, async (req, res) => {
+  try {
+    const limit = req.query.limit || "10";
+    const r = await ragFetch(req.ragToken, `/api/me/notams?limit=${limit}`);
+    const data = await r.json().catch(() => null);
+    if (!r.ok) return res.json({ notams: [] });
+    res.json(data);
+  } catch {
+    res.json({ notams: [] });
+  }
+});
+
+// PIREPs
+app.get("/api/rag/pilot/pireps", requireRagToken, async (req, res) => {
+  try {
+    const limit = req.query.limit || "6";
+    const r = await ragFetch(req.ragToken, `/api/me/pireps?limit=${limit}`);
+    const data = await r.json().catch(() => null);
+    if (!r.ok) return res.json({ pireps: [] });
+    res.json(data);
+  } catch {
+    res.json({ pireps: [] });
+  }
+});
+
+// Token validation — called on login screen "Войти"
+app.post("/api/rag/validate-token", requireRagToken, async (req, res) => {
+  try {
+    const r = await ragFetch(req.ragToken, "/api/me");
+    const data = await r.json().catch(() => null);
+    if (!r.ok) return res.status(401).json({ error: "Invalid token" });
+    res.json({ ok: true, user: data?.user || data });
+  } catch (err) {
+    res.status(502).json({ error: String(err?.message || err) });
+  }
+});
+
+// Booking by id (for PIREP detail)
+app.get("/api/rag/pilot/bookings/:id", requireRagToken, async (req, res) => {
+  try {
+    const r = await ragFetch(req.ragToken, `/api/me/bookings/${req.params.id}`);
+    const data = await r.json().catch(() => null);
+    res.status(r.status).json(data);
+  } catch (err) {
+    res.status(502).json({ error: String(err?.message || err) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIVERIES
+// ─────────────────────────────────────────────────────────────────────────────
+const LIVERIES_DIR = path.join(DATA_DIR, "liveries");
+const LIVERIES_CATALOG_FILE = path.join(LIVERIES_DIR, "catalog.json");
+
+function readLiveriesCatalog() {
+  try {
+    if (fs.existsSync(LIVERIES_CATALOG_FILE)) {
+      return JSON.parse(fs.readFileSync(LIVERIES_CATALOG_FILE, "utf8")) || [];
+    }
+  } catch { /* ignore */ }
+  return [];
+}
+
+function writeLiveriesCatalog(catalog) {
+  if (!fs.existsSync(LIVERIES_DIR)) fs.mkdirSync(LIVERIES_DIR, { recursive: true });
+  fs.writeFileSync(LIVERIES_CATALOG_FILE, JSON.stringify(catalog, null, 2));
+}
+
+function liveryPublicView(l) {
+  const fp = path.join(LIVERIES_DIR, l.fileName || "");
+  return {
+    id: l.id,
+    name: l.name || l.id,
+    aircraft: l.aircraft || "",
+    icao: l.icao || "",
+    description: l.description || "",
+    previewUrl: l.previewUrl || null,
+    packageName: l.packageName || l.id,
+    version: l.version || "1.0.0",
+    fileSizeBytes: l.fileName && fs.existsSync(fp) ? fs.statSync(fp).size : null,
+    uploadedAt: l.uploadedAt || null,
+    downloads: l.downloads || 0,
+  };
+}
+
+// Публичный каталог ливрей.
+app.get("/api/app/liveries", (_req, res) => {
+  const catalog = readLiveriesCatalog();
+  res.json({ liveries: catalog.map(liveryPublicView) });
+});
+
+// Скачивание конкретной ливреи.
+app.get("/api/app/liveries/:id/download", (req, res) => {
+  const id = String(req.params.id || "").trim();
+  const catalog = readLiveriesCatalog();
+  const entry = catalog.find((l) => l.id === id);
+  if (!entry?.fileName) return res.status(404).json({ error: "Livery not found" });
+  const fp = path.join(LIVERIES_DIR, entry.fileName);
+  if (!fp.startsWith(LIVERIES_DIR) || !fs.existsSync(fp)) return res.status(404).json({ error: "File not found" });
+  try { entry.downloads = (entry.downloads || 0) + 1; writeLiveriesCatalog(catalog); } catch { /* ignore */ }
+  res.download(fp, entry.fileName);
+});
+
+// Админ: список ливрей.
+app.get("/api/admin/liveries", requireAdmin, (_req, res) => {
+  const catalog = readLiveriesCatalog();
+  res.json({ liveries: catalog.map((l) => ({ ...liveryPublicView(l), fileName: l.fileName || null })) });
+});
+
+// Админ: загрузка ливреи.
+const liveryUploadBody = express.raw({ type: () => true, limit: "500mb" });
+app.post("/api/admin/liveries", requireAdmin, liveryUploadBody, (req, res) => {
+  try {
+    const id = String(req.query?.id || "").trim().replace(/[^a-zA-Z0-9-_]/g, "");
+    if (!id) return res.status(400).json({ error: "?id= required" });
+    const buffer = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+    if (buffer.length === 0) return res.status(400).json({ error: "Empty body" });
+    if (!fs.existsSync(LIVERIES_DIR)) fs.mkdirSync(LIVERIES_DIR, { recursive: true });
+
+    const hdr = (h, q, def = "") => String(req.headers[h] || req.query?.[q] || def).trim().slice(0, 1000);
+    const name = hdr("x-name", "name", id);
+    const aircraft = hdr("x-aircraft", "aircraft");
+    const icao = hdr("x-icao", "icao").toUpperCase().slice(0, 10);
+    const description = hdr("x-description", "description");
+    const previewUrl = hdr("x-preview-url", "previewUrl").slice(0, 500);
+    const packageName = hdr("x-package-name", "packageName", id).replace(/[^a-zA-Z0-9-_]/g, "").slice(0, 100) || id;
+    const version = hdr("x-version", "version", "1.0.0").slice(0, 20);
+
+    const fileName = `livery-${id}-v${version.replace(/[^a-zA-Z0-9.-]/g, "_")}.zip`;
+    fs.writeFileSync(path.join(LIVERIES_DIR, fileName), buffer);
+
+    const catalog = readLiveriesCatalog().filter((l) => l.id !== id);
+    catalog.unshift({ id, name, aircraft, icao, description, previewUrl, packageName, version, fileName, uploadedAt: new Date().toISOString(), downloads: 0 });
+    writeLiveriesCatalog(catalog);
+    res.json({ ok: true, id, fileName });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
+// Админ: обновление метаданных ливреи (без перезагрузки файла).
+app.patch("/api/admin/liveries/:id", requireAdmin, express.json(), (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const catalog = readLiveriesCatalog();
+    const idx = catalog.findIndex((l) => l.id === id);
+    if (idx === -1) return res.status(404).json({ error: "Livery not found" });
+    const allowed = ["name", "aircraft", "icao", "description", "previewUrl", "packageName", "version"];
+    const body = req.body || {};
+    for (const key of allowed) {
+      if (key in body) catalog[idx][key] = String(body[key] || "").trim().slice(0, 1000);
+    }
+    writeLiveriesCatalog(catalog);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
+// Админ: удаление ливреи.
+app.delete("/api/admin/liveries/:id", requireAdmin, (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    const catalog = readLiveriesCatalog();
+    const entry = catalog.find((l) => l.id === id);
+    if (!entry) return res.status(404).json({ error: "Not found" });
+    const next = catalog.filter((l) => l.id !== id);
+    writeLiveriesCatalog(next);
+    if (entry.fileName) {
+      const fp = path.join(LIVERIES_DIR, entry.fileName);
+      if (fp.startsWith(LIVERIES_DIR) && fs.existsSync(fp)) fs.unlinkSync(fp);
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err?.message || err) });
+  }
 });
 
 // Админ: список релизов (с именами файлов).

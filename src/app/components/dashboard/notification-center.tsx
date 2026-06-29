@@ -88,6 +88,12 @@ const CATEGORY_META: Record<NotificationCategory, {
     accentClass: "text-emerald-600",
     badgeClass: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
+  vamsys: {
+    labelKey: "notifications.category.vamsys",
+    icon: BellRing,
+    accentClass: "text-blue-600",
+    badgeClass: "border-blue-200 bg-blue-50 text-blue-700",
+  },
 };
 
 const formatNotificationTime = (value: string, locale: string) => {
@@ -187,6 +193,7 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   const [staffTicketUnreadCount, setStaffTicketUnreadCount] = useState(0);
   const [staffTickets, setStaffTickets] = useState<StaffTicketPreview[]>([]);
   const [challengeNotifications, setChallengeNotifications] = useState<NotificationItem[]>([]);
+  const [vamsysNotifications, setVamsysNotifications] = useState<NotificationItem[]>([]);
   const navigate = useNavigate();
   const { isAuthenticated, isAdmin, isStaff } = useAuth();
   const { t, language } = useLanguage();
@@ -201,7 +208,8 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   const locale = language === "ru" ? "ru-RU" : "en-US";
   const canViewStaffNotifications = isAuthenticated && (isAdmin || isStaff);
   const challengeUnreadCount = challengeNotifications.filter((item) => !item.isRead).length;
-  const totalUnreadCount = unreadCount + challengeUnreadCount + staffTicketUnreadCount;
+  const vamsysUnreadCount = vamsysNotifications.filter((item) => !item.isRead).length;
+  const totalUnreadCount = unreadCount + challengeUnreadCount + staffTicketUnreadCount + vamsysUnreadCount;
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -255,6 +263,37 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   }, [isAuthenticated, language]);
 
   useEffect(() => {
+    if (!isAuthenticated) {
+      setVamsysNotifications([]);
+      return;
+    }
+
+    let active = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/pilot/vamsys-notifications", { credentials: "include" });
+        if (!res.ok || !active) return;
+        const data = await res.json().catch(() => null);
+        const items: NotificationItem[] = (Array.isArray(data?.notifications) ? data.notifications : []).map((n: any) => ({
+          id: `vamsys:${String(n?.id || Math.random())}`,
+          category: "vamsys" as const,
+          title: String(n?.title || n?.subject || "vAMSYS"),
+          description: String(n?.message || n?.body || ""),
+          createdAt: String(n?.created_at || n?.createdAt || ""),
+          isRead: Boolean(n?.read_at || n?.readAt),
+        })).filter((item: NotificationItem) => item.title);
+        if (active) setVamsysNotifications(items);
+      } catch {
+        // Pilot API not connected — silently ignore
+      }
+    };
+
+    void load();
+    const timer = window.setInterval(() => void load(), 60000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [isAuthenticated]);
+
+  useEffect(() => {
     if (!canViewStaffNotifications) {
       setIsTicketLoading(false);
       setStaffTicketUnreadCount(0);
@@ -298,10 +337,10 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   }, [canViewStaffNotifications]);
 
   const allNotifications = useMemo(
-    () => [...challengeNotifications, ...notifications]
+    () => [...vamsysNotifications, ...challengeNotifications, ...notifications]
       .slice()
       .sort((left, right) => String(right?.createdAt || "").localeCompare(String(left?.createdAt || ""))),
-    [challengeNotifications, notifications]
+    [vamsysNotifications, challengeNotifications, notifications]
   );
 
   const groupedNotifications = useMemo(() => {
@@ -314,6 +353,23 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
 
     return Array.from(groups.entries());
   }, [allNotifications]);
+
+  const markVamsysNotificationRead = async (item: NotificationItem) => {
+    const match = String(item.id || "").match(/^vamsys:(.+)$/);
+    const notifId = String(match?.[1] || "").trim();
+    if (!notifId) return;
+    try {
+      await fetch(`/api/pilot/vamsys-notifications/${encodeURIComponent(notifId)}/read`, {
+        method: "POST",
+        credentials: "include",
+      });
+      setVamsysNotifications((prev) =>
+        prev.map((n) => (n.id === item.id ? { ...n, isRead: true } : n))
+      );
+    } catch {
+      // ignored
+    }
+  };
 
   const markChallengeNotificationRead = async (item: NotificationItem) => {
     const match = String(item.id || "").match(/^challenge:(.+)$/);
@@ -340,6 +396,10 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   };
 
   const handleMarkAsRead = (item: NotificationItem) => {
+    if (item.category === "vamsys") {
+      void markVamsysNotificationRead(item);
+      return;
+    }
     if (item.category === "challenge") {
       void markChallengeNotificationRead(item);
       return;
@@ -348,7 +408,7 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
   };
 
   const handleDelete = (item: NotificationItem) => {
-    if (item.category === "challenge") {
+    if (item.category === "challenge" || item.category === "vamsys") {
       return;
     }
     deleteNotification(item.id);
@@ -358,17 +418,11 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
     markAllAsRead();
 
     const unreadChallengeItems = challengeNotifications.filter((item) => !item.isRead);
-    if (!unreadChallengeItems.length) {
-      return;
-    }
-
     await Promise.all(
       unreadChallengeItems.map(async (item) => {
         const match = String(item.id || "").match(/^challenge:(.+)$/);
         const challengeId = String(match?.[1] || "").trim();
-        if (!challengeId) {
-          return;
-        }
+        if (!challengeId) return;
         try {
           await fetch(`/api/pilot/challenges/notifications/${encodeURIComponent(challengeId)}/read`, {
             method: "POST",
@@ -379,8 +433,17 @@ export function NotificationCenter({ variant = "dashboard" }: { variant?: "dashb
         }
       })
     );
-
     setChallengeNotifications((current) => current.map((item) => ({ ...item, isRead: true })));
+
+    const unreadVamsys = vamsysNotifications.filter((item) => !item.isRead);
+    if (unreadVamsys.length) {
+      try {
+        await fetch("/api/pilot/vamsys-notifications/read-all", { method: "POST", credentials: "include" });
+        setVamsysNotifications((current) => current.map((item) => ({ ...item, isRead: true })));
+      } catch {
+        // ignored
+      }
+    }
   };
 
   const handleAction = (item: NotificationItem) => {

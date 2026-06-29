@@ -68,11 +68,6 @@ interface OverviewPayload {
   }>;
 }
 
-interface UtcClockValue {
-  time: string;
-  date: string;
-}
-
 type RecentActivityStatus = NonNullable<OverviewPayload["recentActivity"]>[number]["status"];
 
 function formatRelativeTime(value: string, language: string) {
@@ -91,18 +86,6 @@ function formatRelativeTime(value: string, language: string) {
   }
   const days = Math.floor(hours / 24);
   return language === "ru" ? `${days} дн назад` : `${days} days ago`;
-}
-
-function formatUtcClock(date: Date): UtcClockValue {
-  return {
-    time: `${String(date.getUTCHours()).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`,
-    date: date.toLocaleDateString("en-GB", {
-      timeZone: "UTC",
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
-  };
 }
 
 function formatUtcTime(value?: string | null) {
@@ -186,26 +169,6 @@ function getRecentStatusIcon(status: RecentActivityStatus) {
   }
 }
 
-// AIRAC cycle calculation — pure math, no API needed
-const AIRAC_EPOCH_MS = Date.UTC(2024, 0, 18); // AIRAC 2401 started Jan 18, 2024
-const AIRAC_CYCLE_MS = 28 * 24 * 60 * 60 * 1000;
-
-function getAiracInfo(now = new Date()) {
-  const todayMs = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-  const n = Math.floor((todayMs - AIRAC_EPOCH_MS) / AIRAC_CYCLE_MS);
-  const startMs = AIRAC_EPOCH_MS + n * AIRAC_CYCLE_MS;
-  const start = new Date(startMs);
-  const end = new Date(startMs + AIRAC_CYCLE_MS - 86400000);
-  const yr = start.getUTCFullYear();
-  const n0 = Math.ceil((Date.UTC(yr, 0, 1) - AIRAC_EPOCH_MS) / AIRAC_CYCLE_MS);
-  const ident = `${String(yr).slice(-2)}${String(n - n0 + 1).padStart(2, "0")}`;
-  return { ident, start, end };
-}
-
-function formatAiracDate(d: Date) {
-  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-}
-
 function formatApproxFlightsPerDay(totalFlights: number, range: ActivityRange, language: string) {
   const rangeDays: Record<ActivityRange, number> = {
     day: 1,
@@ -253,15 +216,6 @@ export function AdminDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState<ActivityRange>("week");
   const [isRecentFlightsModalOpen, setIsRecentFlightsModalOpen] = useState(false);
-  const [utcNow, setUtcNow] = useState<UtcClockValue>(() => formatUtcClock(new Date()));
-  const airac = useMemo(() => getAiracInfo(new Date()), [utcNow]);
-
-  useEffect(() => {
-    const update = () => setUtcNow(formatUtcClock(new Date()));
-    update();
-    const timer = window.setInterval(update, 30000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -332,20 +286,6 @@ export function AdminDashboard() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <h2 className="text-2xl font-bold text-gray-800">{tr("Обзор панели", "Dashboard Overview")}</h2>
-        <div className="flex flex-col items-start gap-2 md:items-end">
-          <span className="text-sm text-gray-500">{tr("Обновлено только что", "Updated just now")}</span>
-          <div className="flex flex-wrap items-stretch gap-2">
-            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">UTC</div>
-              <div className="mt-0.5 text-lg font-bold leading-none text-slate-900 tabular-nums">{utcNow.time}</div>
-              <div className="mt-1 text-[10px] uppercase tracking-[0.2em] text-slate-400">{utcNow.date}</div>
-            </div>
-            <div className="rounded-2xl border border-gray-200 bg-white px-3 py-2 shadow-sm">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">AIRAC {airac.ident}</div>
-              <div className="mt-1 text-xs text-slate-600">{formatAiracDate(airac.start)} – {formatAiracDate(airac.end)}</div>
-            </div>
-          </div>
-        </div>
       </div>
 
       <AdminQuickAccessPanel />

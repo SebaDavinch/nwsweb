@@ -13,7 +13,7 @@ import { icaoToCountry, getFlagUri } from "./flag-data";
 
 /* ── types ──────────────────────────────────────────────────────────── */
 interface MonthlyPoint  { month: string; flights: number; hours: number }
-interface BreakdownRow  { key: string; count: number; hours: number }
+interface BreakdownRow  { key: string; count: number; hours: number; registrations?: string[] }
 interface TopAirport    { icao: string; name: string | null; countryIso2: string | null; count: number }
 interface VsCategory    { label: string; count: number }
 interface AnalyticsData {
@@ -76,12 +76,17 @@ function HeroCard({
 }
 
 /* ── horizontal bar row ──────────────────────────────────────────────── */
-function HBar({ label, count, max, color = "#e31e24", rank }: {
-  label: string; count: number; max: number; color?: string; rank?: number;
+function HBar({ label, count, max, color = "#e31e24", rank, tooltip }: {
+  label: string; count: number; max: number; color?: string; rank?: number; tooltip?: string;
 }) {
   const pct = max > 0 ? Math.round((count / max) * 100) : 0;
+  const [hovered, setHovered] = useState(false);
   return (
-    <div className="flex items-center gap-3 py-2">
+    <div
+      className="relative flex items-center gap-3 py-2"
+      onMouseEnter={() => tooltip ? setHovered(true) : undefined}
+      onMouseLeave={() => setHovered(false)}
+    >
       {rank != null && (
         <span className="w-5 shrink-0 text-right text-[11px] font-bold text-zinc-400">{rank}</span>
       )}
@@ -94,6 +99,11 @@ function HBar({ label, count, max, color = "#e31e24", rank }: {
           <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${pct}%`, backgroundColor: color }} />
         </div>
       </div>
+      {hovered && tooltip && (
+        <div className="pointer-events-none absolute left-0 -top-8 z-50 rounded-lg bg-zinc-800 px-2.5 py-1.5 text-[11px] font-mono text-white shadow-lg whitespace-nowrap">
+          {tooltip}
+        </div>
+      )}
     </div>
   );
 }
@@ -489,17 +499,20 @@ export function PilotStats() {
       {/* ── Breakdowns grid ── */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {[
-          { title: tr("Воздушные суда", "Aircraft"), rows: byAircraft, color: "#E31E24" },
-          { title: tr("Сеть", "Network"), rows: byNetwork, color: "#3b82f6" },
-          { title: tr("Тип рейса", "Route type"), rows: byRouteType, color: "#10b981" },
-          { title: tr("Время суток", "Time of day"), rows: byTimeOfDay, color: "#f59e0b" },
-        ].map(({ title, rows, color }) => {
+          { title: tr("Воздушные суда", "Aircraft"), rows: byAircraft, color: "#E31E24", showRegs: true },
+          { title: tr("Сеть", "Network"), rows: byNetwork, color: "#3b82f6", showRegs: false },
+          { title: tr("Тип рейса", "Route type"), rows: byRouteType, color: "#10b981", showRegs: false },
+          { title: tr("Время суток", "Time of day"), rows: byTimeOfDay, color: "#f59e0b", showRegs: false },
+        ].map(({ title, rows, color, showRegs }) => {
           const max = rows[0]?.count || 1;
           return (
             <Panel key={title} title={title}>
               <div className="divide-y divide-zinc-50 dark:divide-white/5">
                 {rows.slice(0, 7).map((r) => (
-                  <HBar key={r.key} label={r.key} count={r.count} max={max} color={color} />
+                  <HBar
+                    key={r.key} label={r.key} count={r.count} max={max} color={color}
+                    tooltip={showRegs && r.registrations?.length ? r.registrations.slice(0, 6).join(" · ") : undefined}
+                  />
                 ))}
                 {rows.length === 0 && <div className="py-4 text-center text-xs text-zinc-400">{tr("Нет данных", "No data")}</div>}
               </div>

@@ -70,6 +70,9 @@ interface VkBotSettings {
   accessToken: string;
   sync: {
     news: boolean;
+    events: boolean;
+    notams: boolean;
+    alerts: boolean;
     telegramMirror: boolean;
   };
   telegramMirrorChatId: string;
@@ -309,10 +312,31 @@ export function AdminVkBot() {
           <div className="grid gap-3 md:grid-cols-2">
             <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
               <div>
-                <div className="font-medium text-gray-900">News sync</div>
-                <div className="text-xs text-gray-500">Публиковать новости сайта в VK.</div>
+                <div className="font-medium text-gray-900">Новости</div>
+                <div className="text-xs text-gray-500">Публиковать новости в VK при отправке из редактора.</div>
               </div>
               <Switch checked={settings.sync.news} onCheckedChange={(checked) => updateSync("news", Boolean(checked))} />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+              <div>
+                <div className="font-medium text-gray-900">Ивенты</div>
+                <div className="text-xs text-gray-500">Публиковать события (Events) в VK при создании/обновлении.</div>
+              </div>
+              <Switch checked={Boolean(settings.sync.events)} onCheckedChange={(checked) => updateSync("events", Boolean(checked))} />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+              <div>
+                <div className="font-medium text-gray-900">NOTAMы</div>
+                <div className="text-xs text-gray-500">Публиковать NOTAMы в VK при создании/обновлении.</div>
+              </div>
+              <Switch checked={Boolean(settings.sync.notams)} onCheckedChange={(checked) => updateSync("notams", Boolean(checked))} />
+            </div>
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+              <div>
+                <div className="font-medium text-gray-900">Алерты</div>
+                <div className="text-xs text-gray-500">Публиковать системные алерты в VK при создании/обновлении.</div>
+              </div>
+              <Switch checked={Boolean(settings.sync.alerts)} onCheckedChange={(checked) => updateSync("alerts", Boolean(checked))} />
             </div>
             <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
               <div>

@@ -1,7 +1,6 @@
-import { Card, CardContent } from "./ui/card";
-import { Plane } from "lucide-react";
+import { Gauge, Plane, Users, Wind } from "lucide-react";
 import { useLanguage } from "../context/language-context";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 
 interface Aircraft {
@@ -27,11 +26,15 @@ type FleetApiFleet = Record<string, unknown> & {
 };
 
 export function Fleet() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
+  const isRu = language === "ru";
+  const tr = (ru: string, en: string) => (isRu ? ru : en);
+
   const [selectedAirline, setSelectedAirline] = useState<string>("");
   const [fleetData, setFleetData] = useState<AirlineFleet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
+  const tabsRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -69,14 +72,8 @@ export function Fleet() {
       };
 
       const nameMatch = detectFromName();
-      if (nameMatch) {
-        return nameMatch;
-      }
-
-      if (/^[A-Z]\d{2,4}[A-Z]?$/.test(compactCode)) {
-        return compactCode;
-      }
-
+      if (nameMatch) return nameMatch;
+      if (/^[A-Z]\d{2,4}[A-Z]?$/.test(compactCode)) return compactCode;
       const fallback = (compactCode || compactName.replace(/[^A-Z0-9]/g, "")).slice(0, 4);
       return fallback || "NWS";
     };
@@ -94,16 +91,10 @@ export function Fleet() {
     };
 
     const loadFleet = async () => {
-      if (mounted) {
-        setIsLoading(true);
-        setHasError(false);
-      }
-
+      if (mounted) { setIsLoading(true); setHasError(false); }
       try {
         const response = await fetch("/api/vamsys/fleet", { credentials: "include" });
-        if (!response.ok) {
-          throw new Error("fleet_fetch_failed");
-        }
+        if (!response.ok) throw new Error("fleet_fetch_failed");
 
         const payload = await response.json();
         const source = Array.isArray(payload?.fleets) ? payload.fleets : [];
@@ -136,178 +127,273 @@ export function Fleet() {
     };
 
     loadFleet();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
-  const currentFleet = useMemo(() => {
-    return fleetData.find((airline) => airline.code === selectedAirline) || fleetData[0] || null;
-  }, [fleetData, selectedAirline]);
+  const currentFleet = useMemo(
+    () => fleetData.find((a) => a.code === selectedAirline) || fleetData[0] || null,
+    [fleetData, selectedAirline]
+  );
 
-  // Calculate statistics
   const totalAircraft = currentFleet?.aircraft.length || 0;
   const uniqueTypes = currentFleet ? [...new Set(currentFleet.aircraft.map((a) => a.model))].length : 0;
   const totalSeats = currentFleet ? currentFleet.aircraft.reduce((sum, a) => sum + a.seats, 0) : 0;
 
+  // Group aircraft by model for sectioned display
+  const groupedAircraft = useMemo(() => {
+    const groups: Record<string, Aircraft[]> = {};
+    for (const ac of currentFleet?.aircraft || []) {
+      if (!groups[ac.model]) groups[ac.model] = [];
+      groups[ac.model].push(ac);
+    }
+    return Object.entries(groups).sort((a, b) => b[1].length - a[1].length);
+  }, [currentFleet]);
+
+  const accentColor = currentFleet?.color || "#E31E24";
+
   return (
-    <div>
-      {/* Hero Section */}
-      <section
-        className="relative h-[400px] flex items-center justify-center text-white"
-        style={{
-          backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url('https://images.unsplash.com/photo-1650502541642-0e83887eb4c2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxib2VpbmclMjBhaXJjcmFmdCUyMHJ1bndheXxlbnwxfHx8fDE3NzExODg0MTJ8MA&ixlib=rb-4.1.0&q=80&w=1080&utm_source=figma&utm_medium=referral')`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-        }}
-      >
-        <div className="max-w-4xl mx-auto px-4 text-center">
-          <h1 className="text-4xl md:text-5xl mb-4">{t("fleet.hero.title")}</h1>
-          <p className="text-xl text-gray-200">{t("fleet.hero.subtitle")}</p>
-        </div>
-      </section>
+    <div className="bg-white dark:bg-gray-950">
+      {/* ── Hero ── */}
+      <section className="relative h-[480px] flex flex-col items-center justify-center text-white overflow-hidden">
+        <div
+          className="absolute inset-0 bg-cover bg-center"
+          style={{
+            backgroundImage: `url('https://images.unsplash.com/photo-1650502541642-0e83887eb4c2?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3Nzg4Nzd8MHwxfHNlYXJjaHwxfHxib2VpbmclMjBhaXJjcmFmdCUyMHJ1bndheXxlbnwxfHx8fDE3NzExODg0MTJ8MA&ixlib=rb-4.1.0&q=80&w=1080')`,
+          }}
+        />
+        {/* layered gradient: dark bottom + brand tint */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/40 to-black/80" />
+        <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 60% 40%, ${accentColor}22 0%, transparent 70%)` }} />
 
-      {/* Airline Tabs */}
-      <section className="py-8 bg-white border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          {isLoading ? (
-            <div className="text-center text-gray-500">Loading fleet data...</div>
-          ) : null}
-          {hasError ? (
-            <div className="text-center text-red-600">Failed to load fleet from API.</div>
-          ) : null}
-          <div className="flex justify-center gap-4 flex-wrap">
-            {fleetData.map((airline) => (
-              <button
-                key={airline.code}
-                onClick={() => setSelectedAirline(airline.code)}
-                className={`px-6 py-3 rounded-lg transition-all ${
-                  selectedAirline === airline.code
-                    ? "text-white shadow-lg"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-                style={{
-                  backgroundColor: selectedAirline === airline.code ? airline.color : undefined,
-                }}
-              >
-                <div className="font-medium">{airline.name}</div>
-                <div className="text-sm opacity-90">{airline.code}</div>
-              </button>
-            ))}
+        <div className="relative z-10 max-w-3xl mx-auto px-6 text-center">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-sm text-white/80 mb-5">
+            <Plane size={14} />
+            <span>{tr("Nordwind Virtual • Флот", "Nordwind Virtual • Fleet")}</span>
           </div>
+          <h1 className="text-5xl md:text-6xl font-bold tracking-tight mb-4">{t("fleet.hero.title")}</h1>
+          <p className="text-lg text-white/70 max-w-xl mx-auto">{t("fleet.hero.subtitle")}</p>
+        </div>
+
+        {/* wave bottom */}
+        <div className="absolute bottom-0 left-0 right-0 h-16 overflow-hidden">
+          <svg viewBox="0 0 1440 64" className="w-full h-full" preserveAspectRatio="none">
+            <path d="M0,64 C360,0 1080,64 1440,0 L1440,64 Z" className="fill-white dark:fill-gray-950" />
+          </svg>
         </div>
       </section>
 
-      {/* Fleet Stats */}
-      <section className="py-12 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-2xl text-center mb-6" style={{ color: currentFleet?.color || "#E31E24" }}>
-            {currentFleet?.name || "Fleet"} {t("fleet.stats.title")}
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center">
-            <div>
-              <div className="text-3xl mb-2" style={{ color: currentFleet?.color || "#E31E24" }}>
-                {totalAircraft}
-              </div>
-              <div className="text-gray-600">{t("fleet.stats.aircraft")}</div>
-            </div>
-            <div>
-              <div className="text-3xl mb-2" style={{ color: currentFleet?.color || "#E31E24" }}>
-                {uniqueTypes}
-              </div>
-              <div className="text-gray-600">{t("fleet.stats.types")}</div>
-            </div>
-            <div>
-              <div className="text-3xl mb-2" style={{ color: currentFleet?.color || "#E31E24" }}>
-                {totalSeats.toLocaleString()}
-              </div>
-              <div className="text-gray-600">{t("fleet.stats.seats")}</div>
-            </div>
-            <div>
-              <div className="text-3xl mb-2" style={{ color: currentFleet?.color || "#E31E24" }}>
-                —
-              </div>
-              <div className="text-gray-600">{t("fleet.stats.availability")}</div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Aircraft List */}
-      <section className="py-16">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl mb-8 text-center">{t("fleet.list.title")}</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {(currentFleet?.aircraft || []).map((plane, index) => {
-              const cardContent = (
-                <Card className="h-full hover:shadow-lg transition-shadow">
-                  <CardContent className="p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div>
-                        <h3 className="text-xl mb-1">{plane.model}</h3>
-                        <p className="text-gray-500">{plane.registration}</p>
-                      </div>
-                      <div
-                        className="w-12 h-12 rounded-full flex items-center justify-center"
-                        style={{ backgroundColor: currentFleet?.color || "#E31E24" }}
-                      >
-                        <Plane className="text-white" size={24} />
-                      </div>
-                    </div>
-                    <div className="space-y-2 text-sm">
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">{t("fleet.info.seats")}</span>
-                        <span>{plane.seats}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">{t("fleet.info.range")}</span>
-                        <span>{plane.range || "—"}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600">{t("fleet.info.speed")}</span>
-                        <span>{plane.speed || "—"}</span>
-                      </div>
-                    </div>
-                    {currentFleet?.id && plane.id ? (
-                      <div className="mt-4 text-sm font-medium text-[#E31E24]">Open aircraft page →</div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              );
-
-              if (currentFleet?.id && plane.id) {
+      {/* ── Airline Tabs ── */}
+      {fleetData.length > 1 && (
+        <section className="sticky top-0 z-30 bg-white/95 dark:bg-gray-950/95 backdrop-blur border-b border-gray-100 dark:border-gray-800 shadow-sm">
+          <div ref={tabsRef} className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 overflow-x-auto scrollbar-none">
+            <div className="flex items-center gap-1 py-3 min-w-max">
+              {fleetData.map((airline) => {
+                const active = selectedAirline === airline.code;
                 return (
-                  <Link
-                    key={String(plane.id || `${plane.registration}-${index}`)}
-                    to={`/fleet/${currentFleet.id}/aircraft/${plane.id}`}
-                    className="block"
+                  <button
+                    key={airline.code}
+                    onClick={() => setSelectedAirline(airline.code)}
+                    className={`relative flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                      active
+                        ? "text-white shadow-md"
+                        : "text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    }`}
+                    style={active ? { backgroundColor: airline.color } : undefined}
                   >
-                    {cardContent}
-                  </Link>
+                    <span
+                      className={`w-2 h-2 rounded-full flex-shrink-0 ${active ? "bg-white/60" : ""}`}
+                      style={!active ? { backgroundColor: airline.color } : undefined}
+                    />
+                    <span>{airline.name}</span>
+                    <span
+                      className={`text-xs px-1.5 py-0.5 rounded-md ${
+                        active ? "bg-white/20 text-white" : "bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400"
+                      }`}
+                    >
+                      {airline.aircraft.length}
+                    </span>
+                  </button>
                 );
-              }
-
-              return <div key={String(plane.id || `${plane.registration}-${index}`)}>{cardContent}</div>;
-            })}
+              })}
+            </div>
           </div>
-          {!isLoading && !hasError && !currentFleet?.aircraft?.length ? (
-            <div className="text-center text-gray-500 mt-8">No fleet aircraft found.</div>
-          ) : null}
+        </section>
+      )}
+
+      {/* ── Stats Strip ── */}
+      <section className="py-10 border-b border-gray-100 dark:border-gray-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {isLoading && (
+            <div className="flex items-center justify-center gap-3 py-6 text-gray-400">
+              <div className="w-5 h-5 border-2 border-gray-200 border-t-gray-400 rounded-full animate-spin" />
+              <span className="text-sm">{tr("Загрузка флота...", "Loading fleet...")}</span>
+            </div>
+          )}
+          {hasError && (
+            <div className="text-center py-4 text-red-500 text-sm">{tr("Не удалось загрузить данные флота.", "Failed to load fleet data.")}</div>
+          )}
+          {!isLoading && !hasError && currentFleet && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { icon: Plane, value: totalAircraft, label: t("fleet.stats.aircraft") },
+                { icon: Wind, value: uniqueTypes, label: t("fleet.stats.types") },
+                { icon: Users, value: totalSeats.toLocaleString(), label: t("fleet.stats.seats") },
+                { icon: Gauge, value: "—", label: t("fleet.stats.availability") },
+              ].map(({ icon: Icon, value, label }) => (
+                <div
+                  key={label}
+                  className="relative group flex flex-col gap-2 p-5 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 overflow-hidden hover:border-gray-200 dark:hover:border-gray-700 transition-colors"
+                >
+                  <div
+                    className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                    style={{ background: `linear-gradient(135deg, ${accentColor}08, transparent)` }}
+                  />
+                  <div
+                    className="w-9 h-9 rounded-xl flex items-center justify-center"
+                    style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
+                  >
+                    <Icon size={18} />
+                  </div>
+                  <div className="text-3xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">{value}</div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">{label}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
-      {/* Fleet Info */}
-      <section className="py-16 bg-gray-50">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-          <h2 className="text-3xl mb-6 text-center">{t("fleet.about.title")}</h2>
-          <div className="prose max-w-none text-center">
-            <p className="text-lg text-gray-700 mb-6">
-              {t("fleet.about.p1")}
-            </p>
-            <p className="text-lg text-gray-700">
-              {t("fleet.about.p2")}
-            </p>
+      {/* ── Aircraft List ── */}
+      <section className="py-16">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-14">
+          {groupedAircraft.map(([model, planes]) => (
+            <div key={model}>
+              {/* Model group header */}
+              <div className="flex items-center gap-4 mb-6">
+                <div
+                  className="h-px flex-1"
+                  style={{ background: `linear-gradient(to right, ${accentColor}60, transparent)` }}
+                />
+                <div className="flex items-center gap-2 px-4 py-1.5 rounded-full border text-sm font-semibold"
+                  style={{ borderColor: `${accentColor}40`, color: accentColor, backgroundColor: `${accentColor}0d` }}
+                >
+                  <Plane size={13} />
+                  <span>{model}</span>
+                  <span className="ml-1 opacity-60">× {planes.length}</span>
+                </div>
+                <div className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {planes.map((plane, index) => {
+                  const card = (
+                    <div
+                      className="group relative flex flex-col bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:shadow-lg dark:hover:shadow-gray-900/60 transition-all duration-200 hover:-translate-y-0.5"
+                    >
+                      {/* top accent bar */}
+                      <div className="h-1 w-full" style={{ backgroundColor: accentColor }} />
+
+                      <div className="p-5 flex flex-col gap-4 flex-1">
+                        {/* header */}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div
+                              className="text-xs font-semibold uppercase tracking-widest mb-1"
+                              style={{ color: accentColor }}
+                            >
+                              {currentFleet?.name}
+                            </div>
+                            <div className="text-base font-bold text-gray-900 dark:text-gray-100 leading-tight truncate">
+                              {plane.model}
+                            </div>
+                          </div>
+                          <div
+                            className="flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center"
+                            style={{ backgroundColor: `${accentColor}18`, color: accentColor }}
+                          >
+                            <Plane size={16} />
+                          </div>
+                        </div>
+
+                        {/* registration badge */}
+                        <div className="inline-flex self-start items-center gap-1.5 px-2.5 py-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                          <span className="text-xs text-gray-400 dark:text-gray-500">{tr("Рег.", "Reg.")}</span>
+                          <span className="text-xs font-mono font-semibold text-gray-700 dark:text-gray-300 tracking-wider">
+                            {plane.registration}
+                          </span>
+                        </div>
+
+                        {/* specs */}
+                        <div className="mt-auto grid grid-cols-3 gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+                          <div className="flex flex-col items-center gap-1">
+                            <Users size={12} className="text-gray-400" />
+                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{plane.seats || "—"}</span>
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wide leading-none">{tr("Мест", "Seats")}</span>
+                          </div>
+                          <div className="flex flex-col items-center gap-1">
+                            <Wind size={12} className="text-gray-400" />
+                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{plane.range || "—"}</span>
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wide leading-none">{tr("Дальн.", "Range")}</span>
+                          </div>
+                          <div className="flex flex-col items-center gap-1">
+                            <Gauge size={12} className="text-gray-400" />
+                            <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{plane.speed || "—"}</span>
+                            <span className="text-[10px] text-gray-400 uppercase tracking-wide leading-none">{tr("Скор.", "Speed")}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* link hint */}
+                      {currentFleet?.id && plane.id && (
+                        <div
+                          className="px-5 py-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs font-medium"
+                          style={{ color: accentColor }}
+                        >
+                          <span>{tr("Открыть страницу борта", "View aircraft page")}</span>
+                          <span className="group-hover:translate-x-0.5 transition-transform">→</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+
+                  if (currentFleet?.id && plane.id) {
+                    return (
+                      <Link
+                        key={String(plane.id || `${plane.registration}-${index}`)}
+                        to={`/fleet/${currentFleet.id}/aircraft/${plane.id}`}
+                        className="block"
+                      >
+                        {card}
+                      </Link>
+                    );
+                  }
+
+                  return <div key={String(plane.id || `${plane.registration}-${index}`)}>{card}</div>;
+                })}
+              </div>
+            </div>
+          ))}
+
+          {!isLoading && !hasError && !currentFleet?.aircraft?.length && (
+            <div className="text-center py-20 text-gray-400">
+              {tr("Воздушные суда не найдены.", "No aircraft found.")}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ── About ── */}
+      <section className="py-20 bg-gray-50 dark:bg-gray-900/50">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+          <div
+            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium mb-6"
+            style={{ backgroundColor: `${accentColor}15`, color: accentColor }}
+          >
+            <Plane size={13} />
+            <span>{t("fleet.about.title")}</span>
           </div>
+          <p className="text-lg text-gray-600 dark:text-gray-400 mb-5 leading-relaxed">{t("fleet.about.p1")}</p>
+          <p className="text-lg text-gray-600 dark:text-gray-400 leading-relaxed">{t("fleet.about.p2")}</p>
         </div>
       </section>
     </div>
