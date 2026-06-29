@@ -61,3 +61,4 @@ data/social-gallery.json
 data/social-gallery-assets/
 data/liveries/
 artifacts/
+.claude/worktrees/
